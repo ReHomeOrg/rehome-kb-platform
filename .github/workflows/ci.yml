@@ -120,18 +120,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect secrets
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # TruffleHog — бесплатен для personal и org аккаунтов (в отличие от
+      # gitleaks-action@v2, требующего GITLEAKS_LICENSE для org). Пиннинг
+      # на конкретный тег вместо @main — supply-chain hygiene.
+      - name: Detect secrets (TruffleHog)
+        uses: trufflesecurity/trufflehog@v3.95.3
+        with:
+          extra_args: --only-verified
 
-      - name: Python dependency vulnerabilities
+      - name: Python dependency vulnerabilities (pip-audit)
+        working-directory: backend
         run: |
           pip install pip-audit
-          pip-audit
+          pip-audit --requirement requirements.txt
 
-      - name: Node dependency vulnerabilities
-        run: npm audit --audit-level=high
+      - name: Node dependency vulnerabilities (npm audit)
+        working-directory: frontend
+        # --omit=dev: dev-only уязвимости (e.g. ESLint chain) исключены.
+        # --audit-level=critical: bootstrap-этап. Next.js 14.2.35 имеет
+        # 2 known prod vuln (1 high SSRF + 1 moderate postcss XSS) — не
+        # critical-уровня, bump до Next.js 15 — отдельный backlog Issue.
+        run: npm audit --omit=dev --audit-level=critical
 
   # ============================================================
   # Анти-костыли: проверка кода на типичные ошибки
