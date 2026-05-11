@@ -1,0 +1,108 @@
+{
+  "realm": "rehome",
+  "displayName": "reHome KB",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespan": 5184000,
+  "passwordPolicy": "length(12) and digits(1) and lowerCase(1) and upperCase(1) and notUsername",
+  "roles": {
+    "realm": [
+      {
+        "name": "staff_admin",
+        "description": "Администратор kb-модуля (всё кроме HR_RESTRICTED)"
+      },
+      {
+        "name": "staff_support",
+        "description": "Оператор поддержки"
+      },
+      {
+        "name": "staff_legal",
+        "description": "Юрист"
+      },
+      {
+        "name": "staff_hr",
+        "description": "HR (доступ к HR_RESTRICTED)"
+      },
+      {
+        "name": "agent",
+        "description": "Агент по закреплённым объектам"
+      },
+      {
+        "name": "tenant",
+        "description": "Наниматель"
+      },
+      {
+        "name": "landlord",
+        "description": "Наймодатель / собственник"
+      },
+      {
+        "name": "guest",
+        "description": "Синтетическая роль для backend default-scope (не назначается реальным пользователям)"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "rehome-platform-m2m",
+      "name": "reHome Platform (m2m)",
+      "description": "Server-to-server клиент для вызовов API gateway (OAuth 2.0 Client Credentials Grant)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "secret": "rehome-platform-m2m-local-dev-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {
+        "client_credentials.use_refresh_token": "false",
+        "access.token.lifespan": "3600"
+      }
+    },
+    {
+      "clientId": "rehome-web-spa",
+      "name": "reHome Web SPA",
+      "description": "Browser-based клиент для Next.js (Authorization Code Grant + PKCE)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "serviceAccountsEnabled": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback/keycloak",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-rehome-platform-m2m",
+      "enabled": true,
+      "serviceAccountClientId": "rehome-platform-m2m",
+      "realmRoles": [
+        "staff_admin"
+      ]
+    }
+  ]
+}
