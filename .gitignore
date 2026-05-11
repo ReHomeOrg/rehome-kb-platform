@@ -58,6 +58,7 @@ logs/
 .env
 .env.local
 .env.*.local
+infra/.env
 *.pem
 *.key
 *.crt
