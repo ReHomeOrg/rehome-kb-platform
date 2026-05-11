@@ -57,22 +57,27 @@ Qdrant, MinIO, Redis, Keycloak.
 
 ## Локальный dev-стенд
 
+Инфраструктурные сервисы (Keycloak, в будущем Postgres основной БД, Redis,
+Qdrant, MinIO) разворачиваются через `infra/docker-compose.yml`. Сейчас
+доступны только Keycloak + Postgres backend для Keycloak (E1.3.1, остальное
+по мере прохождения эпиков):
+
 ```bash
-# 1. Поднять инфраструктуру
-docker-compose up -d postgres redis qdrant minio keycloak
+# 1. Запустить Keycloak
+cd infra && docker compose up -d keycloak postgres-keycloak
+# (подробности и smoke-test: infra/keycloak/README.md)
 
-# 2. Применить миграции
-make migrate
+# 2. Запустить backend (FastAPI)
+cd backend && make install && make run
+# Endpoint: http://localhost:8000/api/v1/health
 
-# 3. Запустить backend
-make backend-dev
-
-# 4. Запустить frontend
-make frontend-dev
-
-# 5. Запустить mock-сервер OpenAPI (для разработки rehome.one)
-make mock-api
+# 3. Запустить frontend (Next.js)
+cd frontend && make install && make dev
+# UI: http://localhost:3000
 ```
+
+Полная локальная разработка (с миграциями, mock-сервером OpenAPI, тестами)
+— по мере добавления соответствующих модулей.
 
 ## Тестирование
 
