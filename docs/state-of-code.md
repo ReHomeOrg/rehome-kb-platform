@@ -88,7 +88,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | Серверы | РФ: Yandex Cloud / Selectel | ❌ ни одного серверa нет |
 | Контейнеризация | Docker | ❌ |
 | Оркестрация | TBD (на E1 решим: docker-compose для dev, k8s или nomad для prod — отдельный ADR) | ❌ |
-| CI/CD | GitHub Actions (`.github/workflows/ci.yml` уже добавлен в репо) | ⚠️ файл есть, прогон 2026-05-11 завершился **failure** — отсутствуют `requirements.txt`, `package.json` и т.д. Это ожидаемо для bootstrap-этапа; фикс — в рамках E1 |
+| CI/CD | GitHub Actions (`.github/workflows/ci.yml` уже добавлен в репо) | ⚠️ файл есть; до коммита `dbc73c5` все прогоны давали 0 jobs из-за YAML parse error (шаг `No except: pass` с неэкранированным двоеточием — главная причина). После фикса в `dbc73c5` стало видно вторичную причину — отсутствие `requirements.txt`/`package.json` в корне. Backend (Python) job стал зелёным после E1.1 (PR #4). Остальные jobs (frontend, security, openapi) — закрываются в E1.2 и follow-up Issues |
 | Наблюдаемость | Prometheus + Grafana + Loki | ❌ |
 | Sentry | для ошибок (опционально) | ❌ |
 
@@ -134,8 +134,8 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | ID | Описание | Severity | Влияние на разработку |
 |---|---|---|---|
 | TD-001 | Отсутствие технической защиты веток `main` (отступление от ТЗ раздел 6.4 по решению Архитектора 2026-05-11 из-за тарифа GitHub Free) | P2 | GitHub не блокирует прямой push в `main`. Двухагентная дисциплина держится на CLAUDE.md/CLAUDE-REVIEWER.md. Каждый PR Разработчик создаёт через ветку и явный PR, не amend/rebase в `main` |
-| TD-002 | Проверяющий как отдельная Claude-сессия пока не поднят | P1 | Approve и merge временно делает Архитектор. Поднимется на этапе E1 параллельно с базовой инфраструктурой |
-| TD-003 | CI красный на bootstrap-коммите (нет deps-файлов) | P2 | Не блокирует docs-only PRs (как этот). Фикс — в рамках E1 |
+| TD-002 | ~~Проверяющий как отдельная Claude-сессия пока не поднят~~ **Закрыт 2026-05-11** post-hoc аудитом PR #2 и PR #4 (Claude Code agent id `a4be970c66aac34ba`). С Issue #5 двухагентный цикл работает в полном объёме | ~~P1~~ closed | ~~Approve и merge временно делает Архитектор~~ С Issue #5 approve плана и merge PR выполняет Проверяющий (отдельный Claude-контекст) |
+| TD-003 | CI давал 0 jobs / 0 check-runs с bootstrap'а (`1d01460`) до `dbc73c5`. **Главная причина** — YAML parse error в `.github/workflows/ci.yml` (шаг `No except: pass` с неэкранированным двоеточием, исправлено в `dbc73c5`). **Вторичная причина** — отсутствие `requirements.txt`/`package.json` в корне (закрылось для backend в PR #4 через `working-directory: backend`). Frontend/security/openapi jobs всё ещё красные — закрываются в E1.2 и follow-up Issues | P2 | На bootstrap фактически блокировал любую CI-проверку. Сейчас Backend (Python) и Anti-crutches зелёные. Не блокирует docs-only PRs |
 | TD-004 | Юридические правки договора найма и публичной оферты — deferred Архитектором | P1 | Блокер выкатки MVP, но не блокер начала разработки. Возвращаемся к вопросу за 4-6 недель до запуска E3/E4 |
 | TD-005 | Размер сервисного платежа (фикс vs %, НДС) — deferred Архитектором | P1 | В платёжном коде использовать config-driven значения с TODO, не хардкод. Решение нужно к моменту реализации платёжного контура (E1.5 или E2) |
 | TD-006 | Состав 3-5 коллаборантов MVP не определён | P2 | Не блокер до начала E7 (Collaborators). До этого момента — Архитектор подтвердит выборку |
@@ -212,12 +212,12 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 ## Утверждение
 
 - [x] Разработчик прочитал и согласен с описанием — Agent (Claude Code), 2026-05-11
-- [ ] Проверяющий прочитал, замечаний нет — N/A (вторая сессия не поднята, см. TD-002)
+- [x] Проверяющий прочитал, замечаний нет — Claude Code agent (id `a4be970c66aac34ba`), 2026-05-11, post-hoc audit PR #2 и PR #4
 - [x] Архитектор утвердил отчёт как baseline — Evgeniy, 2026-05-11
 
 **Подписи (дата):**
 - Разработчик: Claude Code (Opus 4.7), 2026-05-11
-- Проверяющий: —
+- Проверяющий: Claude Code agent (id `a4be970c66aac34ba`), 2026-05-11, post-hoc audit PR #2 и PR #4
 - Архитектор: Evgeniy, 2026-05-11
 
 После утверждения State of Code Report становится baseline. Изменения в нём требуют отдельного ADR (раздел 2.4 ТЗ).
