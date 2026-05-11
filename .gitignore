@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# venv
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.tox/
+.nox/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.npm
+.yarn-integrity
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs / runtime
+*.log
+logs/
+
+# Secrets / local config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+.git-credentials
+.rehome_bootstrap_token
+
+# Local databases
+*.sqlite3
+*.db
