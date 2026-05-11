@@ -308,14 +308,6 @@ paths:
           description: Не изменилось с last ETag
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/articles/{id}:
-    parameters:
-    - name: id
-      in: path
-      required: true
-      schema:
-        type: string
-        format: uuid
     put:
       tags:
       - Articles
@@ -393,19 +385,19 @@ paths:
           description: Архивировано
         '404':
           $ref: '#/components/responses/NotFound'
-  /api/v1/articles/{id}/history:
+  /api/v1/articles/{slug}/history:
     get:
       tags:
       - Articles
       summary: История изменений статьи
       operationId: getArticleHistory
       parameters:
-      - name: id
+      - name: slug
         in: path
         required: true
         schema:
           type: string
-          format: uuid
+          pattern: ^[a-z0-9-]+$
       - $ref: '#/components/parameters/RequestId'
       responses:
         '200':
@@ -1968,16 +1960,13 @@ paths:
                           type: string
                           format: date-time
                         completed_at:
-                          type: string
+                          type: [string, 'null']
                           format: date-time
-                          nullable: true
                         result_url:
-                          type: string
+                          type: [string, 'null']
                           format: uri
-                          nullable: true
                         error:
-                          type: string
-                          nullable: true
+                          type: [string, 'null']
   /api/v1/collaborators:
     get:
       tags:
@@ -2233,9 +2222,8 @@ paths:
                 reason:
                   type: string
                 until:
-                  type: string
+                  type: [string, 'null']
                   format: date
-                  nullable: true
       responses:
         '200':
           description: Приостановлено
@@ -2725,11 +2713,9 @@ components:
       type: object
       properties:
         cursor_next:
-          type: string
-          nullable: true
+          type: [string, 'null']
         cursor_prev:
-          type: string
-          nullable: true
+          type: [string, 'null']
         has_more:
           type: boolean
         total_estimate:
@@ -2876,9 +2862,8 @@ components:
             type: string
             format: date-time
           published_at:
-            type: string
+            type: [string, 'null']
             format: date-time
-            nullable: true
           internal_ref:
             type: string
             description: Ссылка на внутренний регламент (только staff)
@@ -3001,9 +2986,8 @@ components:
           type: string
           format: date
         effective_to:
-          type: string
+          type: [string, 'null']
           format: date
-          nullable: true
         status:
           type: string
           enum:
@@ -3012,8 +2996,7 @@ components:
           - EXPIRED
           - CANCELLED
         counterparty:
-          type: string
-          nullable: true
+          type: [string, 'null']
         confidentiality:
           type: string
           enum:
@@ -3021,8 +3004,7 @@ components:
           - INTERNAL
           - RESTRICTED
         related_entity:
-          type: string
-          nullable: true
+          type: [string, 'null']
         files:
           type: array
           items:
@@ -3154,9 +3136,9 @@ components:
             included_in_rent:
               type: string
               enum:
-              - true
-              - false
-              - partial
+              - "true"
+              - "false"
+              - "partial"
             personal_account:
               type: string
             metering_submit_url:
@@ -3235,9 +3217,8 @@ components:
             amount:
               type: number
             paid_at:
-              type: string
+              type: [string, 'null']
               format: date-time
-              nullable: true
             status:
               type: string
               enum:
@@ -3245,9 +3226,8 @@ components:
               - PAID
               - FAILED
             fiscal_receipt_url:
-              type: string
+              type: [string, 'null']
               format: uri
-              nullable: true
         payment_history:
           type: array
           items:
@@ -3279,8 +3259,7 @@ components:
           type: number
           example: 7.0
         insurance_policy:
-          type: object
-          nullable: true
+          type: [object, 'null']
           properties:
             number:
               type: string
@@ -3384,9 +3363,8 @@ components:
           type: string
           format: uuid
         user_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         scope:
           type: string
         context:
@@ -3437,8 +3415,7 @@ components:
                 type: string
                 format: uri
         feedback:
-          type: object
-          nullable: true
+          type: [object, 'null']
           properties:
             rating:
               type: string
@@ -3516,12 +3493,10 @@ components:
             type: string
             format: date-time
           last_delivery_at:
-            type: string
+            type: [string, 'null']
             format: date-time
-            nullable: true
           last_delivery_status:
-            type: integer
-            nullable: true
+            type: [integer, 'null']
     WebhookEvent:
       type: string
       enum:
@@ -3586,9 +3561,8 @@ components:
           type: string
           format: date-time
         last_login_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         mfa_enabled:
           type: boolean
     KbUserInput:
@@ -3645,9 +3619,8 @@ components:
         entity_type:
           type: string
         entity_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         ip:
           type: string
         user_agent:
@@ -3707,9 +3680,8 @@ components:
         description:
           type: string
         assigned_to:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         created_at:
           type: string
           format: date-time
@@ -3718,12 +3690,10 @@ components:
           format: date-time
           description: Срок ответа — created_at + 30 дней по ФЗ-152
         completed_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         resolution_note:
-          type: string
-          nullable: true
+          type: [string, 'null']
         attachments:
           type: array
           items:
@@ -3777,16 +3747,13 @@ components:
           type: boolean
           description: Требуется уведомление РКН по ФЗ-152 (24ч факт, 72ч состав)
         rkn_notified_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         resolution_note:
-          type: string
-          nullable: true
+          type: [string, 'null']
         resolved_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
     SystemConfig:
       type: object
       properties:
@@ -3892,9 +3859,8 @@ components:
           type: string
           format: date-time
         completed_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         status:
           type: string
           enum:
@@ -4044,8 +4010,7 @@ components:
         name:
           type: string
         brand_name:
-          type: string
-          nullable: true
+          type: [string, 'null']
         collaborator_type:
           $ref: '#/components/schemas/CollaboratorType'
         financial_group:
@@ -4066,10 +4031,9 @@ components:
             value:
               type: string
         rating:
-          type: number
+          type: [number, 'null']
           minimum: 0
           maximum: 5
-          nullable: true
         is_24_7:
           type: boolean
         has_api:
@@ -4090,17 +4054,13 @@ components:
             - ip
             - legal_entity
           inn:
-            type: string
-            nullable: true
+            type: [string, 'null']
           ogrn:
-            type: string
-            nullable: true
+            type: [string, 'null']
           kpp:
-            type: string
-            nullable: true
+            type: [string, 'null']
           counterparty_check:
-            type: object
-            nullable: true
+            type: [object, 'null']
             properties:
               status:
                 type: string
@@ -4153,12 +4113,10 @@ components:
               timezone:
                 type: string
           website:
-            type: string
+            type: [string, 'null']
             format: uri
-            nullable: true
           responsible_internal:
-            type: object
-            nullable: true
+            type: [object, 'null']
             description: Сотрудник reHome — ответственный за этого коллаборанта
             properties:
               user_id:
@@ -4169,13 +4127,11 @@ components:
               role:
                 type: string
           contract_document_id:
-            type: string
+            type: [string, 'null']
             format: uuid
-            nullable: true
             description: Ссылка на документ из категории C хранилища
           financial_terms:
-            type: object
-            nullable: true
+            type: [object, 'null']
             description: Заполняется для групп A/B/C, для D — null
             properties:
               pricing_model:
@@ -4188,21 +4144,18 @@ components:
                 - pay_per_use
                 - referral
               commission_percent:
-                type: number
-                nullable: true
+                type: [number, 'null']
               currency:
                 type: string
                 default: RUB
               minimum_amount:
-                type: number
-                nullable: true
+                type: [number, 'null']
               payment_method:
                 type: string
               notes:
                 type: string
           api_integration:
-            type: object
-            nullable: true
+            type: [object, 'null']
             properties:
               endpoint:
                 type: string
@@ -4220,12 +4173,10 @@ components:
                 type: string
                 format: uri
               webhook_url:
-                type: string
+                type: [string, 'null']
                 format: uri
-                nullable: true
           sla:
-            type: object
-            nullable: true
+            type: [object, 'null']
             properties:
               response_time_minutes:
                 type: integer
@@ -4236,9 +4187,8 @@ components:
               penalties:
                 type: string
           fallback_collaborator_id:
-            type: string
+            type: [string, 'null']
             format: uuid
-            nullable: true
           portal_access_level:
             $ref: '#/components/schemas/PortalAccessLevel'
           created_at:
@@ -4283,8 +4233,7 @@ components:
                 reason:
                   type: string
           onboarding_source:
-            type: string
-            nullable: true
+            type: [string, 'null']
             enum:
             - self_service
             - invited_by_staff
@@ -4304,8 +4253,7 @@ components:
           type: string
           maxLength: 200
         brand_name:
-          type: string
-          nullable: true
+          type: [string, 'null']
         collaborator_type:
           $ref: '#/components/schemas/CollaboratorType'
         financial_group:
@@ -4386,8 +4334,7 @@ components:
           minimum: 1
           description: 1 — основной, 2+ — резерв
         notes:
-          type: string
-          nullable: true
+          type: [string, 'null']
         assigned_at:
           type: string
           format: date-time
@@ -4431,15 +4378,13 @@ components:
         comment:
           type: string
         order_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         created_at:
           type: string
           format: date-time
         response:
-          type: object
-          nullable: true
+          type: [object, 'null']
           description: Ответ коллаборанта на отзыв
           properties:
             text:
@@ -4529,21 +4474,18 @@ components:
           type: string
           format: uuid
         premises_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         booking_id:
-          type: string
+          type: [string, 'null']
           format: uuid
-          nullable: true
         service_type:
           type: string
         service_description:
           type: string
         scheduled_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         status:
           $ref: '#/components/schemas/ServiceOrderStatus'
         price_rub:
@@ -4564,15 +4506,12 @@ components:
           type: string
           format: date-time
         completed_at:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         collaborator_notes:
-          type: string
-          nullable: true
+          type: [string, 'null']
         customer_notes:
-          type: string
-          nullable: true
+          type: [string, 'null']
         attachments:
           type: array
           items:
