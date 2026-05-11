@@ -136,7 +136,7 @@ jobs:
 
       - name: Node dependency vulnerabilities (npm audit)
         working-directory: frontend
-        # --omit=dev: dev-only уязвимости (e.g. ESLint chain) исключены.
+        # --omit=dev: dev-only уязвимости (ESLint chain) исключены.
         # --audit-level=critical: bootstrap-этап. Next.js 14.2.35 имеет
         # 2 known prod vuln (1 high SSRF + 1 moderate postcss XSS) — не
         # critical-уровня, bump до Next.js 15 — отдельный backlog Issue.
