@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  # ============================================================
+  # Backend: Python lint + type-check + tests
+  # ============================================================
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Type check (mypy strict)
+        run: mypy --strict .
+
+      - name: Unit tests
+        run: pytest tests/unit --cov=. --cov-report=xml --cov-fail-under=80
+
+      - name: Integration tests
+        run: pytest tests/integration
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:5432/test
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Security tests (access_level bypass)
+        run: pytest tests/security -m security
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+
+  # ============================================================
+  # Frontend: TypeScript / Next.js
+  # ============================================================
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Type check (tsc --strict)
+        run: npm run typecheck
+
+      - name: Unit tests (Vitest)
+        run: npm run test -- --coverage
+
+      - name: Build
+        run: npm run build
+
+  # ============================================================
+  # OpenAPI: валидация и контрактные тесты
+  # ============================================================
+  openapi:
+    name: OpenAPI spec validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate OpenAPI 3.1
+        run: npx @redocly/cli lint docs/handoff/01_postanovka/04_openapi.yaml
+
+      - name: Check OpenAPI breaking changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          npx oasdiff breaking \
+            origin/${{ github.base_ref }}:docs/handoff/01_postanovka/04_openapi.yaml \
+            docs/handoff/01_postanovka/04_openapi.yaml || \
+            (echo "Breaking changes detected — require ADR and Architect approval" && exit 1)
+
+  # ============================================================
+  # Security scan: секреты, уязвимости зависимостей
+  # ============================================================
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python dependency vulnerabilities
+        run: |
+          pip install pip-audit
+          pip-audit
+
+      - name: Node dependency vulnerabilities
+        run: npm audit --audit-level=high
+
+  # ============================================================
+  # Анти-костыли: проверка кода на типичные ошибки
+  # ============================================================
+  anti-crutches:
+    name: Anti-crutches checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No SELECT without access_level filter
+        run: |
+          # Эвристика: поиск SELECT * FROM таблиц с user-content
+          if grep -rE "SELECT \* FROM (articles|documents|premises_cards|chunks)" \
+             --include='*.py' --include='*.sql' \
+             | grep -v "WHERE.*access_level"; then
+            echo "❌ Найдены SELECT без access_level фильтра"
+            exit 1
+          fi
+
+      - name: No scope from client payload
+        run: |
+          # scope должен браться из сессии, не из request body
+          if grep -rE "request\.(json|data|POST)\[\"?scope\"?\]" \
+             --include='*.py'; then
+            echo "❌ scope передаётся клиентом — это нарушение"
+            exit 1
+          fi
+
+      - name: No localStorage with PII
+        run: |
+          # ПДн не должны храниться в localStorage
+          if grep -rE "localStorage\.(setItem|getItem).*?(passport|phone|email)" \
+             --include='*.ts' --include='*.tsx'; then
+            echo "❌ ПДн в localStorage запрещены"
+            exit 1
+          fi
+
+      - name: No except: pass
+        run: |
+          if grep -rE "except.*:\s*$" -A 1 --include='*.py' | grep "pass"; then
+            echo "❌ except: pass — кардинальный костыль"
+            exit 1
+          fi
+
+      - name: TODO without ticket number
+        run: |
+          # TODO/FIXME должны ссылаться на тикет
+          if grep -rE "(TODO|FIXME|HACK)" --include='*.py' --include='*.ts' \
+             | grep -vE "#[0-9]+"; then
+            echo "⚠️  Найдены TODO/FIXME без номера тикета"
+            # warning, не блок
+          fi

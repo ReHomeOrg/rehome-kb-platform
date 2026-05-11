@@ -1,0 +1,4654 @@
+openapi: 3.1.0
+info:
+  title: reHome Knowledge Base API
+  version: 1.0.0
+  summary: API модуля базы знаний платформы reHome
+  description: "Публичный API модуля базы знаний reHome, через который платформа rehome.one\nи другие потребители получают\
+    \ доступ к статьям help-центра, документам,\nAI-чату, поиску и карточкам квартир.\n\nПолное описание архитектуры и принципов\
+    \ — в документе\n«API базы знаний reHome — ТЗ v1.0».\n\n## Аутентификация\nПоддерживаются два режима:\n- **m2m** (server-to-server):\
+    \ OAuth 2.0 Client Credentials через kb-auth Keycloak,\n  Authorization: Bearer <jwt>\n- **user** (browser-to-server):\
+    \ HttpOnly Cookie kb_session с JWT,\n  устанавливается при логине пользователя в rehome.one\n\n## Контроль доступа\nКаждый\
+    \ ресурс имеет access_level (PUBLIC / LOGGED / AGENT / STAFF / LEGAL / HR_RESTRICTED).\nscope пользователя вычисляется\
+    \ бэкендом из проверенного токена,\nНИКОГДА не передаётся клиентом. Фильтрация применяется на уровне хранилища.\n\n##\
+    \ Версионирование\nВерсия в URL: /api/v1/. Breaking changes требуют новой мажорной версии\nи параллельной работы старой\
+    \ минимум 6 месяцев.\n"
+  contact:
+    name: reHome Engineering
+    email: engineering@rehome.one
+    url: https://rehome.one
+  license:
+    name: Proprietary
+  termsOfService: https://rehome.one/legal/api-terms
+servers:
+- url: https://api.rehome.one/kb
+  description: Production
+- url: https://api.staging.rehome.one/kb
+  description: Staging
+- url: https://api.dev.rehome.one/kb
+  description: Development
+- url: http://localhost:8000/kb
+  description: Local development
+security:
+- BearerAuth: []
+- CookieAuth: []
+tags:
+- name: Health
+  description: Health checks и метаданные API
+- name: Articles
+  description: Статьи help-центра и внутренней wiki
+- name: Categories
+  description: Категории и теги статей
+- name: Documents
+  description: Юридические и прочие документы
+- name: Premises Cards
+  description: Карточки сдаваемых квартир
+- name: Chat
+  description: AI-чат по базе знаний (RAG)
+- name: Search
+  description: Универсальный поиск
+- name: Webhooks
+  description: Управление webhook подписками
+- name: Admin
+  description: Администрирование kb-модуля (требует scope = staff_admin)
+- name: Collaborators
+  description: Коллаборанты — внешние исполнители (УК/ТСЖ, клининг, ремонт, страховые и др.)
+paths:
+  /api/v1/health:
+    get:
+      tags:
+      - Health
+      summary: Liveness probe
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+  /api/v1/ready:
+    get:
+      tags:
+      - Health
+      summary: Readiness probe
+      operationId: ready
+      security: []
+      responses:
+        '200':
+          description: Все зависимости доступны
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ready
+                  dependencies:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum:
+                      - ok
+                      - degraded
+                      - down
+        '503':
+          description: Зависимости недоступны
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/version:
+    get:
+      tags:
+      - Health
+      summary: Версия API
+      operationId: getVersion
+      security: []
+      responses:
+        '200':
+          description: Информация о версии
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_version:
+                    type: string
+                    example: 1.0.0
+                  build_hash:
+                    type: string
+                  build_date:
+                    type: string
+                    format: date-time
+                  environment:
+                    type: string
+                    enum:
+                    - prod
+                    - staging
+                    - dev
+                    - local
+  /api/v1/articles:
+    get:
+      tags:
+      - Articles
+      summary: Список статей
+      description: 'Возвращает список статей с учётом scope пользователя.
+
+        Cursor-based пагинация. Поддерживает фильтры по категории, аудитории, языку.
+
+        '
+      operationId: listArticles
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      - {}
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/AcceptLanguage'
+      - name: category
+        in: query
+        schema:
+          type: string
+          enum:
+          - faq
+          - regulation
+          - guide
+          - policy
+          - document
+          - glossary
+      - name: audience
+        in: query
+        schema:
+          $ref: '#/components/schemas/Audience'
+      - name: tags
+        in: query
+        description: Список тегов через запятую
+        schema:
+          type: string
+          example: сервисный-платёж,оплата
+      - name: language
+        in: query
+        schema:
+          $ref: '#/components/schemas/Language'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: Список статей
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=60
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+            X-API-Version:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ArticleSummary'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimit'
+    post:
+      tags:
+      - Articles
+      summary: Создать статью
+      description: Требует scope ≥ staff_support
+      operationId: createArticle
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '201':
+          description: Создано
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Article'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/articles/{slug}:
+    parameters:
+    - name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-z0-9-]+$
+    get:
+      tags:
+      - Articles
+      summary: Получить статью по slug
+      operationId: getArticleBySlug
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      - {}
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/AcceptLanguage'
+      - name: If-None-Match
+        in: header
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Статья
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Article'
+        '304':
+          description: Не изменилось с last ETag
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/articles/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    put:
+      tags:
+      - Articles
+      summary: Обновить статью полностью
+      operationId: replaceArticle
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: If-Match
+        in: header
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '200':
+          description: Обновлено
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Article'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    patch:
+      tags:
+      - Articles
+      summary: Частично обновить статью
+      operationId: patchArticle
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArticlePatch'
+      responses:
+        '200':
+          description: Обновлено
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Article'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Articles
+      summary: Архивировать статью (soft delete)
+      operationId: archiveArticle
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Архивировано
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/articles/{id}/history:
+    get:
+      tags:
+      - Articles
+      summary: История изменений статьи
+      operationId: getArticleHistory
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: История версий
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ArticleVersion'
+  /api/v1/articles/search:
+    post:
+      tags:
+      - Articles
+      summary: Полнотекстовый поиск по статьям
+      operationId: searchArticles
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - q
+              properties:
+                q:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                filters:
+                  type: object
+                  properties:
+                    category:
+                      type: string
+                    audience:
+                      $ref: '#/components/schemas/Audience'
+                    tags:
+                      type: array
+                      items:
+                        type: string
+                cursor:
+                  type: string
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                  default: 10
+      responses:
+        '200':
+          description: Результаты поиска
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/SearchHit'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+  /api/v1/categories:
+    get:
+      tags:
+      - Categories
+      summary: Дерево категорий
+      operationId: listCategories
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Category'
+  /api/v1/tags:
+    get:
+      tags:
+      - Categories
+      summary: Список тегов
+      operationId: listTags
+      security: []
+      parameters:
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Tag'
+  /api/v1/documents:
+    get:
+      tags:
+      - Documents
+      summary: Список документов
+      operationId: listDocuments
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - name: category
+        in: query
+        schema:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+          - D
+          - E
+          - F
+          description: 'A — публичные документы пользователей,
+
+            B — заключённые договоры,
+
+            C — договоры с подрядчиками,
+
+            D — внутренние,
+
+            E — регуляторы,
+
+            F — шаблоны
+
+            '
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - DRAFT
+          - ACTIVE
+          - EXPIRED
+          - CANCELLED
+      - name: related_entity
+        in: query
+        description: Фильтр по связанной сущности, например "user:abc-123"
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DocumentMeta'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+  /api/v1/documents/{id}:
+    get:
+      tags:
+      - Documents
+      summary: Метаданные документа
+      operationId: getDocument
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Document'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{id}/files/{format}:
+    get:
+      tags:
+      - Documents
+      summary: Скачать файл документа
+      description: Возвращает 302 redirect на signed URL в MinIO с TTL 5 минут
+      operationId: downloadDocumentFile
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: format
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - docx
+          - pdf
+          - html
+      responses:
+        '302':
+          description: Redirect на signed URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/premises-cards/{premises_id}:
+    parameters:
+    - name: premises_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Premises Cards
+      summary: Карточка квартиры
+      description: 'Состав возвращаемых полей зависит от scope:
+
+        - guest: только базовые публичные поля
+
+        - tenant (своей квартиры): доступ + Wi-Fi + контакты + правила
+
+        - landlord: финансовый блок + представитель + история
+
+        - staff: всё включая внутренние данные
+
+        '
+      operationId: getPremisesCard
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/PremisesCard'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Premises Cards
+      summary: Обновить карточку
+      operationId: updatePremisesCard
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PremisesCardInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/PremisesCard'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/premises-cards/{premises_id}/financial:
+    get:
+      tags:
+      - Premises Cards
+      summary: Финансовый блок карточки
+      description: 'Включает данные о сервисном платеже (см. ПЗ «База знаний v1.2» раздел 5.2).
+
+        Доступ только для landlord (своих) и staff.
+
+        '
+      operationId: getPremisesFinancial
+      parameters:
+      - name: premises_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/FinancialBlock'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/chat/sessions:
+    post:
+      tags:
+      - Chat
+      summary: Создать сессию чата
+      operationId: createChatSession
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                context:
+                  type: object
+                  description: Контекст — откуда открыт чат (страница, объект)
+                  properties:
+                    page_url:
+                      type: string
+                      format: uri
+                    premises_id:
+                      type: string
+                      format: uuid
+                    booking_id:
+                      type: string
+                      format: uuid
+      responses:
+        '201':
+          description: Сессия создана
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ChatSession'
+  /api/v1/chat/sessions/{session_id}:
+    parameters:
+    - name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Chat
+      summary: История сессии
+      operationId: getChatSession
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      allOf:
+                      - $ref: '#/components/schemas/ChatSession'
+                      - type: object
+                        properties:
+                          messages:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ChatMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Chat
+      summary: Удалить сессию и историю (право по ФЗ-152)
+      operationId: deleteChatSession
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Удалено
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/chat/sessions/{session_id}/messages:
+    post:
+      tags:
+      - Chat
+      summary: Отправить сообщение в чат
+      description: 'Возвращает либо SSE-стрим (Accept: text/event-stream), либо полный JSON-ответ.
+
+        SSE-события: message-start, chunk, citation, message-end, error, done.
+
+        '
+      operationId: sendChatMessage
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: Accept
+        in: header
+        schema:
+          type: string
+          enum:
+          - application/json
+          - text/event-stream
+          default: text/event-stream
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - content
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        '200':
+          description: Ответ AI (SSE или JSON)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: "Поток событий:\n  event: message-start\n  data: {\"message_id\": \"...\", \"created_at\": \"\
+                  ...\"}\n\n  event: chunk\n  data: {\"text\": \"...\"}\n\n  event: citation\n  data: {\"source\": {...}}\n\
+                  \n  event: message-end\n  data: {\"message_id\": \"...\", \"total_tokens\": N}\n\n  event: done\n  data:\
+                  \ {}\n"
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ChatMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimit'
+  /api/v1/chat/sessions/{session_id}/feedback:
+    post:
+      tags:
+      - Chat
+      summary: Оставить фидбек на ответ
+      operationId: postChatFeedback
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - message_id
+              - rating
+              properties:
+                message_id:
+                  type: string
+                  format: uuid
+                rating:
+                  type: string
+                  enum:
+                  - up
+                  - down
+                comment:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '201':
+          description: Фидбек сохранён
+  /api/v1/chat/sessions/{session_id}/escalate:
+    post:
+      tags:
+      - Chat
+      summary: Эскалация на оператора поддержки
+      operationId: escalateChatSession
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                priority:
+                  type: string
+                  enum:
+                  - low
+                  - normal
+                  - high
+      responses:
+        '201':
+          description: Тикет создан
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        ticket_id:
+                          type: string
+                        estimated_response_time_minutes:
+                          type: integer
+  /api/v1/search:
+    post:
+      tags:
+      - Search
+      summary: Универсальный поиск (hybrid)
+      description: 'Поиск по всему контенту kb: статьи, документы, карточки квартир, регламенты.
+
+        Hybrid retrieval: vector (Qdrant) + full-text (Postgres). Возвращает
+
+        разнородные результаты с указанием типа.
+
+        '
+      operationId: universalSearch
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - query
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                types:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - article
+                    - document
+                    - premises_card
+                    - regulation
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                  default: 10
+      responses:
+        '200':
+          description: Результаты
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/SearchHit'
+  /api/v1/webhooks:
+    get:
+      tags:
+      - Webhooks
+      summary: Список зарегистрированных webhook
+      operationId: listWebhooks
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Webhook'
+    post:
+      tags:
+      - Webhooks
+      summary: Зарегистрировать webhook
+      operationId: createWebhook
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Webhook'
+  /api/v1/webhooks/{id}:
+    delete:
+      tags:
+      - Webhooks
+      summary: Отозвать webhook
+      operationId: deleteWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Отозван
+  /api/v1/webhooks/{id}/test:
+    post:
+      tags:
+      - Webhooks
+      summary: Тестовая отправка события
+      operationId: testWebhook
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Тест выполнен
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivered:
+                    type: boolean
+                  status_code:
+                    type: integer
+                  response_time_ms:
+                    type: integer
+  /api/v1/admin/users:
+    get:
+      tags:
+      - Admin
+      summary: Список пользователей kb (сотрудники, редакторы)
+      description: 'Управление пользователями kb-модуля (НЕ конечные пользователи rehome.one — те живут в основной системе).
+
+        Здесь — сотрудники с правами редактирования, проверяющие, администраторы.
+
+        Требует scope = staff_admin.
+
+        '
+      operationId: listKbUsers
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - name: role
+        in: query
+        schema:
+          type: string
+          enum:
+          - staff_support
+          - staff_legal
+          - staff_hr
+          - staff_admin
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - SUSPENDED
+          - ARCHIVED
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/KbUser'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+      - Admin
+      summary: Добавить сотрудника
+      operationId: createKbUser
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KbUserInput'
+      responses:
+        '201':
+          description: Создано
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/KbUser'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/admin/users/{user_id}:
+    parameters:
+    - name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Admin
+      summary: Карточка сотрудника
+      operationId: getKbUser
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/KbUser'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Admin
+      summary: Изменить роль/права/статус сотрудника
+      operationId: updateKbUser
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum:
+                  - staff_support
+                  - staff_legal
+                  - staff_hr
+                  - staff_admin
+                status:
+                  type: string
+                  enum:
+                  - ACTIVE
+                  - SUSPENDED
+                  - ARCHIVED
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/KbUser'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags:
+      - Admin
+      summary: Деактивировать сотрудника
+      description: Soft-delete. Отзывает все доступы, помечает архивированным.
+      operationId: deactivateKbUser
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Деактивирован
+  /api/v1/admin/audit-log:
+    get:
+      tags:
+      - Admin
+      summary: Аудит-лог системы
+      description: 'Журнал действий в kb-модуле для compliance и расследований инцидентов.
+
+        Хранится 5 лет. Доступ — staff_admin или staff_legal.
+
+        '
+      operationId: getAuditLog
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - name: actor_id
+        in: query
+        description: Фильтр по конкретному пользователю
+        schema:
+          type: string
+          format: uuid
+      - name: action
+        in: query
+        description: Тип действия (read, write, delete, login, escalate, и т.д.)
+        schema:
+          type: string
+      - name: entity_type
+        in: query
+        description: Тип сущности (article, document, premises_card, и т.д.)
+        schema:
+          type: string
+      - name: entity_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: severity
+        in: query
+        schema:
+          type: string
+          enum:
+          - info
+          - warning
+          - error
+          - critical
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 50
+          maximum: 500
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AuditLogEntry'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/audit-log/export:
+    post:
+      tags:
+      - Admin
+      summary: Экспорт аудит-лога (для регуляторов / суда)
+      description: 'Запускает фоновую задачу экспорта в подписанный CSV/JSON.
+
+        Возвращает task_id, готовый файл — webhook + endpoint загрузки.
+
+        '
+      operationId: exportAuditLog
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - from
+              - to
+              properties:
+                from:
+                  type: string
+                  format: date-time
+                to:
+                  type: string
+                  format: date-time
+                filters:
+                  type: object
+                format:
+                  type: string
+                  enum:
+                  - csv
+                  - json
+                  default: csv
+                reason:
+                  type: string
+                  description: Причина экспорта (для аудита аудит-лога)
+      responses:
+        '202':
+          description: Принято, задача создана
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                    format: uuid
+                  estimated_ready_at:
+                    type: string
+                    format: date-time
+  /api/v1/admin/personal-data/requests:
+    get:
+      tags:
+      - Admin
+      summary: Заявки субъектов ПДн (ФЗ-152)
+      description: 'Реестр запросов пользователей на предоставление / исправление / удаление ПДн.
+
+        Срок ответа по ФЗ-152 — 30 дней.
+
+        '
+      operationId: listPersonalDataRequests
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - NEW
+          - IN_PROGRESS
+          - COMPLETED
+          - REJECTED
+          - OVERDUE
+      - name: type
+        in: query
+        schema:
+          type: string
+          enum:
+          - provide
+          - correct
+          - delete
+          - transfer
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/PersonalDataRequest'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/admin/personal-data/requests/{request_id}:
+    parameters:
+    - name: request_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Admin
+      summary: Карточка заявки субъекта ПДн
+      operationId: getPersonalDataRequest
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/PersonalDataRequest'
+    patch:
+      tags:
+      - Admin
+      summary: Обработка заявки
+      operationId: processPersonalDataRequest
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - IN_PROGRESS
+                  - COMPLETED
+                  - REJECTED
+                resolution_note:
+                  type: string
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: OK
+  /api/v1/admin/security-incidents:
+    get:
+      tags:
+      - Admin
+      summary: Реестр security-инцидентов
+      description: 'События безопасности: попытки обхода прав, утечки, подозрительная активность,
+
+        срабатывания систем мониторинга. По ФЗ-152 — уведомление РКН в 24/72 часа.
+
+        '
+      operationId: listSecurityIncidents
+      parameters:
+      - name: severity
+        in: query
+        schema:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - OPEN
+          - INVESTIGATING
+          - RESOLVED
+          - FALSE_POSITIVE
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/SecurityIncident'
+  /api/v1/admin/security-incidents/{incident_id}:
+    parameters:
+    - name: incident_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    patch:
+      tags:
+      - Admin
+      summary: Обновление статуса инцидента
+      operationId: updateSecurityIncident
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - OPEN
+                  - INVESTIGATING
+                  - RESOLVED
+                  - FALSE_POSITIVE
+                resolution_note:
+                  type: string
+                rkn_notified_at:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: OK
+  /api/v1/admin/system-config:
+    get:
+      tags:
+      - Admin
+      summary: Системные настройки kb-модуля
+      description: 'Конфигурация на лету: rate limits, LLM-провайдер, фичефлаги, лимиты модерации.
+
+        '
+      operationId: getSystemConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SystemConfig'
+    patch:
+      tags:
+      - Admin
+      summary: Изменение настроек
+      operationId: updateSystemConfig
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Patch-объект с полями SystemConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SystemConfig'
+  /api/v1/admin/llm/providers:
+    get:
+      tags:
+      - Admin
+      summary: Список подключённых LLM-провайдеров
+      description: 'Yandex, GigaChat, Saiga и т.д. Используется для feature-flag-переключения
+
+        и eval-стенда (см. документ Чат-поиск ТЗ v2 раздел 3).
+
+        '
+      operationId: listLlmProviders
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/LlmProvider'
+  /api/v1/admin/llm/active:
+    put:
+      tags:
+      - Admin
+      summary: Переключить активного LLM-провайдера
+      description: 'Меняет провайдера без деплоя. Запрос требует подтверждение через MFA-челлендж.
+
+        '
+      operationId: setActiveLlmProvider
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: X-MFA-Token
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - provider_id
+              properties:
+                provider_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Переключено
+  /api/v1/admin/llm/eval-runs:
+    get:
+      tags:
+      - Admin
+      summary: История прогонов eval-стенда
+      operationId: listEvalRuns
+      parameters:
+      - name: provider
+        in: query
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/EvalRun'
+    post:
+      tags:
+      - Admin
+      summary: Запустить новый прогон eval
+      operationId: startEvalRun
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - providers
+              - test_set
+              properties:
+                providers:
+                  type: array
+                  items:
+                    type: string
+                test_set:
+                  type: string
+                  enum:
+                  - full
+                  - smoke
+                  - custom
+                custom_questions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '202':
+          description: Запущено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                    format: uuid
+  /api/v1/admin/cache:
+    delete:
+      tags:
+      - Admin
+      summary: Инвалидация кеша
+      operationId: invalidateCache
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - name: scope
+        in: query
+        schema:
+          type: string
+          enum:
+          - all
+          - articles
+          - documents
+          - premises_cards
+          - search
+          default: all
+      responses:
+        '202':
+          description: Инвалидация запущена
+  /api/v1/admin/reindex:
+    post:
+      tags:
+      - Admin
+      summary: Принудительная переиндексация
+      description: 'Пересоздаёт vector-индекс (Qdrant) и full-text индекс (Postgres/Meili).
+
+        Долгая операция, фоновая задача.
+
+        '
+      operationId: reindexContent
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scope:
+                  type: string
+                  enum:
+                  - all
+                  - articles
+                  - documents
+                  - premises_cards
+                  default: all
+      responses:
+        '202':
+          description: Запущено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+                    format: uuid
+  /api/v1/admin/stats:
+    get:
+      tags:
+      - Admin
+      summary: Сводная статистика kb-модуля
+      description: 'Метрики по запросам, чату, документам, инцидентам.
+
+        Окно — последние 30 дней по умолчанию.
+
+        '
+      operationId: getAdminStats
+      parameters:
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AdminStats'
+  /api/v1/admin/tasks/{task_id}:
+    get:
+      tags:
+      - Admin
+      summary: Статус фоновой задачи
+      description: 'Универсальный endpoint для отслеживания асинхронных операций:
+
+        экспорт аудит-лога, переиндексация, eval-прогоны и т.д.
+
+        '
+      operationId: getTaskStatus
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        task_id:
+                          type: string
+                          format: uuid
+                        type:
+                          type: string
+                        status:
+                          type: string
+                          enum:
+                          - PENDING
+                          - RUNNING
+                          - COMPLETED
+                          - FAILED
+                          - CANCELLED
+                        progress_percent:
+                          type: integer
+                          minimum: 0
+                          maximum: 100
+                        created_at:
+                          type: string
+                          format: date-time
+                        completed_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        result_url:
+                          type: string
+                          format: uri
+                          nullable: true
+                        error:
+                          type: string
+                          nullable: true
+  /api/v1/collaborators:
+    get:
+      tags:
+      - Collaborators
+      summary: Список коллаборантов
+      description: 'Возвращает список внешних коллаборантов (УК/ТСЖ, аварийные службы, клининг,
+
+        переезды, ремонт, страховые и т.д.). Подробно — в ПЗ «База знаний v1.3»
+
+        раздел 10.
+
+
+        Фильтрация по типу, статусу, географии. Видимость зависит от scope:
+
+        - guest / tenant / landlord: только ACTIVE с публичными контактами
+
+        - staff_support: все ACTIVE
+
+        - staff_admin: все включая ARCHIVED
+
+        '
+      operationId: listCollaborators
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - name: type
+        in: query
+        schema:
+          $ref: '#/components/schemas/CollaboratorType'
+      - name: financial_group
+        in: query
+        schema:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+          - D
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - DRAFT
+          - PENDING_REVIEW
+          - ACTIVE
+          - SUSPENDED
+          - ARCHIVED
+      - name: city
+        in: query
+        schema:
+          type: string
+      - name: district
+        in: query
+        schema:
+          type: string
+      - name: premises_id
+        in: query
+        description: Вернуть только коллаборантов, обслуживающих этот объект
+        schema:
+          type: string
+          format: uuid
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          maximum: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CollaboratorSummary'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - Collaborators
+      summary: Создать коллаборанта
+      description: Требует scope = staff_support+
+      operationId: createCollaborator
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollaboratorInput'
+      responses:
+        '201':
+          description: Создано (статус — DRAFT или PENDING_REVIEW)
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Collaborator'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/collaborators/{collaborator_id}:
+    parameters:
+    - name: collaborator_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Collaborators
+      summary: Карточка коллаборанта
+      description: 'Состав возвращаемых полей зависит от scope:
+
+        - guest / tenant / landlord: name, type, public contacts, working_hours, rating
+
+        - staff_*: + financial_terms, sla, metrics, contract_document_id
+
+        - staff_admin: + audit_log, counterparty_check
+
+        '
+      operationId: getCollaborator
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Collaborator'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - Collaborators
+      summary: Обновить карточку коллаборанта
+      operationId: patchCollaborator
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollaboratorInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Collaborator'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Collaborators
+      summary: Архивировать коллаборанта (soft delete)
+      operationId: archiveCollaborator
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Архивировано
+  /api/v1/collaborators/{collaborator_id}/activate:
+    post:
+      tags:
+      - Collaborators
+      summary: Активация коллаборанта (DRAFT/PENDING_REVIEW → ACTIVE)
+      description: 'Активация возможна только когда: counterparty_check = CLEAN,
+
+        contract_document_id заполнен (для групп A/B/C), responsible_internal назначен.
+
+        Любая активация фиксируется в аудит-логе.
+
+        '
+      operationId: activateCollaborator
+      parameters:
+      - name: collaborator_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Активировано
+        '422':
+          description: Не выполнены условия активации
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/collaborators/{collaborator_id}/suspend:
+    post:
+      tags:
+      - Collaborators
+      summary: Приостановка коллаборанта
+      description: 'Временная остановка работы с коллаборантом без архивации.
+
+        Например, при просрочке проверки контрагента или сбое API партнёра.
+
+        '
+      operationId: suspendCollaborator
+      parameters:
+      - name: collaborator_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                until:
+                  type: string
+                  format: date
+                  nullable: true
+      responses:
+        '200':
+          description: Приостановлено
+  /api/v1/collaborators/{collaborator_id}/metrics:
+    get:
+      tags:
+      - Collaborators
+      summary: Метрики работы коллаборанта
+      description: 'Объём услуг, средний рейтинг, время реакции, выручка через коллаборанта,
+
+        количество инцидентов. Для типов финансовой группы B — выручка платформы.
+
+        '
+      operationId: getCollaboratorMetrics
+      parameters:
+      - name: collaborator_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CollaboratorMetrics'
+  /api/v1/premises/{premises_id}/collaborators:
+    parameters:
+    - name: premises_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Collaborators
+      summary: Коллаборанты, обслуживающие данный объект
+      description: 'Возвращает список PremisesCollaborator-связей: УК, аварийная служба,
+
+        рекомендуемые сантехники, привязанные к этому объекту.
+
+        Видимость публичных контактов — для tenant данной квартиры.
+
+        '
+      operationId: listPremisesCollaborators
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/PremisesCollaborator'
+    post:
+      tags:
+      - Collaborators
+      summary: Назначить коллаборанта на объект
+      description: Требует staff_support+
+      operationId: assignCollaboratorToPremises
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PremisesCollaboratorInput'
+      responses:
+        '201':
+          description: Назначено
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/PremisesCollaborator'
+  /api/v1/premises/{premises_id}/collaborators/{collaborator_id}:
+    delete:
+      tags:
+      - Collaborators
+      summary: Отвязать коллаборанта от объекта
+      operationId: unassignCollaboratorFromPremises
+      parameters:
+      - name: premises_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: collaborator_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Отвязано
+  /api/v1/collaborators/{collaborator_id}/reviews:
+    parameters:
+    - name: collaborator_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Collaborators
+      summary: Отзывы пользователей о коллаборанте
+      operationId: listCollaboratorReviews
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CollaboratorReview'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
+    post:
+      tags:
+      - Collaborators
+      summary: Оставить отзыв
+      description: Доступно tenant/landlord, оставлявшим заказ через этого коллаборанта
+      operationId: createCollaboratorReview
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - rating
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                comment:
+                  type: string
+                  maxLength: 2000
+                order_id:
+                  type: string
+                  format: uuid
+                  description: Заказ, по которому отзыв
+      responses:
+        '201':
+          description: Создано
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/service-orders:
+    get:
+      tags:
+      - Collaborators
+      summary: Заказы услуг у коллаборантов
+      description: 'Заказы пользователей у коллаборантов финансовой группы B (оплата через платформу):
+
+        клининг, переезд, ремонт, доставка ключей.
+
+        '
+      operationId: listServiceOrders
+      parameters:
+      - name: collaborator_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/ServiceOrderStatus'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ServiceOrder'
+    post:
+      tags:
+      - Collaborators
+      summary: Создать заказ у коллаборанта
+      operationId: createServiceOrder
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceOrderInput'
+      responses:
+        '201':
+          description: Заказ создан, направлен коллаборанту
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ServiceOrder'
+  /api/v1/service-orders/{order_id}:
+    parameters:
+    - name: order_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Collaborators
+      summary: Карточка заказа
+      operationId: getServiceOrder
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ServiceOrder'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/service-orders/{order_id}/cancel:
+    post:
+      tags:
+      - Collaborators
+      summary: Отмена заказа
+      operationId: cancelServiceOrder
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Отменено
+  /api/v1/collaborators/{collaborator_id}/portal-access:
+    parameters:
+    - name: collaborator_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    put:
+      tags:
+      - Collaborators
+      summary: Изменить уровень доступа коллаборанта к кабинету
+      description: Коллаборант может понизить уровень в любой момент (FULL → LIGHT, LIGHT → NONE). Повысить (NONE → LIGHT,
+        LIGHT → FULL) можно только после выполнения первой успешной операции через платформу или одобрения оператором reHome.
+        Изменения логируются в audit_log карточки.
+      operationId: changeCollaboratorPortalAccess
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - portal_access_level
+              properties:
+                portal_access_level:
+                  $ref: '#/components/schemas/PortalAccessLevel'
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResponseEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Collaborator'
+        '422':
+          description: Повышение уровня недоступно — не выполнены условия
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/collaborators/onboarding:
+    post:
+      tags:
+      - Collaborators
+      summary: Самостоятельная заявка коллаборанта (онбординг)
+      description: Эндпоинт публичной формы регистрации на rehome.one/partners. Коллаборант сам заявляет о себе, указывает
+        тип, желаемый portal_access_level (по умолчанию LIGHT), реквизиты. Создаётся карточка в статусе PENDING_REVIEW, оператор
+        reHome проверяет и активирует.
+      operationId: submitCollaboratorOnboarding
+      security:
+      - {}
+      - BearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CollaboratorInput'
+              - type: object
+                properties:
+                  applicant_contact:
+                    type: object
+                    description: Контакт заявителя для обратной связи
+                    required:
+                    - full_name
+                    - phone
+                    - email
+                    properties:
+                      full_name:
+                        type: string
+                      phone:
+                        type: string
+                      email:
+                        type: string
+                        format: email
+                      position:
+                        type: string
+                  message:
+                    type: string
+                    description: Произвольное сообщение от заявителя
+                required:
+                - applicant_contact
+      responses:
+        '202':
+          description: Заявка принята, ожидает рассмотрения
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  application_id:
+                    type: string
+                    format: uuid
+                  estimated_review_time:
+                    type: string
+                    example: 3 рабочих дня
+                  message:
+                    type: string
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Bearer JWT — m2m или user токен.
+
+        m2m: получить через kb-auth Client Credentials Grant.
+
+        '
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: kb_session
+      description: HttpOnly Secure cookie, ставится при логине в rehome.one
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      schema:
+        type: string
+        format: uuid
+      description: UUID запроса для трассировки. Если не передан — генерируется.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema:
+        type: string
+        format: uuid
+      description: UUID для дедупликации повторных POST/PATCH. Ответ кешируется 24ч.
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      schema:
+        type: string
+      description: CSRF-токен (double-submit). Обязателен для browser-mutations.
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      schema:
+        type: string
+        enum:
+        - ru
+        - en
+        default: ru
+      description: Язык ответа
+  schemas:
+    Meta:
+      type: object
+      required:
+      - request_id
+      - api_version
+      - timestamp
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        api_version:
+          type: string
+          example: 1.0.0
+        timestamp:
+          type: string
+          format: date-time
+    Pagination:
+      type: object
+      properties:
+        cursor_next:
+          type: string
+          nullable: true
+        cursor_prev:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+        total_estimate:
+          type: integer
+          description: Приблизительная оценка
+    ResponseEnvelope:
+      type: object
+      required:
+      - meta
+      properties:
+        meta:
+          $ref: '#/components/schemas/Meta'
+    Error:
+      type: object
+      required:
+      - type
+      - title
+      - status
+      - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        request_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          enum:
+          - VALIDATION
+          - ACCESS_DENIED
+          - NOT_FOUND
+          - RATE_LIMIT
+          - CONFLICT
+          - INTERNAL_ERROR
+          - METHOD_NOT_ALLOWED
+          - GONE
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    AccessLevel:
+      type: string
+      enum:
+      - PUBLIC
+      - LOGGED
+      - AGENT
+      - STAFF
+      - LEGAL
+      - HR_RESTRICTED
+    Audience:
+      type: string
+      enum:
+      - all
+      - guest
+      - tenant
+      - landlord
+      - agent
+      - staff
+    Language:
+      type: string
+      enum:
+      - ru
+      - en
+      default: ru
+    ArticleStatus:
+      type: string
+      enum:
+      - DRAFT
+      - PUBLISHED
+      - ARCHIVED
+    ArticleSummary:
+      type: object
+      required:
+      - id
+      - slug
+      - title
+      - category
+      - audience
+      - access_level
+      - updated_at
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        title:
+          type: string
+        short_answer:
+          type: string
+        category:
+          type: string
+        audience:
+          $ref: '#/components/schemas/Audience'
+        access_level:
+          $ref: '#/components/schemas/AccessLevel'
+        tags:
+          type: array
+          items:
+            type: string
+        language:
+          $ref: '#/components/schemas/Language'
+        updated_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/ArticleStatus'
+    Article:
+      allOf:
+      - $ref: '#/components/schemas/ArticleSummary'
+      - type: object
+        required:
+        - body_markdown
+        properties:
+          body_markdown:
+            type: string
+          body_html:
+            type: string
+          related:
+            type: array
+            items:
+              type: string
+              format: uuid
+          author:
+            type: string
+          created_at:
+            type: string
+            format: date-time
+          published_at:
+            type: string
+            format: date-time
+            nullable: true
+          internal_ref:
+            type: string
+            description: Ссылка на внутренний регламент (только staff)
+    ArticleInput:
+      type: object
+      required:
+      - slug
+      - title
+      - body_markdown
+      - category
+      - audience
+      properties:
+        slug:
+          type: string
+          pattern: ^[a-z0-9-]+$
+        title:
+          type: string
+          maxLength: 200
+        short_answer:
+          type: string
+          maxLength: 300
+        body_markdown:
+          type: string
+        category:
+          type: string
+        audience:
+          $ref: '#/components/schemas/Audience'
+        access_level:
+          $ref: '#/components/schemas/AccessLevel'
+        tags:
+          type: array
+          items:
+            type: string
+        related:
+          type: array
+          items:
+            type: string
+            format: uuid
+        language:
+          $ref: '#/components/schemas/Language'
+        status:
+          $ref: '#/components/schemas/ArticleStatus'
+    ArticlePatch:
+      type: object
+      description: Все поля опциональны
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        short_answer:
+          type: string
+          maxLength: 300
+        body_markdown:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/ArticleStatus'
+    ArticleVersion:
+      type: object
+      properties:
+        version:
+          type: integer
+        author:
+          type: string
+        changed_at:
+          type: string
+          format: date-time
+        changes_summary:
+          type: string
+    Category:
+      type: object
+      properties:
+        slug:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        article_count:
+          type: integer
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+    Tag:
+      type: object
+      properties:
+        name:
+          type: string
+        article_count:
+          type: integer
+    DocumentMeta:
+      type: object
+      required:
+      - id
+      - title
+      - category
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        category:
+          type: string
+          enum:
+          - A
+          - B
+          - C
+          - D
+          - E
+          - F
+        version:
+          type: string
+        effective_from:
+          type: string
+          format: date
+        effective_to:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - ACTIVE
+          - EXPIRED
+          - CANCELLED
+        counterparty:
+          type: string
+          nullable: true
+        confidentiality:
+          type: string
+          enum:
+          - PUBLIC
+          - INTERNAL
+          - RESTRICTED
+        related_entity:
+          type: string
+          nullable: true
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              format:
+                type: string
+                enum:
+                - docx
+                - pdf
+                - html
+              size_bytes:
+                type: integer
+              sha256:
+                type: string
+    Document:
+      allOf:
+      - $ref: '#/components/schemas/DocumentMeta'
+      - type: object
+        properties:
+          signed_by:
+            type: array
+            items:
+              type: object
+              properties:
+                role:
+                  type: string
+                name:
+                  type: string
+                date:
+                  type: string
+                  format: date-time
+                method:
+                  type: string
+                  enum:
+                  - sms_otp
+                  - qep
+                  - paper
+          audit_log:
+            type: array
+            items:
+              type: object
+              properties:
+                actor:
+                  type: string
+                action:
+                  type: string
+                ts:
+                  type: string
+                  format: date-time
+    PremisesCard:
+      type: object
+      properties:
+        premises_id:
+          type: string
+          format: uuid
+        internal_code:
+          type: string
+          example: СПБ-Купчино-001
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - PUBLISHED
+          - RENTED
+          - ARCHIVED
+        address:
+          $ref: '#/components/schemas/Address'
+        cadastral_number:
+          type: string
+        owner:
+          $ref: '#/components/schemas/Person'
+        owner_representative:
+          allOf:
+          - $ref: '#/components/schemas/Person'
+          - type: object
+            properties:
+              basis_type:
+                type: string
+                enum:
+                - power_of_attorney
+                - family
+                - management_contract
+              basis_document_id:
+                type: string
+                format: uuid
+              powers:
+                type: array
+                items:
+                  type: string
+                  enum:
+                  - showing
+                  - acceptance_act
+                  - payments
+                  - termination
+        current_tenant:
+          $ref: '#/components/schemas/Person'
+        financial:
+          $ref: '#/components/schemas/FinancialBlock'
+        access:
+          type: object
+          properties:
+            entrance_code:
+              type: string
+              description: Доступно scope tenant+
+            floor:
+              type: integer
+            apartment_number:
+              type: string
+            lock_notes:
+              type: string
+            keys_location:
+              type: string
+        wifi:
+          type: object
+          properties:
+            ssid:
+              type: string
+            password:
+              type: string
+              description: Доступно scope tenant+
+            provider:
+              type: string
+            support_phone:
+              type: string
+        utilities:
+          type: object
+          properties:
+            included_in_rent:
+              type: string
+              enum:
+              - true
+              - false
+              - partial
+            personal_account:
+              type: string
+            metering_submit_url:
+              type: string
+            submit_deadline_day:
+              type: integer
+        rules:
+          type: object
+          properties:
+            quiet_hours:
+              type: string
+              example: 22:00-08:00 будни, 23:00-10:00 выходные
+            smoking:
+              type: boolean
+            pets:
+              type: boolean
+            guests:
+              type: string
+        contacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contact'
+        infrastructure:
+          type: object
+          additionalProperties: true
+        management_company:
+          type: object
+          properties:
+            name:
+              type: string
+            inn:
+              type: string
+            phones:
+              type: array
+              items:
+                type: string
+            email:
+              type: string
+              format: email
+            website:
+              type: string
+              format: uri
+        internal_data:
+          type: object
+          description: Доступно только scope staff+
+          additionalProperties: true
+    FinancialBlock:
+      type: object
+      description: 'Финансовая информация по договору.
+
+        ВАЖНО: в модели reHome ОТСУТСТВУЕТ залог. Используется сервисный платёж —
+
+        невозвратный, идёт платформе, вносится при заезде (см. ПЗ раздел 5.2).
+
+        '
+      properties:
+        contract_url:
+          type: string
+          format: uri
+        contract_start:
+          type: string
+          format: date
+        contract_end:
+          type: string
+          format: date
+        monthly_rent:
+          type: number
+        rent_due_day:
+          type: integer
+          minimum: 1
+          maximum: 31
+        service_fee:
+          type: object
+          description: Сервисный платёж — невозвратный, идёт платформе reHome
+          properties:
+            amount:
+              type: number
+            paid_at:
+              type: string
+              format: date-time
+              nullable: true
+            status:
+              type: string
+              enum:
+              - PENDING
+              - PAID
+              - FAILED
+            fiscal_receipt_url:
+              type: string
+              format: uri
+              nullable: true
+        payment_history:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              amount:
+                type: number
+              type:
+                type: string
+                enum:
+                - rent
+                - service_fee
+                - utilities
+              status:
+                type: string
+                enum:
+                - RECEIVED
+                - RELEASED
+                - DISPUTED
+        current_debt:
+          type: number
+          default: 0
+        utilities_included:
+          type: boolean
+        platform_commission_percent:
+          type: number
+          example: 7.0
+        insurance_policy:
+          type: object
+          nullable: true
+          properties:
+            number:
+              type: string
+            coverage_amount:
+              type: number
+            period_end:
+              type: string
+              format: date
+            pdf_url:
+              type: string
+              format: uri
+    PremisesCardInput:
+      type: object
+      description: Partial update — все поля опциональны
+      properties:
+        access:
+          type: object
+        wifi:
+          type: object
+        utilities:
+          type: object
+        rules:
+          type: object
+        contacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contact'
+    Address:
+      type: object
+      required:
+      - city
+      - street
+      - house_number
+      properties:
+        country:
+          type: string
+          default: RU
+        city:
+          type: string
+        street:
+          type: string
+        house_number:
+          type: string
+        post_code:
+          type: string
+        district:
+          type: string
+        metro:
+          type: string
+        location:
+          type: object
+          properties:
+            lat:
+              type: number
+            lon:
+              type: number
+    Person:
+      type: object
+      properties:
+        full_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+        person_type:
+          type: string
+          enum:
+          - individual
+          - self_employed
+          - ip
+          - legal_entity
+    Contact:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+          - owner
+          - owner_representative
+          - emergency
+          - plumber
+          - electrician
+          - management_company
+          - rehome_support
+        name:
+          type: string
+        phone:
+          type: string
+        notes:
+          type: string
+    ChatSession:
+      type: object
+      required:
+      - id
+      - created_at
+      - expires_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+        scope:
+          type: string
+        context:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    ChatMessage:
+      type: object
+      required:
+      - id
+      - role
+      - content
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          - system
+        content:
+          type: string
+        citations:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum:
+                - article
+                - document
+                - regulation
+              id:
+                type: string
+                format: uuid
+              title:
+                type: string
+              url:
+                type: string
+                format: uri
+        feedback:
+          type: object
+          nullable: true
+          properties:
+            rating:
+              type: string
+              enum:
+              - up
+              - down
+            comment:
+              type: string
+        token_count:
+          type: integer
+        duration_ms:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    SearchHit:
+      type: object
+      required:
+      - type
+      - id
+      - title
+      - score
+      properties:
+        type:
+          type: string
+          enum:
+          - article
+          - document
+          - premises_card
+          - regulation
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        snippet:
+          type: string
+          description: Фрагмент с подсветкой совпадений
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+        url:
+          type: string
+          format: uri
+    WebhookInput:
+      type: object
+      required:
+      - url
+      - events
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        secret:
+          type: string
+          description: Если не передан — генерируется
+        description:
+          type: string
+    Webhook:
+      allOf:
+      - $ref: '#/components/schemas/WebhookInput'
+      - type: object
+        properties:
+          id:
+            type: string
+            format: uuid
+          client_id:
+            type: string
+          created_at:
+            type: string
+            format: date-time
+          last_delivery_at:
+            type: string
+            format: date-time
+            nullable: true
+          last_delivery_status:
+            type: integer
+            nullable: true
+    WebhookEvent:
+      type: string
+      enum:
+      - article.published
+      - article.updated
+      - article.archived
+      - document.created
+      - document.signed
+      - chat.escalated
+      - chat.no_answer
+      - search.popular_query
+      - premises_card.updated
+      - audit.security_event
+      - collaborator.created
+      - collaborator.activated
+      - collaborator.suspended
+      - collaborator.archived
+      - collaborator.review.posted
+      - service_order.created
+      - service_order.accepted
+      - service_order.completed
+      - service_order.cancelled
+      - service_order.failed
+      - collaborator.portal_access.changed
+      - collaborator.onboarding.submitted
+    KbUser:
+      type: object
+      required:
+      - id
+      - email
+      - full_name
+      - role
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          type: string
+          enum:
+          - staff_support
+          - staff_legal
+          - staff_hr
+          - staff_admin
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Дополнительные permission-флаги поверх роли
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - SUSPENDED
+          - ARCHIVED
+        created_at:
+          type: string
+          format: date-time
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        mfa_enabled:
+          type: boolean
+    KbUserInput:
+      type: object
+      required:
+      - email
+      - full_name
+      - role
+      properties:
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          type: string
+          enum:
+          - staff_support
+          - staff_legal
+          - staff_hr
+          - staff_admin
+        permissions:
+          type: array
+          items:
+            type: string
+    AuditLogEntry:
+      type: object
+      required:
+      - id
+      - ts
+      - actor_id
+      - action
+      properties:
+        id:
+          type: string
+          format: uuid
+        ts:
+          type: string
+          format: date-time
+        actor_id:
+          type: string
+          format: uuid
+        actor_type:
+          type: string
+          enum:
+          - user
+          - m2m
+          - system
+        actor_role:
+          type: string
+        action:
+          type: string
+          description: 'Например: article.read, document.download, user.role.change'
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        ip:
+          type: string
+        user_agent:
+          type: string
+        request_id:
+          type: string
+          format: uuid
+        severity:
+          type: string
+          enum:
+          - info
+          - warning
+          - error
+          - critical
+        details:
+          type: object
+          additionalProperties: true
+          description: Структурированные дополнительные поля события
+    PersonalDataRequest:
+      type: object
+      required:
+      - id
+      - type
+      - status
+      - subject_id
+      - created_at
+      - due_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum:
+          - provide
+          - correct
+          - delete
+          - transfer
+          description: Тип запроса по ФЗ-152
+        status:
+          type: string
+          enum:
+          - NEW
+          - IN_PROGRESS
+          - COMPLETED
+          - REJECTED
+          - OVERDUE
+        subject_id:
+          type: string
+          format: uuid
+          description: ID субъекта ПДн (пользователя rehome.one)
+        subject_email:
+          type: string
+          format: email
+        subject_phone:
+          type: string
+        description:
+          type: string
+        assigned_to:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        due_at:
+          type: string
+          format: date-time
+          description: Срок ответа — created_at + 30 дней по ФЗ-152
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_note:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            type: string
+            format: uuid
+    SecurityIncident:
+      type: object
+      required:
+      - id
+      - severity
+      - status
+      - detected_at
+      - incident_type
+      properties:
+        id:
+          type: string
+          format: uuid
+        incident_type:
+          type: string
+          description: 'Например: access_violation, suspected_data_leak, brute_force, prompt_injection'
+        severity:
+          type: string
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+        status:
+          type: string
+          enum:
+          - OPEN
+          - INVESTIGATING
+          - RESOLVED
+          - FALSE_POSITIVE
+        detected_at:
+          type: string
+          format: date-time
+        detected_by:
+          type: string
+          enum:
+          - monitoring
+          - audit
+          - user_report
+          - staff
+          - automated_scan
+        affected_resources:
+          type: array
+          items:
+            type: object
+        rkn_notification_required:
+          type: boolean
+          description: Требуется уведомление РКН по ФЗ-152 (24ч факт, 72ч состав)
+        rkn_notified_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_note:
+          type: string
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+    SystemConfig:
+      type: object
+      properties:
+        rate_limits:
+          type: object
+          properties:
+            guest_per_minute:
+              type: integer
+            user_per_minute:
+              type: integer
+            m2m_per_minute:
+              type: integer
+            chat_messages_per_5min:
+              type: integer
+        feature_flags:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: 'Например: chat_enabled, internal_chat_enabled, partner_webhooks_enabled'
+        llm_config:
+          type: object
+          properties:
+            active_provider:
+              type: string
+            fallback_provider:
+              type: string
+            ab_test_split_percent:
+              type: integer
+              minimum: 0
+              maximum: 100
+            max_context_tokens:
+              type: integer
+            temperature:
+              type: number
+        moderation:
+          type: object
+          properties:
+            auto_publish_threshold:
+              type: number
+            require_review_for_categories:
+              type: array
+              items:
+                type: string
+        webhooks:
+          type: object
+          properties:
+            max_retries:
+              type: integer
+            timeout_seconds:
+              type: integer
+    LlmProvider:
+      type: object
+      required:
+      - id
+      - name
+      - status
+      properties:
+        id:
+          type: string
+          description: yandexgpt-pro, gigachat-pro, saiga-local и т.п.
+        name:
+          type: string
+        vendor:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+          - EXPERIMENTAL
+        is_current:
+          type: boolean
+        cost_per_1m_input_tokens_rub:
+          type: number
+        cost_per_1m_output_tokens_rub:
+          type: number
+        max_context_tokens:
+          type: integer
+        supports_streaming:
+          type: boolean
+        last_health_check:
+          type: string
+          format: date-time
+        health_status:
+          type: string
+          enum:
+          - ok
+          - degraded
+          - down
+    EvalRun:
+      type: object
+      required:
+      - id
+      - started_at
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum:
+          - RUNNING
+          - COMPLETED
+          - FAILED
+        providers:
+          type: array
+          items:
+            type: string
+        test_set:
+          type: string
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              provider:
+                type: string
+              composite_score:
+                type: number
+              answer_correctness:
+                type: number
+              faithfulness:
+                type: number
+              citation_accuracy:
+                type: number
+              refusal_correctness:
+                type: number
+              avg_latency_ms:
+                type: integer
+              cost_per_query_rub:
+                type: number
+    AdminStats:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        requests:
+          type: object
+          properties:
+            total:
+              type: integer
+            by_endpoint:
+              type: object
+              additionalProperties:
+                type: integer
+            by_status:
+              type: object
+              additionalProperties:
+                type: integer
+            error_rate_percent:
+              type: number
+        chat:
+          type: object
+          properties:
+            sessions:
+              type: integer
+            messages:
+              type: integer
+            containment_rate:
+              type: number
+              description: Доля сессий без эскалации
+            avg_rating:
+              type: number
+            no_answer_count:
+              type: integer
+            escalations:
+              type: integer
+        content:
+          type: object
+          properties:
+            total_articles:
+              type: integer
+            total_documents:
+              type: integer
+            pending_reviews:
+              type: integer
+        security:
+          type: object
+          properties:
+            open_incidents:
+              type: integer
+            critical_incidents:
+              type: integer
+            overdue_pd_requests:
+              type: integer
+    CollaboratorType:
+      type: string
+      enum:
+      - management_company
+      - emergency_service
+      - repair_handyman
+      - cleaning
+      - moving
+      - key_delivery
+      - insurance
+      - payment_partner
+      - kyc_provider
+      - edo_provider
+      - sms_voice
+      - it_infrastructure
+      - legal_consultant
+      - other
+      description: Тип коллаборанта. Подробно — ПЗ База знаний v1.3 раздел 10.2
+    CollaboratorFinancialGroup:
+      type: string
+      enum:
+      - A
+      - B
+      - C
+      - D
+      description: A — мы платим коллаборанту; B — пользователь через нас; C — реферальная; D — бесплатные контакты (УК, аварийки)
+    CollaboratorStatus:
+      type: string
+      enum:
+      - DRAFT
+      - PENDING_REVIEW
+      - ACTIVE
+      - SUSPENDED
+      - ARCHIVED
+    PortalAccessLevel:
+      type: string
+      enum:
+      - NONE
+      - LIGHT
+      - FULL
+      description: NONE — без личного кабинета; LIGHT — просмотр заявок; FULL — полный дашборд
+    CollaboratorSummary:
+      type: object
+      required:
+      - id
+      - name
+      - collaborator_type
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        brand_name:
+          type: string
+          nullable: true
+        collaborator_type:
+          $ref: '#/components/schemas/CollaboratorType'
+        financial_group:
+          $ref: '#/components/schemas/CollaboratorFinancialGroup'
+        status:
+          $ref: '#/components/schemas/CollaboratorStatus'
+        service_area:
+          type: object
+          properties:
+            scope:
+              type: string
+              enum:
+              - address
+              - district
+              - city
+              - region
+              - country
+            value:
+              type: string
+        rating:
+          type: number
+          minimum: 0
+          maximum: 5
+          nullable: true
+        is_24_7:
+          type: boolean
+        has_api:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    Collaborator:
+      allOf:
+      - $ref: '#/components/schemas/CollaboratorSummary'
+      - type: object
+        properties:
+          legal_entity_type:
+            type: string
+            enum:
+            - individual
+            - self_employed
+            - ip
+            - legal_entity
+          inn:
+            type: string
+            nullable: true
+          ogrn:
+            type: string
+            nullable: true
+          kpp:
+            type: string
+            nullable: true
+          counterparty_check:
+            type: object
+            nullable: true
+            properties:
+              status:
+                type: string
+                enum:
+                - CLEAN
+                - YELLOW
+                - RED
+              checked_at:
+                type: string
+                format: date-time
+              expires_at:
+                type: string
+                format: date-time
+          contacts:
+            type: array
+            items:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                  - phone
+                  - email
+                  - telegram
+                  - whatsapp
+                  - emergency
+                  - dispatcher
+                value:
+                  type: string
+                person_name:
+                  type: string
+                person_role:
+                  type: string
+          working_hours:
+            type: object
+            properties:
+              is_24_7:
+                type: boolean
+              schedule:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    days:
+                      type: string
+                    from:
+                      type: string
+                    to:
+                      type: string
+              timezone:
+                type: string
+          website:
+            type: string
+            format: uri
+            nullable: true
+          responsible_internal:
+            type: object
+            nullable: true
+            description: Сотрудник reHome — ответственный за этого коллаборанта
+            properties:
+              user_id:
+                type: string
+                format: uuid
+              full_name:
+                type: string
+              role:
+                type: string
+          contract_document_id:
+            type: string
+            format: uuid
+            nullable: true
+            description: Ссылка на документ из категории C хранилища
+          financial_terms:
+            type: object
+            nullable: true
+            description: Заполняется для групп A/B/C, для D — null
+            properties:
+              pricing_model:
+                type: string
+                enum:
+                - fixed
+                - hourly
+                - subscription
+                - commission_percent
+                - pay_per_use
+                - referral
+              commission_percent:
+                type: number
+                nullable: true
+              currency:
+                type: string
+                default: RUB
+              minimum_amount:
+                type: number
+                nullable: true
+              payment_method:
+                type: string
+              notes:
+                type: string
+          api_integration:
+            type: object
+            nullable: true
+            properties:
+              endpoint:
+                type: string
+                format: uri
+              auth_type:
+                type: string
+                enum:
+                - api_key
+                - oauth2
+                - basic
+                - mtls
+              api_version:
+                type: string
+              docs_url:
+                type: string
+                format: uri
+              webhook_url:
+                type: string
+                format: uri
+                nullable: true
+          sla:
+            type: object
+            nullable: true
+            properties:
+              response_time_minutes:
+                type: integer
+              resolution_time_hours:
+                type: integer
+              uptime_percent:
+                type: number
+              penalties:
+                type: string
+          fallback_collaborator_id:
+            type: string
+            format: uuid
+            nullable: true
+          portal_access_level:
+            $ref: '#/components/schemas/PortalAccessLevel'
+          created_at:
+            type: string
+            format: date-time
+          audit_log:
+            type: array
+            description: Только для staff_admin
+            items:
+              type: object
+              properties:
+                actor:
+                  type: string
+                action:
+                  type: string
+                ts:
+                  type: string
+                  format: date-time
+                details:
+                  type: object
+                  additionalProperties: true
+          portal_access_history:
+            type: array
+            description: История смены portal_access_level
+            items:
+              type: object
+              properties:
+                from_level:
+                  $ref: '#/components/schemas/PortalAccessLevel'
+                to_level:
+                  $ref: '#/components/schemas/PortalAccessLevel'
+                changed_at:
+                  type: string
+                  format: date-time
+                changed_by:
+                  type: string
+                  enum:
+                  - collaborator
+                  - rehome_operator
+                  - system
+                  description: Кто инициировал смену
+                reason:
+                  type: string
+          onboarding_source:
+            type: string
+            nullable: true
+            enum:
+            - self_service
+            - invited_by_staff
+            - auto_from_dadata
+            - imported
+            description: Как коллаборант появился в системе
+    CollaboratorInput:
+      type: object
+      required:
+      - name
+      - collaborator_type
+      - financial_group
+      - legal_entity_type
+      - service_area
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        brand_name:
+          type: string
+          nullable: true
+        collaborator_type:
+          $ref: '#/components/schemas/CollaboratorType'
+        financial_group:
+          $ref: '#/components/schemas/CollaboratorFinancialGroup'
+        legal_entity_type:
+          type: string
+          enum:
+          - individual
+          - self_employed
+          - ip
+          - legal_entity
+        inn:
+          type: string
+        ogrn:
+          type: string
+        kpp:
+          type: string
+        service_area:
+          type: object
+          properties:
+            scope:
+              type: string
+              enum:
+              - address
+              - district
+              - city
+              - region
+              - country
+            value:
+              type: string
+        contacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        working_hours:
+          type: object
+        website:
+          type: string
+          format: uri
+        responsible_internal_user_id:
+          type: string
+          format: uuid
+        contract_document_id:
+          type: string
+          format: uuid
+        financial_terms:
+          type: object
+        api_integration:
+          type: object
+        sla:
+          type: object
+        portal_access_level:
+          $ref: '#/components/schemas/PortalAccessLevel'
+    PremisesCollaborator:
+      type: object
+      required:
+      - premises_id
+      - collaborator_id
+      - role
+      properties:
+        premises_id:
+          type: string
+          format: uuid
+        collaborator_id:
+          type: string
+          format: uuid
+        collaborator_name:
+          type: string
+          description: Денормализованное имя для удобства
+        collaborator_type:
+          $ref: '#/components/schemas/CollaboratorType'
+        role:
+          type: string
+          description: 'Назначение: default_uk, emergency_water, plumber и т.п.'
+        priority:
+          type: integer
+          minimum: 1
+          description: 1 — основной, 2+ — резерв
+        notes:
+          type: string
+          nullable: true
+        assigned_at:
+          type: string
+          format: date-time
+        assigned_by:
+          type: string
+          format: uuid
+    PremisesCollaboratorInput:
+      type: object
+      required:
+      - collaborator_id
+      - role
+      properties:
+        collaborator_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+        priority:
+          type: integer
+          default: 1
+        notes:
+          type: string
+    CollaboratorReview:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        collaborator_id:
+          type: string
+          format: uuid
+        reviewer_id:
+          type: string
+          format: uuid
+        reviewer_name:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        order_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        response:
+          type: object
+          nullable: true
+          description: Ответ коллаборанта на отзыв
+          properties:
+            text:
+              type: string
+            created_at:
+              type: string
+              format: date-time
+    CollaboratorMetrics:
+      type: object
+      properties:
+        collaborator_id:
+          type: string
+          format: uuid
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+        orders:
+          type: object
+          properties:
+            total:
+              type: integer
+            completed:
+              type: integer
+            cancelled:
+              type: integer
+            failed:
+              type: integer
+        revenue:
+          type: object
+          description: Только для финансовой группы B
+          properties:
+            gross_rub:
+              type: number
+            platform_commission_rub:
+              type: number
+            collaborator_payout_rub:
+              type: number
+        sla_compliance:
+          type: object
+          properties:
+            avg_response_time_minutes:
+              type: number
+            sla_breach_count:
+              type: integer
+        quality:
+          type: object
+          properties:
+            avg_rating:
+              type: number
+            reviews_count:
+              type: integer
+            complaints_count:
+              type: integer
+    ServiceOrderStatus:
+      type: string
+      enum:
+      - DRAFT
+      - PENDING_COLLABORATOR
+      - ACCEPTED
+      - IN_PROGRESS
+      - COMPLETED
+      - CANCELLED
+      - FAILED
+      - DISPUTED
+    ServiceOrder:
+      type: object
+      required:
+      - id
+      - collaborator_id
+      - service_type
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        collaborator_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        premises_id:
+          type: string
+          format: uuid
+          nullable: true
+        booking_id:
+          type: string
+          format: uuid
+          nullable: true
+        service_type:
+          type: string
+        service_description:
+          type: string
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ServiceOrderStatus'
+        price_rub:
+          type: number
+        commission_rub:
+          type: number
+        payment_status:
+          type: string
+          enum:
+          - HOLD
+          - PAID
+          - REFUNDED
+          - PARTIAL_REFUND
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        collaborator_notes:
+          type: string
+          nullable: true
+        customer_notes:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            type: string
+            format: uuid
+    ServiceOrderInput:
+      type: object
+      required:
+      - collaborator_id
+      - service_type
+      properties:
+        collaborator_id:
+          type: string
+          format: uuid
+        premises_id:
+          type: string
+          format: uuid
+        booking_id:
+          type: string
+          format: uuid
+        service_type:
+          type: string
+        service_description:
+          type: string
+        scheduled_at:
+          type: string
+          format: date-time
+        customer_notes:
+          type: string
+  responses:
+    BadRequest:
+      description: Ошибка валидации
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Запрещено по правам
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Не найдено (или нет прав)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Конфликт версий или дубликат
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimit:
+      description: Превышен лимит запросов
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
