@@ -165,7 +165,7 @@ jobs:
             exit 1
           fi
 
-      - name: No except: pass
+      - name: "No except: pass"
         run: |
           if grep -rE "except.*:\s*$" -A 1 --include='*.py' | grep "pass"; then
             echo "❌ except: pass — кардинальный костыль"
