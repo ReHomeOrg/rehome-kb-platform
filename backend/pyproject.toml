@@ -27,15 +27,23 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    # Project is bilingual ru/en: docstrings and comments use Cyrillic that
-    # visually resembles Latin (С/с/В/в/Н/а etc.). This is by design, not a
-    # typo. RUF002 (docstrings) and RUF003 (comments) flag every such char.
+    # Project is bilingual ru/en: strings, docstrings, comments use Cyrillic
+    # that visually resembles Latin (С/с/В/в/Н/а etc.). This is by design.
+    # RUF001 (string literals), RUF002 (docstrings), RUF003 (comments).
+    "RUF001",
     "RUF002",
     "RUF003",
+    # FastAPI's idiomatic pattern uses `Depends()` in default arguments,
+    # which flake8-bugbear flags. This is the standard practice — explicitly
+    # acknowledged in FastAPI docs.
+    "B008",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+# Tests: pytest fixtures pass via argument-name dependency injection;
+# pytest "uses" them by virtue of being in the signature, even if not
+# referenced in the body. ARG001 (unused argument) is not meaningful here.
+"tests/**" = ["S101", "ARG001"]
 
 [tool.mypy]
 python_version = "3.12"
