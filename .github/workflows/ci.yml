@@ -100,14 +100,27 @@ jobs:
       - name: Validate OpenAPI 3.1
         run: npx @redocly/cli lint docs/handoff/01_postanovka/04_openapi.yaml
 
+      # oasdiff — Go-tool, не npm package. Раньше использовался `npx oasdiff`,
+      # который детерминированно падал с npm 404 (Issue #13). Переход на
+      # setup-go + go install: пиннинг на тег v1.15.3 — supply-chain hygiene.
+      - name: Setup Go (for oasdiff)
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Install oasdiff
+        if: github.event_name == 'pull_request'
+        run: go install github.com/oasdiff/oasdiff@v1.15.3
+
       - name: Check OpenAPI breaking changes
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin ${{ github.base_ref }}
-          npx oasdiff breaking \
+          oasdiff breaking \
             origin/${{ github.base_ref }}:docs/handoff/01_postanovka/04_openapi.yaml \
-            docs/handoff/01_postanovka/04_openapi.yaml || \
-            (echo "Breaking changes detected — require ADR and Architect approval" && exit 1)
+            docs/handoff/01_postanovka/04_openapi.yaml
 
   # ============================================================
   # Security scan: секреты, уязвимости зависимостей
