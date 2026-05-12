@@ -17,10 +17,12 @@ from src.api.articles.authorization import ensure_can_write_access_level
 from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.articles.schemas import (
+    ArticleHistoryResponse,
     ArticleInput,
     ArticleResponse,
     ArticlesListResponse,
     ArticleSummary,
+    ArticleVersionResponse,
     PaginationInfo,
 )
 from src.api.auth.dependency import (
@@ -221,7 +223,7 @@ async def create_article(
     """
     ensure_can_write_access_level(payload.access_level, access_levels)
 
-    article = await repo.create(payload)
+    article = await repo.create(payload, actor_sub=claims["sub"])
 
     # NB: audit log вне транзакции — best-effort на E4.1. Risk
     # документирован в Issue #27 / Plan; mitigation для compliance —
@@ -290,7 +292,7 @@ async def replace_article(
     # что target ему недоступен; источник статьи остаётся опаковым.
     ensure_can_write_access_level(payload.access_level, access_levels)
 
-    updated = await repo.update(slug, payload, access_levels)
+    updated = await repo.update(slug, payload, access_levels, actor_sub=claims["sub"])
     if updated is None:
         # Source check (ADR-0003 mask): нет статьи ИЛИ scope её не видит.
         raise HTTPException(
@@ -346,7 +348,7 @@ async def archive_article(
     Идемпотентность: DELETE на уже-ARCHIVED → 204 без мутации (per RFC 7231).
     Audit пишется с `was_status='ARCHIVED'` — сигнал повторной DELETE.
     """
-    result = await repo.archive(slug, access_levels)
+    result = await repo.archive(slug, access_levels, actor_sub=claims["sub"])
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -360,3 +362,57 @@ async def archive_article(
         was_access_level=was_access_level,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{slug}/history",
+    response_model=ArticleHistoryResponse,
+    summary="История изменений статьи",
+    responses={
+        404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
+    },
+)
+async def get_article_history(
+    slug: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=SLUG_PATTERN,
+        description="Канонический идентификатор статьи (ADR-0006)",
+    ),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ArticleRepository = Depends(get_article_repository),
+) -> ArticleHistoryResponse:
+    """История версий статьи в порядке `version DESC`.
+
+    Visibility наследуется от parent article (ADR-0003 source-mask):
+    `repo.list_versions` сначала вызывает `get_by_slug`, и если scope не
+    видит article → None → 404. Это значит, что history non-PUBLISHED
+    статьи скрыта (даже для writer'а) — endpoint следует публичному read
+    инварианту. Editor-history (`/staff/.../history`) — отдельный endpoint
+    в будущем (E4.x).
+    """
+    if not access_levels:
+        # Defence-in-depth (как в `GET /articles/{slug}`).
+        raise UnauthorizedError(detail="No access levels resolved")
+
+    versions = await repo.list_versions(slug, access_levels)
+    if versions is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Article not found",
+        )
+
+    # Мапим `author_sub → author` явно для соответствия OpenAPI.
+    return ArticleHistoryResponse(
+        data=[
+            ArticleVersionResponse(
+                version=v.version,
+                author=v.author_sub,
+                changed_at=v.changed_at,
+                event=v.event,
+                changes_summary=v.changes_summary,
+            )
+            for v in versions
+        ]
+    )
