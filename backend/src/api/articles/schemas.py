@@ -160,3 +160,47 @@ class ArticlePatch(BaseModel):
     # `status` пока str (drift OpenAPI, как audience в ArticleInput) —
     # backlog #28 для enum-rollout. DB CHECK всё равно отсечёт невалид.
     status: str | None = Field(default=None, min_length=1, max_length=16)
+
+
+class SearchInput(BaseModel):
+    """Body для `POST /api/v1/articles/search` (OpenAPI E2.5a #46).
+
+    `q` — обязателен, 1..500 chars. Пустая строка отвергается через
+    `min_length=1`; whitespace-only отвергается через validator.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    q: str = Field(min_length=1, max_length=500)
+    cursor: str | None = Field(default=None)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+class SearchHit(BaseModel):
+    """SearchHit per OpenAPI (схема 3443-3473) минимальное подмножество.
+
+    `type='article'` для E2.5a (document/premises_card/regulation — другие
+    домены). `score` — `ts_rank` от 0; OpenAPI говорит 0..1, raw `ts_rank`
+    обычно < 1 на типичных запросах; clip к 1.0 в роутере если превышает.
+
+    **Snippet WARNING**: `ts_headline` оборачивает совпадения в `<b>...</b>`
+    но НЕ escape'нет existing HTML в `body_markdown`. Frontend ОБЯЗАН
+    sanitize (например, через DOMPurify) перед `dangerouslySetInnerHTML`.
+    """
+
+    type: str = "article"
+    id: UUID
+    title: str
+    snippet: str | None = None
+    score: float = Field(ge=0, le=1)
+
+
+class ArticlesSearchResponse(BaseModel):
+    """Ответ `POST /api/v1/articles/search`.
+
+    Cursor стабильный только для **того же `q`**: rank query-dependent;
+    при смене query — fresh search (client должен отбрасывать cursor).
+    """
+
+    data: list[SearchHit]
+    pagination: PaginationInfo

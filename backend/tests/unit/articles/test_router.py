@@ -1602,3 +1602,170 @@ def test_patch_articles_actor_sub_from_jwt_not_payload(
     finally:
         _cleanup_session_override()
     assert response.status_code == 422
+
+
+# ============================================================
+# POST /api/v1/articles/search — Postgres FTS (E2.5a #46)
+# ============================================================
+
+
+def _override_search(
+    monkeypatch: pytest.MonkeyPatch,
+    rows: list[tuple[Any, ...]],
+    has_more: bool = False,
+    capture: dict[str, Any] | None = None,
+) -> None:
+    """Подменяет ArticleRepository.search."""
+
+    async def _fake(
+        self: Any,
+        q: str,
+        access_levels: frozenset[Any],
+        *,
+        cursor: Any = None,
+        limit: int = 10,
+    ) -> tuple[list[Any], bool]:
+        if capture is not None:
+            capture["q"] = q
+            capture["access_levels"] = access_levels
+            capture["cursor"] = cursor
+            capture["limit"] = limit
+        return rows, has_more
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.search", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_search_returns_200_with_data(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        (uuid4(), "Договор аренды", "<b>Договор</b> аренды...", 0.85),
+        (uuid4(), "Другой документ", "...<b>договор</b>...", 0.42),
+    ]
+    _override_search(monkeypatch, rows)
+    try:
+        response = client.post("/api/v1/articles/search", json={"q": "договор"})
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["data"]) == 2
+    assert body["data"][0]["type"] == "article"
+    assert body["data"][0]["title"] == "Договор аренды"
+    assert body["data"][0]["score"] == 0.85
+    assert "<b>" in body["data"][0]["snippet"]
+
+
+def test_search_empty_q_returns_422(client: TestClient) -> None:
+    response = client.post("/api/v1/articles/search", json={"q": ""})
+    assert response.status_code == 422
+
+
+def test_search_whitespace_only_q_returns_422(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_search(monkeypatch, [])
+    try:
+        response = client.post("/api/v1/articles/search", json={"q": "   "})
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 422
+
+
+def test_search_q_too_long_returns_422(client: TestClient) -> None:
+    response = client.post("/api/v1/articles/search", json={"q": "x" * 501})
+    assert response.status_code == 422
+
+
+def test_search_limit_out_of_range_returns_422(client: TestClient) -> None:
+    response = client.post("/api/v1/articles/search", json={"q": "x", "limit": 51})
+    assert response.status_code == 422
+
+
+def test_search_score_clipped_to_one(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ts_rank теоретически > 1; router clip'ит к 1.0."""
+    rows = [(uuid4(), "T", "snip", 1.5)]  # > 1
+    _override_search(monkeypatch, rows)
+    try:
+        response = client.post("/api/v1/articles/search", json={"q": "x"})
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+    assert response.json()["data"][0]["score"] == 1.0
+
+
+def test_search_returns_cursor_when_has_more(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [(uuid4(), "T", "s", 0.5)]
+    _override_search(monkeypatch, rows, has_more=True)
+    try:
+        response = client.post("/api/v1/articles/search", json={"q": "x", "limit": 1})
+    finally:
+        _cleanup_session_override()
+    body = response.json()
+    assert body["pagination"]["has_more"] is True
+    assert isinstance(body["pagination"]["cursor_next"], str)
+    assert len(body["pagination"]["cursor_next"]) > 0
+
+
+def test_search_invalid_cursor_returns_400(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_search(monkeypatch, [])
+    try:
+        response = client.post(
+            "/api/v1/articles/search",
+            json={"q": "x", "cursor": "это-не-base64-©®"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 400
+
+
+def test_search_passes_access_levels_from_dependency(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_search(monkeypatch, [], capture=capture)
+    try:
+        # Без токена → guest → access_levels = {PUBLIC}.
+        client.post("/api/v1/articles/search", json={"q": "x"})
+    finally:
+        _cleanup_session_override()
+    assert {lvl.value for lvl in capture["access_levels"]} == {"PUBLIC"}
+
+
+def test_search_default_limit_is_10(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_search(monkeypatch, [], capture=capture)
+    try:
+        client.post("/api/v1/articles/search", json={"q": "x"})
+    finally:
+        _cleanup_session_override()
+    assert capture["limit"] == 10
+
+
+def test_search_extra_field_rejected(client: TestClient) -> None:
+    """`extra='forbid'` — unknown поля → 422."""
+    response = client.post("/api/v1/articles/search", json={"q": "x", "random": "field"})
+    assert response.status_code == 422

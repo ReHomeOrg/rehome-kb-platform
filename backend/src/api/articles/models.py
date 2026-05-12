@@ -8,8 +8,18 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    Computed,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,6 +85,19 @@ class Article(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    # FTS search vector (E2.5a #46) — Postgres generated STORED column.
+    # Stemming через `russian` config; weights: title=A, category=B, body=C.
+    # Tags/summary — backlog (см. migration 0006 docstring).
+    search_vector: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('russian', coalesce(title, '')), 'A') || "
+            "setweight(to_tsvector('russian', coalesce(category, '')), 'B') || "
+            "setweight(to_tsvector('russian', coalesce(body_markdown, '')), 'C')",
+            persisted=True,
+        ),
     )
 
     __table_args__ = (
