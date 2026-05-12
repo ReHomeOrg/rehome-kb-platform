@@ -12,7 +12,8 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import literal, select, tuple_
+from sqlalchemy import cast, literal, select, tuple_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,6 +91,7 @@ class ArticleRepository:
         category: str | None = None,
         audience: str | None = None,
         language: str | None = None,
+        tags: list[str] | None = None,
         cursor: tuple[datetime, UUID] | None = None,
         limit: int = 20,
     ) -> tuple[list[Article], bool]:
@@ -99,8 +101,13 @@ class ArticleRepository:
         - `status = 'PUBLISHED'` — DRAFT/ARCHIVED скрыты на SQL-уровне.
         - `access_level IN (:allowed)` — ADR-0003 critical invariant.
 
-        Опциональные фильтры: `category`, `audience`, `language` (если None
-        — не добавляем условие, не используем `OR ... IS NULL`).
+        Опциональные фильтры: `category`, `audience`, `language`, `tags`
+        (если None / пустой list — не добавляем условие).
+
+        `tags` — JSONB AND-semantics: статья должна содержать ВСЕ
+        переданные теги (`tags @> ARRAY[...]::jsonb`). GIN-индекс
+        `ix_articles_tags_gin` ускоряет containment-запросы. Сравнение
+        case-sensitive — нормализация tags (lowercase/stemming) backlog.
 
         Пагинация — keyset по композитному ключу `(updated_at DESC, id DESC)`.
         Если `cursor` задан, добавляется row-value предикат
@@ -126,6 +133,11 @@ class ArticleRepository:
             stmt = stmt.where(Article.audience == audience)
         if language is not None:
             stmt = stmt.where(Article.language == language)
+        if tags:
+            # JSONB `@>` containment — AND-semantics. Параметризуется через
+            # bind params (литералы tags не попадают в скомпилированный SQL).
+            # GIN-индекс `ix_articles_tags_gin` (jsonb_path_ops) ускоряет.
+            stmt = stmt.where(Article.tags.op("@>")(cast(tags, JSONB)))
         if cursor is not None:
             cursor_updated_at, cursor_id = cursor
             # `literal(...)` оборачивает Python-значения в ColumnElement —

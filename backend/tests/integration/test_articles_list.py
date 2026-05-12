@@ -195,3 +195,87 @@ def test_list_pagination_cursor_flow(
 def test_list_invalid_cursor_returns_400(kb_client: httpx.Client) -> None:
     response = kb_client.get("/api/v1/articles?cursor=это-не-base64-©")
     assert response.status_code == 400
+
+
+# ============================================================
+# tags filter (E2.4)
+# ============================================================
+
+
+@pytest.fixture
+async def seed_tagged_articles(
+    db: asyncpg.Connection,
+) -> AsyncIterator[dict[str, str]]:
+    """Статьи с разными tags для проверки фильтра."""
+    seeded: dict[str, str] = {}
+    rows = [
+        # (key, slug, tags)
+        ("dogovor_naimatel", "договор + наниматель", '["договор", "наниматель"]'),
+        ("dogovor_landlord", "договор + landlord", '["договор", "landlord"]'),
+        ("only_dogovor", "только договор", '["договор"]'),
+        ("no_match", "другие теги", '["payments", "fee"]'),
+    ]
+    for key, title, tags_json in rows:
+        slug = f"e24-{key}-{uuid4().hex[:8]}"
+        await db.execute(
+            """
+            INSERT INTO articles
+                (slug, title, body_markdown, audience, category, access_level,
+                 status, tags)
+            VALUES ($1, $2, 'b', 'all', 'guide', 'PUBLIC', 'PUBLISHED', $3::jsonb)
+            """,
+            slug,
+            title,
+            tags_json,
+        )
+        seeded[key] = slug
+    yield seeded
+    for slug in seeded.values():
+        await db.execute("DELETE FROM articles WHERE slug = $1", slug)
+
+
+@pytest.mark.integration
+def test_list_filter_by_single_tag(
+    kb_client: httpx.Client, seed_tagged_articles: dict[str, str]
+) -> None:
+    """`?tags=договор` → статьи с тегом договор (3 из 4)."""
+    response = kb_client.get("/api/v1/articles?tags=договор&limit=100")
+    assert response.status_code == 200
+    slugs = _slugs(response.json())
+    assert seed_tagged_articles["dogovor_naimatel"] in slugs
+    assert seed_tagged_articles["dogovor_landlord"] in slugs
+    assert seed_tagged_articles["only_dogovor"] in slugs
+    assert seed_tagged_articles["no_match"] not in slugs
+
+
+@pytest.mark.integration
+def test_list_filter_by_multiple_tags_and_semantics(
+    kb_client: httpx.Client, seed_tagged_articles: dict[str, str]
+) -> None:
+    """`?tags=договор,наниматель` → статья ДОЛЖНА иметь оба тега (AND)."""
+    response = kb_client.get("/api/v1/articles?tags=договор,наниматель&limit=100")
+    assert response.status_code == 200
+    slugs = _slugs(response.json())
+    # Только статья с обоими тегами.
+    assert seed_tagged_articles["dogovor_naimatel"] in slugs
+    assert seed_tagged_articles["dogovor_landlord"] not in slugs
+    assert seed_tagged_articles["only_dogovor"] not in slugs
+
+
+@pytest.mark.integration
+def test_list_filter_by_nonexistent_tag_returns_empty(
+    kb_client: httpx.Client, seed_tagged_articles: dict[str, str]
+) -> None:
+    response = kb_client.get("/api/v1/articles?tags=nonexistent-tag-xyz&limit=100")
+    assert response.status_code == 200
+    slugs = _slugs(response.json())
+    for slug in seed_tagged_articles.values():
+        assert slug not in slugs
+
+
+@pytest.mark.integration
+def test_list_filter_tags_too_many_returns_422(kb_client: httpx.Client) -> None:
+    """>10 тегов → 422."""
+    tags = ",".join(f"tag{i}" for i in range(11))
+    response = kb_client.get(f"/api/v1/articles?tags={tags}")
+    assert response.status_code == 422
