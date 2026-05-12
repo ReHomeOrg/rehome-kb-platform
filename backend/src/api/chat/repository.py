@@ -243,21 +243,42 @@ class ChatRepository:
         self,
         message_id: UUID,
         *,
+        session_id: UUID,
+        user_id: UUID | None = None,
+        session_token: UUID | None = None,
         rating: str,
         comment: str | None = None,
     ) -> ChatMessage | None:
-        """Установить feedback на message (E3.5 endpoint).
+        """Установить feedback на message в session (E3.5 #69).
 
-        **Precondition**: caller обязан проверить, что message принадлежит
-        session с правильным owner. Этот метод — internal storage helper.
+        Двухступенчатая авторизация:
+        1. Owner-gate session через `get_session_by_owner` (None → return).
+        2. message принадлежит указанной session (`WHERE session_id =`).
 
-        Возвращает None если message_id не существует.
+        404 mask: out-of-scope session ИЛИ nonexistent message ИЛИ
+        cross-session message_id — все возвращают None.
+
+        Idempotent: overwrite existing feedback без 409.
         """
-        stmt = select(ChatMessage).where(ChatMessage.id == message_id).limit(1)
+        session = await self.get_session_by_owner(
+            session_id, user_id=user_id, session_token=session_token
+        )
+        if session is None:
+            return None
+
+        stmt = (
+            select(ChatMessage)
+            .where(
+                ChatMessage.id == message_id,
+                ChatMessage.session_id == session_id,
+            )
+            .limit(1)
+        )
         result = await self._session.execute(stmt)
         message = result.scalar_one_or_none()
         if message is None:
             return None
+
         payload: dict[str, Any] = {"rating": rating}
         if comment is not None:
             payload["comment"] = comment
