@@ -1403,3 +1403,202 @@ def test_get_history_empty_array_when_no_versions(
         _cleanup_session_override()
     assert response.status_code == 200
     assert response.json() == {"data": []}
+
+
+# ============================================================
+# PATCH /api/v1/articles/{slug} (E4.5 #38)
+# ============================================================
+
+
+def _override_patch(
+    monkeypatch: pytest.MonkeyPatch,
+    return_value: tuple[Article, str, str] | None,
+    capture: dict[str, Any] | None = None,
+) -> None:
+    """Подменяет ArticleRepository.patch."""
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        access_levels: frozenset[Any],
+        *,
+        actor_sub: str,
+    ) -> tuple[Article, str, str] | None:
+        if capture is not None:
+            capture["slug"] = slug
+            capture["actor_sub"] = actor_sub
+            capture["payload"] = payload
+        return return_value
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.patch", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_patch_articles_401_without_token(client: TestClient) -> None:
+    response = client.patch("/api/v1/articles/slug", json={"title": "x"})
+    assert response.status_code == 401
+
+
+def test_patch_articles_403_when_tenant_scope(
+    client: TestClient, make_jwt: Callable[..., str]
+) -> None:
+    token = make_jwt(roles=["tenant"])
+    response = client.patch(
+        "/api/v1/articles/slug",
+        json={"title": "x"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_patch_articles_200_updates_title(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    fake_article.title = "New Title"
+    _override_patch(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="admin-user")
+        response = client.patch(
+            "/api/v1/articles/some-slug",
+            json={"title": "New Title"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200, response.text
+    assert response.json()["title"] == "New Title"
+
+
+def test_patch_articles_404_when_article_not_found(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_patch(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.patch(
+            "/api/v1/articles/missing",
+            json={"title": "x"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "forbidden_field",
+    [
+        "access_level",
+        "slug",
+        "category",
+        "audience",
+        "language",
+        "short_answer",
+    ],
+)
+def test_patch_articles_422_when_forbidden_field_in_payload(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    forbidden_field: str,
+) -> None:
+    """`extra='forbid'`: попытка передать запрещённое поле → 422.
+
+    Особо `access_level` — security: блокирует тихую эскалацию visibility
+    через PATCH (только PUT с явным target check может менять access_level).
+    """
+    token = make_jwt(roles=["staff_admin"])
+    response = client.patch(
+        "/api/v1/articles/slug",
+        json={"title": "x", forbidden_field: "PUBLIC"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+def test_patch_articles_empty_payload_returns_200(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Empty `{}` — 200 no-op (repository не создаёт версию)."""
+    _override_patch(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.patch(
+            "/api/v1/articles/slug",
+            json={},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+
+
+def test_patch_articles_audit_log_emitted_without_content(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ФЗ-152: PATCH использует `log_article_updated` (как PUT) — без content."""
+    import logging
+
+    fake_article.status = "PUBLISHED"
+    _override_patch(monkeypatch, (fake_article, "PUBLIC", "DRAFT"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="actor")
+        caplog.set_level(logging.INFO, logger="rehome.kb.audit")
+        response = client.patch(
+            "/api/v1/articles/slug",
+            json={"status": "PUBLISHED"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+    audit_records = [r for r in caplog.records if r.name == "rehome.kb.audit"]
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec.getMessage() == "articles.updated"
+    assert getattr(rec, "actor_sub", None) == "actor"
+    assert getattr(rec, "old_status", None) == "DRAFT"
+    assert getattr(rec, "new_status", None) == "PUBLISHED"
+    for attr in ("body_markdown", "title", "summary", "short_answer"):
+        assert not hasattr(rec, attr)
+
+
+def test_patch_articles_actor_sub_from_jwt_not_payload(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_patch(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"), capture)
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="real-actor")
+        # Попытка передать actor_sub в payload отвергается `extra='forbid'`.
+        response = client.patch(
+            "/api/v1/articles/slug",
+            json={"title": "x", "actor_sub": "spoofed"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 422

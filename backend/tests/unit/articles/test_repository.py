@@ -1173,3 +1173,239 @@ async def test_update_creates_version_even_if_payload_unchanged(
     assert len(versions) == 1
     assert versions[0].version == 2
     assert versions[0].event == "UPDATE"
+
+
+# ============================================================
+# patch (E4.5 #38)
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_patch_updates_single_field(fake_article: Article) -> None:
+    """PATCH меняет только переданное поле."""
+    from src.api.articles.models import ArticleVersion
+    from src.api.articles.schemas import ArticlePatch
+
+    fake_article.id = uuid4()
+    fake_article.title = "Old title"
+    fake_article.body_markdown = "Old body"
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+    original_body = fake_article.body_markdown
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[article_result, max_result])
+
+    repo = ArticleRepository(session)
+    out = await repo.patch(
+        "slug",
+        ArticlePatch(title="New title"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    assert out is not None
+    article, old_al, old_st = out
+    assert article.title == "New title"
+    # body не тронут.
+    assert article.body_markdown == original_body
+    assert old_al == "PUBLIC"
+    assert old_st == "PUBLISHED"
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert len(versions) == 1
+    assert versions[0].event == "UPDATE"
+    assert versions[0].version == 2
+
+
+@pytest.mark.asyncio
+async def test_patch_updates_multiple_fields(fake_article: Article) -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[article_result, max_result])
+
+    repo = ArticleRepository(session)
+    await repo.patch(
+        "slug",
+        ArticlePatch(title="T", body_markdown="B", status="DRAFT"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    assert fake_article.title == "T"
+    assert fake_article.body_markdown == "B"
+    assert fake_article.status == "DRAFT"
+
+
+@pytest.mark.asyncio
+async def test_patch_empty_payload_no_op_no_version(fake_article: Article) -> None:
+    """Empty `{}` — no-op: НЕТ версии, НЕТ commit."""
+    from src.api.articles.models import ArticleVersion
+    from src.api.articles.schemas import ArticlePatch
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    session.execute = AsyncMock(return_value=article_result)
+
+    repo = ArticleRepository(session)
+    out = await repo.patch(
+        "slug",
+        ArticlePatch(),  # empty
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    assert out is not None
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert versions == []
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_patch_returns_none_when_article_not_found() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    session = MagicMock()
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=article_result)
+    session.commit = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    out = await repo.patch(
+        "missing",
+        ArticlePatch(title="x"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    assert out is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_patch_sql_includes_access_level_filter() -> None:
+    """ADR-0003 source-mask: SELECT с `access_level IN (current)`."""
+    from src.api.articles.schemas import ArticlePatch
+
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        if "stmt" not in captured:
+            captured["stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+
+    repo = ArticleRepository(session)
+    await repo.patch(
+        "any",
+        ArticlePatch(title="x"),
+        frozenset({AccessLevel.STAFF}),
+        actor_sub="actor",
+    )
+    sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+    assert "access_level IN" in sql
+    assert "'STAFF'" in sql
+    # Writer видит DRAFT/ARCHIVED — НЕ фильтруем status.
+    assert "'PUBLISHED'" not in sql
+
+
+@pytest.mark.asyncio
+async def test_patch_does_not_touch_access_level_or_slug(fake_article: Article) -> None:
+    """ArticlePatch не содержит access_level/slug — repository их не меняет."""
+    from src.api.articles.schemas import ArticlePatch
+
+    fake_article.id = uuid4()
+    fake_article.slug = "original-slug"
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 0
+    session.execute = AsyncMock(side_effect=[article_result, max_result])
+
+    repo = ArticleRepository(session)
+    await repo.patch(
+        "original-slug",
+        ArticlePatch(title="new"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    # slug и access_level не изменились.
+    assert fake_article.slug == "original-slug"
+    assert fake_article.access_level == "PUBLIC"
+
+
+@pytest.mark.asyncio
+async def test_patch_status_to_archived_creates_update_event(
+    fake_article: Article,
+) -> None:
+    """PATCH status='ARCHIVED' создаёт event=UPDATE (НЕ ARCHIVE).
+
+    Намеренное различие с DELETE: PATCH — общий update, DELETE — формальная
+    архивация. Документировано в docstring `repo.patch`.
+    """
+    from src.api.articles.models import ArticleVersion
+    from src.api.articles.schemas import ArticlePatch
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[article_result, max_result])
+
+    repo = ArticleRepository(session)
+    await repo.patch(
+        "slug",
+        ArticlePatch(status="ARCHIVED"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert len(versions) == 1
+    assert versions[0].event == "UPDATE"  # НЕ ARCHIVE
+    assert versions[0].old_status == "PUBLISHED"
+    assert versions[0].new_status == "ARCHIVED"

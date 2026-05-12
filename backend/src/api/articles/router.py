@@ -19,6 +19,7 @@ from src.api.articles.repository import ArticleRepository, get_article_repositor
 from src.api.articles.schemas import (
     ArticleHistoryResponse,
     ArticleInput,
+    ArticlePatch,
     ArticleResponse,
     ArticlesListResponse,
     ArticleSummary,
@@ -416,3 +417,60 @@ async def get_article_history(
             for v in versions
         ]
     )
+
+
+@router.patch(
+    "/{slug}",
+    response_model=ArticleResponse,
+    summary="Частично обновить статью (требует scope ≥ staff_support)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Недостаточный scope"},
+        404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
+        422: {"description": "Невалидный payload или попытка изменить access_level/slug"},
+    },
+)
+async def patch_article(
+    payload: ArticlePatch,
+    slug: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=SLUG_PATTERN,
+        description="Канонический идентификатор статьи (ADR-0006)",
+    ),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: ArticleRepository = Depends(get_article_repository),
+) -> ArticleResponse:
+    """Partial-update: меняет только переданные поля.
+
+    Доступные поля (см. `ArticlePatch`): title, body_markdown, tags, status.
+    Запрещённые (через `extra='forbid'`): access_level, slug, category,
+    audience, language, short_answer. Их изменение требует PUT (с явным
+    target-check для access_level).
+
+    Авторизация (ADR-0003 source-only — без Level-2):
+    1. `require_authenticated` → 401.
+    2. `require_access_level(STAFF)` → 403.
+    3. Source-mask в `repo.patch`: writer не видит источник → 404.
+
+    Empty payload `{}` → 200, no-op (НЕ создаёт версию, идемпотентно).
+    """
+    result = await repo.patch(slug, payload, access_levels, actor_sub=claims["sub"])
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Article not found",
+        )
+    article, old_access_level, old_status = result
+    log_article_updated(
+        actor_sub=claims["sub"],
+        slug=article.slug,
+        old_access_level=old_access_level,
+        new_access_level=article.access_level,
+        old_status=old_status,
+        new_status=article.status,
+    )
+    return ArticleResponse.model_validate(article)

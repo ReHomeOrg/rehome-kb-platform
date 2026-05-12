@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article, ArticleVersion
-from src.api.articles.schemas import ArticleInput
+from src.api.articles.schemas import ArticleInput, ArticlePatch
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
 
@@ -380,6 +380,71 @@ class ArticleRepository:
         # else: already-ARCHIVED → no-op, version НЕ создаётся (idempotent).
 
         return was_status, was_access_level
+
+    async def patch(
+        self,
+        slug: str,
+        payload: ArticlePatch,
+        access_levels: frozenset[AccessLevel],
+        *,
+        actor_sub: str,
+    ) -> tuple[Article, str, str] | None:
+        """Partial-update: меняет только переданные поля `payload`.
+
+        Авторизация (ADR-0003 source-side, как `update`):
+        - `access_level IN (current_levels)` — writer не видит чужие → None → 404.
+        - НЕ фильтруем `status='PUBLISHED'` — writer редактирует DRAFT/ARCHIVED.
+
+        Target check (Level-2) НЕ применяется: ArticlePatch не содержит
+        `access_level` (security-by-design — смена visibility только через PUT).
+
+        `payload.model_dump(exclude_unset=True)` — только явно переданные поля.
+        Empty payload `{}` → no-op (НЕ создаём версию, НЕ commit'им) → 200.
+
+        Atomic с version-row (event='UPDATE', как E4.3 update). `status='ARCHIVED'`
+        через PATCH создаёт event=UPDATE (НЕ event=ARCHIVE) — намеренное
+        различие с DELETE для семантики history. Для архивации лучше DELETE.
+
+        Возвращает `(article, old_access_level, old_status)` или None для router.
+        """
+        allowed_strings = [level.value for level in access_levels]
+        stmt = select(Article).where(
+            Article.slug == slug,
+            Article.access_level.in_(allowed_strings),
+        )
+        result = await self._session.execute(stmt)
+        article = result.scalar_one_or_none()
+        if article is None:
+            return None
+
+        old_access_level = article.access_level
+        old_status = article.status
+
+        updates = payload.model_dump(exclude_unset=True)
+        if not updates:
+            # Empty payload {} — no-op (idempotent). НЕ создаём версию,
+            # НЕ вызываем commit — нет реальных изменений.
+            return article, old_access_level, old_status
+
+        for field, value in updates.items():
+            setattr(article, field, value)
+
+        next_v = await self._next_version(article.id)
+        version_row = self._build_version(
+            article_id=article.id,
+            version=next_v,
+            event="UPDATE",
+            author_sub=actor_sub,
+            old_status=old_status,
+            new_status=article.status,
+            old_access_level=old_access_level,
+            new_access_level=article.access_level,
+            summary="Patched",
+        )
+        self._session.add(version_row)
+        await self._session.commit()
+        await self._session.refresh(article)
+        return article, old_access_level, old_status
 
     async def list_versions(
         self,
