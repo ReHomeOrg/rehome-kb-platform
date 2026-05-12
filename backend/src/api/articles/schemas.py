@@ -38,3 +38,43 @@ class ArticleResponse(BaseModel):
     published_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ArticleSummary(BaseModel):
+    """Краткая карточка статьи для list endpoint (без `body_markdown`).
+
+    Соответствует OpenAPI `ArticleSummary` (минимальный набор полей,
+    `short_answer` пока опущен — поле в моделях отсутствует).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    slug: str
+    title: str
+    category: str
+    audience: str
+    access_level: str
+    tags: list[str]
+    status: str
+    updated_at: datetime
+
+
+class PaginationInfo(BaseModel):
+    """Курсор-пагинация. `cursor_prev` и `total_estimate` будут добавлены
+    позже (см. Issue #25 «Out of scope») — partial drift от OpenAPI.
+    """
+
+    cursor_next: str | None = None
+    has_more: bool = False
+
+
+class ArticlesListResponse(BaseModel):
+    """Ответ для `GET /api/v1/articles`.
+
+    OpenAPI оборачивает в `ResponseEnvelope {meta, data, pagination}` —
+    мы пока без `meta` (единый E5 рефакторинг покроет все endpoints).
+    """
+
+    data: list[ArticleSummary]
+    pagination: PaginationInfo
