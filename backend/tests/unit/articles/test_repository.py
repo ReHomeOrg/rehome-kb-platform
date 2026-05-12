@@ -1,21 +1,29 @@
 """Unit-тесты ArticleRepository.
 
 Проверяем, что:
-1. SQL фильтр включает access_level (ADR-0003 critical invariant).
-2. Возвращаем None если scope не видит статью.
-3. Возвращаем Article если запись найдена.
-4. Защищённое маскировкой 404: pусто frozenset → IN ([]) → 0 строк.
+1. SQL фильтр включает access_level (ADR-0003 critical invariant) —
+   для `get_by_slug` И для `list_filtered`.
+2. Возвращаем None / [] если scope не видит ресурсы.
+3. SQL генерируется через bind params, не f-string (anti-SQL-injection).
+4. `status = 'PUBLISHED'` всегда присутствует в WHERE (DRAFT/ARCHIVED guard).
+5. Cursor row-value comparison `(updated_at, id) <` не разворачивается в AND.
 """
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from src.api.articles.models import Article
 from src.api.articles.repository import ArticleRepository
-from src.api.auth.scope import AccessLevel
+from src.api.auth.scope import (
+    AccessLevel,
+    Scope,
+    compute_access_levels,
+)
 
 
 @pytest.mark.asyncio
@@ -83,3 +91,284 @@ async def test_get_by_slug_empty_access_levels_returns_none(
     repo = ArticleRepository(session_returning(None))
     result = await repo.get_by_slug("anything", frozenset())
     assert result is None
+
+
+# ============================================================
+# list_filtered tests
+# ============================================================
+
+
+def _build_session_returning_rows(rows: list[Article]) -> Any:
+    """AsyncSession-мок, возвращающий указанный список через scalars().all()."""
+    scalars = MagicMock()
+    scalars.all.return_value = rows
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    return session
+
+
+async def _capture_list_filtered_sql(**kwargs: Any) -> str:
+    """Запускает `list_filtered` с переданными kwargs и возвращает SQL-string.
+
+    `kwargs` обязаны содержать `access_levels`; остальное — опциональные
+    фильтры/cursor/limit.
+    """
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        scalars = MagicMock()
+        scalars.all.return_value = []
+        result = MagicMock()
+        result.scalars.return_value = scalars
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.list_filtered(**kwargs)
+    return str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_returns_rows_and_has_more_false(
+    fake_article: Article,
+) -> None:
+    """Меньше limit → has_more=False, без trim."""
+    session = _build_session_returning_rows([fake_article])
+    repo = ArticleRepository(session)
+    rows, has_more = await repo.list_filtered(frozenset({AccessLevel.PUBLIC}), limit=20)
+    assert rows == [fake_article]
+    assert has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_has_more_true_and_trims_to_limit(
+    fake_article: Article,
+) -> None:
+    """SQL запрашивает limit+1; если получили limit+1 → has_more=True, возвращаем limit штук."""
+    # Создаём 4 разных Article — limit=3, repo запросит 4, получит 4.
+    rows_in = []
+    for _ in range(4):
+        a = Article()
+        a.id = uuid4()
+        a.updated_at = datetime(2026, 5, 12, tzinfo=UTC)
+        rows_in.append(a)
+    session = _build_session_returning_rows(rows_in)
+    repo = ArticleRepository(session)
+    rows, has_more = await repo.list_filtered(frozenset({AccessLevel.PUBLIC}), limit=3)
+    assert len(rows) == 3  # Trim до limit, НЕ 4.
+    assert has_more is True
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_empty_returns_empty_no_has_more() -> None:
+    session = _build_session_returning_rows([])
+    repo = ArticleRepository(session)
+    rows, has_more = await repo.list_filtered(frozenset({AccessLevel.PUBLIC}))
+    assert rows == []
+    assert has_more is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_filtered_sql_always_includes_status_published() -> None:
+    """SQL-уровень guard: DRAFT/ARCHIVED не утекают в list никогда."""
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    assert "status" in sql
+    assert "'PUBLISHED'" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "scope",
+    [
+        Scope.GUEST,
+        Scope.TENANT,
+        Scope.LANDLORD,
+        Scope.AGENT,
+        Scope.STAFF_SUPPORT,
+        Scope.STAFF_LEGAL,
+        Scope.STAFF_HR,
+        Scope.STAFF_ADMIN,
+    ],
+)
+async def test_list_filtered_sql_includes_correct_access_levels_per_scope(
+    scope: Scope,
+) -> None:
+    """ADR-0003 critical: SQL содержит ровно те access_levels, что выдал
+    `compute_access_levels` для каждого Scope.
+
+    Особо: `staff_admin` НЕ должен получать `HR_RESTRICTED`.
+    """
+    role_map = {
+        Scope.GUEST: [],
+        Scope.TENANT: ["tenant"],
+        Scope.LANDLORD: ["landlord"],
+        Scope.AGENT: ["agent"],
+        Scope.STAFF_SUPPORT: ["staff_support"],
+        Scope.STAFF_LEGAL: ["staff_legal"],
+        Scope.STAFF_HR: ["staff_hr"],
+        Scope.STAFF_ADMIN: ["staff_admin"],
+    }
+    levels = compute_access_levels(role_map[scope])
+    sql = await _capture_list_filtered_sql(access_levels=levels)
+
+    assert "access_level IN" in sql
+    for lvl in levels:
+        assert f"'{lvl.value}'" in sql
+
+    # Guard: уровни, НЕ принадлежащие данному scope, не должны попасть в IN.
+    all_levels: set[AccessLevel] = set(AccessLevel.__members__.values())
+    forbidden: set[AccessLevel] = all_levels - levels
+    # Простая эвристика: ищем `'<LEVEL>'` в SQL — все literal access_level'ы
+    # появляются только в нашем IN-клаузе.
+    for forbidden_lvl in forbidden:
+        assert f"'{forbidden_lvl.value}'" not in sql, (
+            f"Scope={scope.value}: access_level={forbidden_lvl.value} утёк в SQL "
+            "(ADR-0003 regression)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_sql_uses_correct_order_and_limit() -> None:
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        limit=20,
+    )
+    # ORDER BY updated_at DESC, id DESC
+    assert "ORDER BY" in sql
+    assert "updated_at DESC" in sql
+    assert "id DESC" in sql
+    # LIMIT 21 (limit + 1 для has_more detection)
+    assert "LIMIT 21" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filter_key", "value"),
+    [
+        ("category", "rental"),
+        ("audience", "tenant"),
+        ("language", "ru"),
+    ],
+)
+async def test_list_filtered_sql_includes_optional_filter(filter_key: str, value: str) -> None:
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        **{filter_key: value},
+    )
+    assert filter_key in sql
+    assert f"'{value}'" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_omits_filter_when_none() -> None:
+    """Без явного фильтра — нет соответствующего WHERE-условия."""
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    # Базовые условия есть.
+    assert "status" in sql
+    assert "access_level IN" in sql
+    # Опциональные не подмешаны.
+    assert "category =" not in sql
+    assert "audience =" not in sql
+    assert "language =" not in sql
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_unknown_category_value_still_yields_valid_sql() -> None:
+    """Drift OpenAPI: `category=unknown` не падает 500/422; возвращает 200 [].
+
+    SQL компилируется, просто matches 0 строк.
+    """
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        category="not-a-real-category",
+    )
+    assert "category" in sql
+    assert "'not-a-real-category'" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_sql_uses_bind_params_not_fstring() -> None:
+    """Anti-SQL-injection guard: компилятор без literal_binds выдаёт `?`/`:p`,
+    не литерал — это значит ORM использует bind params.
+    """
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        scalars = MagicMock()
+        scalars.all.return_value = []
+        result = MagicMock()
+        result.scalars.return_value = scalars
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.list_filtered(
+        frozenset({AccessLevel.PUBLIC}),
+        category="'); DROP TABLE articles; --",
+    )
+    # Без literal_binds — SQL содержит placeholder (`?` или `:name_1`).
+    sql_with_binds = str(captured["stmt"].compile())
+    assert "DROP TABLE" not in sql_with_binds
+    # Параметризованное значение появляется только при literal_binds=True.
+    sql_with_literals = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+    # При literal_binds — литерал в SQL экранирован одинарными кавычками.
+    assert "DROP TABLE" in sql_with_literals  # ровно как escaped string literal
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_filtered_sql_cursor_predicate_is_row_value_not_and() -> None:
+    """Keyset row-value `(updated_at, id) < (:u, :i)` — НЕ `updated_at < :u AND id < :i`.
+
+    Второе эквивалентно «или updated_at меньше, или updated_at равен И id меньше»,
+    что разваливает keyset при равенстве по `updated_at`. Тест ловит регрессию
+    `tuple_()` → split into AND.
+    """
+    cursor_ts = datetime(2026, 5, 12, 10, 30, 0, tzinfo=UTC)
+    cursor_id = uuid4()
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        cursor=(cursor_ts, cursor_id),
+    )
+    # Row-value comparison оставляет parenthesized tuple на обеих сторонах.
+    # SQLAlchemy формат: `(articles.updated_at, articles.id) < (..., ...)`.
+    assert (
+        "updated_at, articles.id) <" in sql or "(updated_at, id) <" in sql
+    ), f"SQL не содержит row-value comparison: {sql}"
+    # Не должно быть split на два отдельных AND-предиката:
+    assert sql.count("updated_at <") <= 1
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_no_cursor_no_predicate() -> None:
+    sql = await _capture_list_filtered_sql(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    assert "<" not in sql.split("ORDER BY")[0].split("LIMIT")[0].replace(
+        "ix_", ""
+    )  # никаких неравенств в WHERE
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_filtered_empty_access_levels_returns_empty(
+    fake_article: Article,
+) -> None:
+    """Пустой frozenset → IN ([]) — 0 строк. Не падаем, не утекаем."""
+    session = _build_session_returning_rows([])
+    repo = ArticleRepository(session)
+    rows, has_more = await repo.list_filtered(frozenset(), limit=20)
+    assert rows == []
+    assert has_more is False
