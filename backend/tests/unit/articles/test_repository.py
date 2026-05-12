@@ -62,7 +62,9 @@ async def test_get_by_slug_sql_includes_access_level_filter() -> None:
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        captured["stmt"] = stmt
+        # E5.0: advisory lock SQL идёт ПЕРВЫМ в update/archive/patch — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt):
+            captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         return result
@@ -541,7 +543,9 @@ async def test_update_sql_does_not_filter_status_published() -> None:
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        captured["stmt"] = stmt
+        # E5.0: advisory lock SQL идёт ПЕРВЫМ в update/archive/patch — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt):
+            captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         return result
@@ -590,7 +594,9 @@ async def test_update_sql_includes_correct_access_levels_per_scope(
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        captured["stmt"] = stmt
+        # E5.0: advisory lock SQL идёт ПЕРВЫМ в update/archive/patch — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt):
+            captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         return result
@@ -728,7 +734,9 @@ async def test_archive_sql_does_not_filter_status_published() -> None:
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        captured["stmt"] = stmt
+        # E5.0: advisory lock SQL идёт ПЕРВЫМ в update/archive/patch — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt):
+            captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         return result
@@ -785,7 +793,9 @@ async def test_archive_sql_includes_correct_access_levels_per_scope(
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        captured["stmt"] = stmt
+        # E5.0: advisory lock SQL идёт ПЕРВЫМ в update/archive/patch — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt):
+            captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         return result
@@ -953,7 +963,7 @@ async def test_update_inserts_version_with_next_number(fake_article: Article) ->
     select_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 3  # prev version was 3
-    session.execute = AsyncMock(side_effect=[select_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result, max_result])
 
     repo = ArticleRepository(session)
     payload = _valid_input()
@@ -996,7 +1006,7 @@ async def test_archive_inserts_version_when_status_changes(fake_article: Article
     select_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 1
-    session.execute = AsyncMock(side_effect=[select_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result, max_result])
 
     repo = ArticleRepository(session)
     await repo.archive("to-archive", frozenset({AccessLevel.STAFF}), actor_sub="hr-sub")
@@ -1153,7 +1163,7 @@ async def test_update_creates_version_even_if_payload_unchanged(
     select_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 1
-    session.execute = AsyncMock(side_effect=[select_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result, max_result])
 
     # Payload идентичен текущему article (access_level=PUBLIC, status=PUBLISHED).
     payload = _valid_input()
@@ -1202,7 +1212,7 @@ async def test_patch_updates_single_field(fake_article: Article) -> None:
     article_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 1
-    session.execute = AsyncMock(side_effect=[article_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), article_result, max_result])
 
     repo = ArticleRepository(session)
     out = await repo.patch(
@@ -1240,7 +1250,7 @@ async def test_patch_updates_multiple_fields(fake_article: Article) -> None:
     article_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 1
-    session.execute = AsyncMock(side_effect=[article_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), article_result, max_result])
 
     repo = ArticleRepository(session)
     await repo.patch(
@@ -1315,7 +1325,8 @@ async def test_patch_sql_includes_access_level_filter() -> None:
     captured: dict[str, Any] = {}
 
     async def _capture(stmt: Any) -> Any:
-        if "stmt" not in captured:
+        # E5.0: advisory lock идёт первым — пропускаем.
+        if "pg_advisory_xact_lock" not in str(stmt) and "stmt" not in captured:
             captured["stmt"] = stmt
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
@@ -1356,7 +1367,7 @@ async def test_patch_does_not_touch_access_level_or_slug(fake_article: Article) 
     article_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 0
-    session.execute = AsyncMock(side_effect=[article_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), article_result, max_result])
 
     repo = ArticleRepository(session)
     await repo.patch(
@@ -1395,7 +1406,7 @@ async def test_patch_status_to_archived_creates_update_event(
     article_result.scalar_one_or_none.return_value = fake_article
     max_result = MagicMock()
     max_result.scalar.return_value = 1
-    session.execute = AsyncMock(side_effect=[article_result, max_result])
+    session.execute = AsyncMock(side_effect=[MagicMock(), article_result, max_result])
 
     repo = ArticleRepository(session)
     await repo.patch(
@@ -1409,3 +1420,124 @@ async def test_patch_status_to_archived_creates_update_event(
     assert versions[0].event == "UPDATE"  # НЕ ARCHIVE
     assert versions[0].old_status == "PUBLISHED"
     assert versions[0].new_status == "ARCHIVED"
+
+
+# ============================================================
+# Advisory lock race-fix (E5.0 #40)
+# ============================================================
+
+
+def _make_capture_stmts() -> tuple[list[Any], Any]:
+    """Возвращает (list-storage, async _capture) — пишет ВСЕ execute statements."""
+    stmts: list[Any] = []
+
+    async def _capture(stmt: Any) -> Any:
+        stmts.append(stmt)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        # Для MAX-query — int scalar return (для archive нет MAX в no-op path)
+        result.scalar.return_value = None
+        return result
+
+    return stmts, _capture
+
+
+@pytest.mark.asyncio
+async def test_update_acquires_advisory_lock_before_select() -> None:
+    """E5.0: pg_advisory_xact_lock — ПЕРВЫЙ statement в update."""
+    stmts, capture = _make_capture_stmts()
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=capture)
+
+    repo = ArticleRepository(session)
+    await repo.update("the-slug", _valid_input(), frozenset({AccessLevel.PUBLIC}), actor_sub="a")
+    assert len(stmts) >= 2
+    first_sql = str(stmts[0])
+    assert "pg_advisory_xact_lock" in first_sql
+    # Slug передан через bind param (без literal substitution).
+    second_sql = str(stmts[1])
+    assert "articles.slug" in second_sql
+    assert "pg_advisory_xact_lock" not in second_sql
+
+
+@pytest.mark.asyncio
+async def test_archive_acquires_advisory_lock_before_select() -> None:
+    """E5.0: то же для archive."""
+    stmts, capture = _make_capture_stmts()
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=capture)
+
+    repo = ArticleRepository(session)
+    await repo.archive("the-slug", frozenset({AccessLevel.PUBLIC}), actor_sub="a")
+    assert len(stmts) >= 2
+    assert "pg_advisory_xact_lock" in str(stmts[0])
+    assert "articles.slug" in str(stmts[1])
+
+
+@pytest.mark.asyncio
+async def test_patch_acquires_advisory_lock_before_select() -> None:
+    """E5.0: то же для patch."""
+    from src.api.articles.schemas import ArticlePatch
+
+    stmts, capture = _make_capture_stmts()
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=capture)
+
+    repo = ArticleRepository(session)
+    await repo.patch(
+        "the-slug",
+        ArticlePatch(title="x"),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="a",
+    )
+    assert len(stmts) >= 2
+    assert "pg_advisory_xact_lock" in str(stmts[0])
+    assert "articles.slug" in str(stmts[1])
+
+
+@pytest.mark.asyncio
+async def test_create_does_not_acquire_advisory_lock() -> None:
+    """E5.0: create НЕ берёт advisory lock — UNIQUE slug constraint защищает.
+
+    Concurrent create того же slug → второй writer получит 409 SlugConflictError
+    (как до E5.0; поведение не меняется).
+    """
+    stmts, capture = _make_capture_stmts()
+    session = MagicMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock(return_value=None)
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    session.execute = AsyncMock(side_effect=capture)
+
+    repo = ArticleRepository(session)
+    await repo.create(_valid_input(), actor_sub="a")
+
+    # Все вызванные SQL: НИ ОДИН не должен быть advisory_xact_lock.
+    for s in stmts:
+        assert "pg_advisory_xact_lock" not in str(s)
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_advisory_lock_uses_bind_param_not_literal_slug() -> None:
+    """Anti-SQL-injection: slug передаётся через bind param, не literal."""
+    malicious_slug = "'); DROP TABLE articles; --"
+    stmts, capture = _make_capture_stmts()
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=capture)
+
+    repo = ArticleRepository(session)
+    await repo.update(
+        malicious_slug,
+        _valid_input(),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="a",
+    )
+    # SQL string lock-statement НЕ содержит payload.
+    lock_stmt = stmts[0]
+    sql_no_binds = str(lock_stmt)
+    assert "DROP TABLE" not in sql_no_binds
+    # Bind params содержат payload (для безопасного исполнения).
+    params = lock_stmt.compile().params
+    assert malicious_slug in params.values()
