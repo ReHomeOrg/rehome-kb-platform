@@ -331,3 +331,89 @@ def test_delete_nonexistent_returns_404(kb_client: httpx.Client, m2m_token: str)
 def test_delete_without_token_returns_401(kb_client: httpx.Client) -> None:
     response = kb_client.delete("/api/v1/articles/whatever")
     assert response.status_code == 401
+
+
+# ============================================================
+# PATCH /api/v1/articles/{slug} (E4.5)
+# ============================================================
+
+
+@pytest.mark.integration
+def test_patch_title_only_preserves_other_fields(
+    kb_client: httpx.Client, m2m_token: str, db_cleanup: list[str]
+) -> None:
+    """PATCH меняет только title; body, access_level, status остаются."""
+    slug = f"e45-title-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+    auth = {"Authorization": f"Bearer {m2m_token}"}
+
+    kb_client.post("/api/v1/articles", headers=auth, json=_payload(slug))
+    patch = kb_client.patch(
+        f"/api/v1/articles/{slug}",
+        headers=auth,
+        json={"title": "Patched title"},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["title"] == "Patched title"
+
+    # GET возвращает new title + old body.
+    get_resp = kb_client.get(f"/api/v1/articles/{slug}")
+    body = get_resp.json()
+    assert body["title"] == "Patched title"
+    assert body["body_markdown"] == "# Content"  # из _payload default
+    assert body["access_level"] == "PUBLIC"
+
+
+@pytest.mark.integration
+@pytest.mark.security
+def test_patch_access_level_in_payload_returns_422(kb_client: httpx.Client, m2m_token: str) -> None:
+    """Security: попытка передать `access_level` через PATCH → 422."""
+    response = kb_client.patch(
+        f"/api/v1/articles/whatever-{uuid4().hex[:8]}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json={"title": "x", "access_level": "PUBLIC"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+def test_patch_creates_version_in_history(
+    kb_client: httpx.Client, m2m_token: str, db_cleanup: list[str]
+) -> None:
+    """POST + PATCH → /history содержит 2 версии (CREATE, UPDATE)."""
+    slug = f"e45-hist-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+    auth = {"Authorization": f"Bearer {m2m_token}"}
+
+    kb_client.post("/api/v1/articles", headers=auth, json=_payload(slug))
+    kb_client.patch(
+        f"/api/v1/articles/{slug}",
+        headers=auth,
+        json={"title": "V2"},
+    )
+
+    history = kb_client.get(f"/api/v1/articles/{slug}/history")
+    body = history.json()
+    assert len(body["data"]) == 2
+    assert body["data"][0]["version"] == 2
+    assert body["data"][0]["event"] == "UPDATE"
+    assert body["data"][1]["version"] == 1
+    assert body["data"][1]["event"] == "CREATE"
+
+
+@pytest.mark.integration
+def test_patch_empty_payload_returns_200_no_version(
+    kb_client: httpx.Client, m2m_token: str, db_cleanup: list[str]
+) -> None:
+    """PATCH `{}` → 200, версия НЕ создаётся (no-op)."""
+    slug = f"e45-noop-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+    auth = {"Authorization": f"Bearer {m2m_token}"}
+
+    kb_client.post("/api/v1/articles", headers=auth, json=_payload(slug))
+    patch = kb_client.patch(f"/api/v1/articles/{slug}", headers=auth, json={})
+    assert patch.status_code == 200
+
+    history = kb_client.get(f"/api/v1/articles/{slug}/history")
+    # Только 1 версия (CREATE из POST).
+    assert len(history.json()["data"]) == 1

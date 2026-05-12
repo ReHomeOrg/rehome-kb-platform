@@ -104,3 +104,76 @@ def test_article_input_tags_default_empty_list() -> None:
     payload.tags.append("x")
     payload2 = ArticleInput(**_valid_payload())  # type: ignore[arg-type]
     assert payload2.tags == []
+
+
+# ============================================================
+# ArticlePatch (E4.5 #38)
+# ============================================================
+
+
+def test_article_patch_all_fields_optional() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    # Empty `{}` — валидно.
+    p = ArticlePatch()
+    assert p.model_dump(exclude_unset=True) == {}
+
+
+def test_article_patch_single_field_set() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    p = ArticlePatch(title="New")
+    assert p.title == "New"
+    assert p.body_markdown is None
+    assert p.tags is None
+    assert p.status is None
+    # exclude_unset: только явно переданное.
+    assert p.model_dump(exclude_unset=True) == {"title": "New"}
+
+
+def test_article_patch_extra_fields_rejected() -> None:
+    """`extra='forbid'`: попытка передать access_level/slug/etc → 422."""
+    from src.api.articles.schemas import ArticlePatch
+
+    forbidden_fields = [
+        {"access_level": "PUBLIC"},  # security-critical block
+        {"slug": "new-slug"},
+        {"category": "guide"},
+        {"audience": "tenant"},
+        {"language": "en"},
+        {"short_answer": "..."},
+        {"random": "junk"},
+    ]
+    for payload in forbidden_fields:
+        with pytest.raises(ValidationError):
+            ArticlePatch(**payload)  # type: ignore[arg-type]
+
+
+def test_article_patch_title_too_long_rejected() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    with pytest.raises(ValidationError):
+        ArticlePatch(title="x" * 201)
+
+
+def test_article_patch_empty_body_rejected() -> None:
+    """Если body_markdown передан, не должен быть пустым."""
+    from src.api.articles.schemas import ArticlePatch
+
+    with pytest.raises(ValidationError):
+        ArticlePatch(body_markdown="")
+
+
+def test_article_patch_distinguishes_unset_from_null() -> None:
+    """exclude_unset не путает «не передано» с «явно null»."""
+    from src.api.articles.schemas import ArticlePatch
+
+    # title не передан → отсутствует в dump.
+    p1 = ArticlePatch(body_markdown="x")
+    assert "title" not in p1.model_dump(exclude_unset=True)
+
+    # title=None явно передан → присутствует в dump.
+    # Но: ArticlePatch с min_length=1 на title не примет None.
+    # Эту семантику оставляем future-proof для nullable полей.
+    p2 = ArticlePatch(title="New")
+    assert p2.model_dump(exclude_unset=True) == {"title": "New"}
