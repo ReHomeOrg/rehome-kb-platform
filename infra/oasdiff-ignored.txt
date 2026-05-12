@@ -1,0 +1,22 @@
+# Approved breaking changes for `oasdiff breaking` job.
+#
+# Каждая не-comment строка ниже — substring для матчинга в error message
+# oasdiff. При совпадении breaking change игнорируется (CI зелёный).
+#
+# Workflow добавления записи:
+#   1. Architect одобрил deviation в Issue/PR в формате CLAUDE.md §9:
+#      `@architect approved deviation from <ТЗ>: <reason>`
+#      или `approved spec evolution: <reason>`.
+#   2. Добавить сюда строку с reference на Issue + comment-id.
+#   3. Обновить yaml + open PR с обоими изменениями.
+#
+# Periodic audit (E5.x backlog): просмотр устаревших записей, restore-of-spec
+# когда implementation подтянулась обратно к стандарту.
+
+# ============================================================
+# 2026-05-12 — ArticleInput.access_level становится required.
+# Architect approve: Issue #27 issuecomment 4428692249 (E4.1, security-by-design).
+# Spec sync: Issue #42 / PR #43 (этот PR).
+# Real-world impact: zero — код enforce'ил это с E4.1; клиенты без
+#   `access_level` уже получали 422. Спека догоняет реальность.
+property access_level became required

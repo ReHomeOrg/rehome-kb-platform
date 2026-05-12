@@ -116,11 +116,15 @@ jobs:
 
       - name: Check OpenAPI breaking changes
         if: github.event_name == 'pull_request'
+        # `--err-ignore` — список approved breaking changes (CLAUDE.md §9
+        # workflow). Каждая non-comment строка — substring для матчинга
+        # oasdiff error message. См. infra/oasdiff-ignored.txt.
         run: |
           git fetch origin ${{ github.base_ref }}
           oasdiff breaking \
             origin/${{ github.base_ref }}:docs/handoff/01_postanovka/04_openapi.yaml \
-            docs/handoff/01_postanovka/04_openapi.yaml
+            docs/handoff/01_postanovka/04_openapi.yaml \
+            --err-ignore infra/oasdiff-ignored.txt
 
   # ============================================================
   # Security scan: секреты, уязвимости зависимостей

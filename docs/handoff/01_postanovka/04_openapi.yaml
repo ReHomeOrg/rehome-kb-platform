@@ -2875,6 +2875,7 @@ components:
       - body_markdown
       - category
       - audience
+      - access_level
       properties:
         slug:
           type: string
