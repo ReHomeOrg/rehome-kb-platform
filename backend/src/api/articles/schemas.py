@@ -134,3 +134,29 @@ class ArticleHistoryResponse(BaseModel):
     """Ответ `GET /api/v1/articles/{slug}/history` — массив версий."""
 
     data: list[ArticleVersionResponse]
+
+
+class ArticlePatch(BaseModel):
+    """Partial-update payload для `PATCH /api/v1/articles/{slug}`.
+
+    Соответствует OpenAPI `ArticlePatch` (строки 2909-2926) с двумя уточнениями:
+    - `short_answer` опущен (поле отсутствует в БД; backlog для миграции).
+    - `access_level`, `slug`, `category`, `audience`, `language` запрещены
+      через `extra='forbid'`: смена visibility/identifier требует PUT с
+      явным target check. Это security-by-design (writer не может тихо
+      повысить access_level через PATCH).
+
+    Используется в repository через `model_dump(exclude_unset=True)` —
+    только явно переданные поля попадают в UPDATE. Различие
+    «не передано» vs «явно null» сохраняется (future-proof; пока nullable
+    полей нет).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    body_markdown: str | None = Field(default=None, min_length=1)
+    tags: list[str] | None = Field(default=None)
+    # `status` пока str (drift OpenAPI, как audience в ArticleInput) —
+    # backlog #28 для enum-rollout. DB CHECK всё равно отсечёт невалид.
+    status: str | None = Field(default=None, min_length=1, max_length=16)
