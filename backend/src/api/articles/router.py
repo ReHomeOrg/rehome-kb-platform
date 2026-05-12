@@ -8,7 +8,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 
-from src.api.articles.audit import log_article_created, log_article_updated
+from src.api.articles.audit import (
+    log_article_archived,
+    log_article_created,
+    log_article_updated,
+)
 from src.api.articles.authorization import ensure_can_write_access_level
 from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.articles.repository import ArticleRepository, get_article_repository
@@ -252,3 +256,55 @@ async def replace_article(
         new_status=article.status,
     )
     return ArticleResponse.model_validate(article)
+
+
+@router.delete(
+    "/{slug}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Архивировать статью (soft delete, требует scope ≥ staff_support)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Недостаточный scope"},
+        404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
+    },
+)
+async def archive_article(
+    slug: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=SLUG_PATTERN,
+        description="Канонический идентификатор статьи (ADR-0006)",
+    ),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: ArticleRepository = Depends(get_article_repository),
+) -> Response:
+    """Soft-delete: переводит статью в `status='ARCHIVED'` (не удаляет из БД).
+
+    Авторизация (ADR-0003 source-only):
+    1. `require_authenticated` → 401.
+    2. `require_access_level(STAFF)` → 403.
+    3. Source check (в `repo.archive`): writer не видит источник → 404.
+
+    Target Level-2 (access_level) НЕ применяется: DELETE меняет `status`,
+    не `access_level`.
+
+    Идемпотентность: DELETE на уже-ARCHIVED → 204 без мутации (per RFC 7231).
+    Audit пишется с `was_status='ARCHIVED'` — сигнал повторной DELETE.
+    """
+    result = await repo.archive(slug, access_levels)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Article not found",
+        )
+    was_status, was_access_level = result
+    log_article_archived(
+        actor_sub=claims["sub"],
+        slug=slug,
+        was_status=was_status,
+        was_access_level=was_access_level,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
