@@ -69,9 +69,7 @@ class TagRepository:
         # FROM left-to-right и `articles` ещё не в scope.
         # `table_valued("tag")` + `.lateral()` рендерится как
         # `FROM articles, LATERAL jsonb_array_elements_text(articles.tags) AS tag(tag)`.
-        tag_tbl = (
-            func.jsonb_array_elements_text(Article.tags).table_valued("tag").lateral()
-        )
+        tag_tbl = func.jsonb_array_elements_text(Article.tags).table_valued("tag").lateral()
         tag_col = tag_tbl.c.tag
 
         count_expr = func.count(literal(1)).label("article_count")
