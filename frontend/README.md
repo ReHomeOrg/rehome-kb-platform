@@ -4,20 +4,71 @@ Frontend для модулей kb-help, kb-staff, kb-hr, kb-vault. Единая 
 14 App Router сборка под все суб-домены `*.rehome.one` (см. ПЗ «База
 знаний v1.4» раздел 1.4.4 «Единая платформа», ADR-0001).
 
-На E1.2 (этом PR) — только scaffold: один лендинг help-центра. Реальный
-контент и интеграция с API gateway появятся в E2-E3.
+После UI epic (UI.1-UI.6 / PR #76-#86) — реализованы pages для всех
+read-API endpoint'ов backend'а: articles list/search/detail, categories
+tree, tags cloud, documents list/detail, chat sessions с SSE streaming.
 
 ## Стек
 
-- Next.js 14 (App Router)
-- React 18+
-- TypeScript strict
-- Tailwind CSS 3
-- Vitest + Testing Library + `@vitest/coverage-v8`
+- Next.js 14 (App Router) с TypeScript strict
+- React 18+, Tailwind CSS 3
+- Vitest + Testing Library + `@vitest/coverage-v8` (порог 60% branches)
 - ESLint (`eslint-config-next`)
+- `react-markdown@10` + `remark-gfm` + `isomorphic-dompurify` для article render
 
-См. ADR-0001 (категория A, kb-* модули) и ADR-0005 (FastAPI gateway,
-который этот frontend будет вызывать на E2).
+См. ADR-0001 (категория A, kb-* модули) и ADR-0005 (FastAPI gateway).
+
+## Pages
+
+| Маршрут | Описание | Component type |
+|---|---|---|
+| `/` | Лендинг help.rehome.one | Server |
+| `/login` | OAuth Authorization Code + PKCE flow | Server |
+| `/articles` | Список статей с фильтрами + cursor пагинация | Server |
+| `/articles/[slug]` | Detail с markdown render | Server |
+| `/articles/search` | Постgres FTS поиск с snippet | Server |
+| `/categories` | Recursive Category tree → /articles?category= | Server |
+| `/tags` | Tag cloud с size scaling → /articles?tags= | Server |
+| `/chat` | Список недавних сессий + create | Client |
+| `/chat/[session_id]` | Message thread с SSE streaming | Client |
+| `/documents` | Список с filter dropdowns | Server |
+| `/documents/[id]` | Detail с PII (signed_by, audit_log) | Server |
+
+## Архитектура: API client + proxy
+
+Backend требует `Authorization: Bearer <JWT>`. JWT хранится в HttpOnly
+`kb_session` cookie (JS не может прочитать). Поэтому browser-side API
+calls идут через Next.js API route proxy:
+
+```
+browser → fetch('/api/kb/api/v1/articles')
+       → app/api/kb/[...path]/route.ts (читает cookie + добавляет Bearer)
+       → backend /api/v1/articles
+```
+
+Для SSE — отдельный proxy `/api/kb-sse/<path>` с streaming Response +
+`X-Accel-Buffering: no` (nginx-safe).
+
+Для **Server Components** (SSR) — `apiFetch` идёт напрямую через
+`BACKEND_BASE_URL + path` + cookie attach через `next/headers.cookies()`.
+Hybrid implementation в `lib/api/client.ts`.
+
+## Chat session_token
+
+Anonymous chat sessions identified opaque `session_token` (выдаётся
+backend'ом при POST /chat/sessions). Хранится в **localStorage**
+(JS-accessible), trade-off: theft = hijack ОДНОЙ chat-сессии (24h
+expiry на backend), не user account. Acceptable для MVP. Альтернатива
+(HttpOnly cookie + custom proxy) — backlog.
+
+## XSS защита
+
+Двухслойная:
+1. **Markdown content** (`react-markdown` 10): default escape raw HTML,
+   `rehype-raw` НЕ используется.
+2. **Search snippet** (от `ts_headline`): `sanitizeSearchSnippet()` через
+   `isomorphic-dompurify` с whitelist `<b>` ONLY перед
+   `dangerouslySetInnerHTML`.
 
 ## Запуск
 
@@ -25,6 +76,8 @@ Frontend для модулей kb-help, kb-staff, kb-hr, kb-vault. Единая 
 make install     # npm ci, ставит deps по package-lock.json
 make dev         # next dev — http://localhost:3000
 ```
+
+Должен быть запущен backend (uvicorn на 8000 — см. `../backend/Makefile`).
 
 ## Проверки
 
@@ -39,12 +92,12 @@ make build       # Next.js production build
 
 | Имя | Default | Назначение |
 |---|---|---|
+| `BACKEND_BASE_URL` | `http://localhost:8000` | Backend API base URL (SSR + proxy) |
 | `NEXT_PUBLIC_KC_URL` | `http://localhost:8080` | Keycloak base URL |
-| `NEXT_PUBLIC_KC_REALM` | `rehome` | Realm name |
+| `NEXT_PUBLIC_KC_REALM` | `rehome` | Keycloak realm |
 | `NEXT_PUBLIC_KC_CLIENT_ID` | `rehome-web-spa` | OAuth client_id (SPA) |
-| `KC_REDIRECT_URI` | `http://localhost:3000/api/auth/callback/keycloak` | OAuth callback URI (см. ADR-0007) |
-| `KC_POST_LOGOUT_URI` | `http://localhost:3000/` | Куда вернуться после logout |
-| `NEXT_PUBLIC_KB_API_URL` | _(E2+)_ | Base URL для kb-API gateway (Production: `https://api.rehome.one/kb`) |
+| `KC_REDIRECT_URI` | `http://localhost:3000/api/auth/callback/keycloak` | OAuth callback URI |
+| `KC_POST_LOGOUT_URI` | `http://localhost:3000/` | Post-logout redirect |
 
 ## Auth flow
 
@@ -68,31 +121,54 @@ Browser → /login (UI page)
            - 302 to Keycloak /logout
 ```
 
-Backend (PR #18) валидирует `kb_session` cookie через JWKS и вычисляет
-scope из `realm_access.roles`.
-
 ## Структура
 
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx       — корневой layout, ru локаль, метаданные
-│   ├── page.tsx         — лендинг help.rehome.one (заглушка)
-│   ├── page.test.tsx    — smoke-тесты на главную
-│   └── globals.css      — Tailwind directives
-├── vitest.config.ts     — Vitest + jsdom + coverage v8 (порог 60%)
-├── vitest.setup.ts      — @testing-library/jest-dom matchers
-├── tsconfig.json        — TypeScript strict
-├── tailwind.config.ts   — Tailwind конфиг
-├── next.config.mjs      — Next.js конфиг
-└── Makefile             — proxy команд
+│   ├── layout.tsx               корневой layout, ru локаль
+│   ├── error.tsx                global error boundary
+│   ├── global-error.tsx         fallback при падении layout.tsx
+│   ├── loading.tsx              global loading skeleton
+│   ├── page.tsx                 лендинг
+│   ├── _components/nav.tsx      top navigation (Server)
+│   ├── api/
+│   │   ├── auth/                Keycloak OAuth callback routes
+│   │   ├── kb/[...path]/        backend API proxy (catch-all)
+│   │   └── kb-sse/[...path]/    SSE proxy для chat streaming
+│   ├── articles/                list/search/[slug] + loading
+│   ├── categories/              recursive tree
+│   ├── tags/                    tag cloud
+│   ├── chat/                    sessions + thread + SSE consume
+│   └── documents/               list + detail (download deferred)
+├── lib/
+│   ├── api/
+│   │   ├── client.ts            apiFetch + ApiError
+│   │   ├── types.ts             handwritten TS types backend Pydantic
+│   │   ├── articles.ts / chat.ts / categories.ts / tags.ts / documents.ts
+│   ├── auth/                    Keycloak helpers (E1.3.3)
+│   ├── chat-storage.ts          localStorage helpers для session_token
+│   ├── env.ts                   env validation
+│   └── sanitize.ts              DOMPurify wrapper для search snippet
+├── vitest.config.ts             Vitest + jsdom + coverage v8
+└── Makefile                     proxy команд
 ```
 
-## Что НЕ реализовано на E1.2 (defer)
+## Backlog после landing UI epic
 
-- Подключение к kb-API (`/api/v1/...`) — E2
-- Аутентификация / Keycloak — E1.3
-- Подмодули kb-staff, kb-hr, kb-vault — E3-E6
-- Storybook / UI-kit catalog — позже, когда накопится компонентов
-- Playwright E2E — позже, по реальным user flows
-- i18n — пока только русский
+- **Playwright E2E** — реальный browser test main flows (auth, article
+  view, chat message, document detail). Требует CI job с full stack.
+- **Dark mode** — Tailwind dark: prefix variants.
+- **a11y review** — axe-core в CI, aria-labels checks.
+- **i18n** — пока только русский (single language).
+- **Generated TS types** из OpenAPI через `openapi-typescript-codegen`
+  (сейчас handwritten).
+- **React Query / SWR** — pre-fetch + cache. Сейчас Server Components
+  с revalidate cover most cases.
+- **Refresh token flow** — backend выдаёт access_token TTL ≈ 5 min;
+  после expire — 401, нужен retry с refresh. Сейчас просто 401 в UI.
+- **Singleton API client** — sharable httpx-like fetch instance с
+  connection pooling, retry policy.
+- **Linkable search results** — backend `SearchHit` нужен `slug` или
+  detail-by-id endpoint (сейчас search показывает results без link на
+  detail page).
