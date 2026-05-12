@@ -107,3 +107,30 @@ class ArticleInput(BaseModel):
     status: str = Field(default="DRAFT", min_length=1, max_length=16)
     language: str = Field(default="ru", min_length=1, max_length=8)
     tags: list[str] = Field(default_factory=list)
+
+
+class ArticleVersionResponse(BaseModel):
+    """История изменений статьи (OpenAPI `ArticleVersion`).
+
+    `author` — Keycloak `sub` claim (UUID), не human-readable имя
+    (spec evolution одобрено в Issue #36 issuecomment 4429626012).
+    `event` — тип события, породившего эту версию (additive в OpenAPI).
+    Content (body_markdown/title) НЕ хранится — backlog для compliance.
+
+    NB: router строит этот response из ORM `ArticleVersion`, мапя
+    `author_sub → author` явно (а не через alias/from_attributes) — чтобы
+    field name в API чётко совпадал с OpenAPI и не зависел от Pydantic
+    alias-конфигурации FastAPI.
+    """
+
+    version: int
+    author: str
+    changed_at: datetime
+    event: str
+    changes_summary: str | None = None
+
+
+class ArticleHistoryResponse(BaseModel):
+    """Ответ `GET /api/v1/articles/{slug}/history` — массив версий."""
+
+    data: list[ArticleVersionResponse]

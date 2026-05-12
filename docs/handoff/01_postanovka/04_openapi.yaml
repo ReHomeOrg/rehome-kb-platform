@@ -2931,11 +2931,19 @@ components:
           type: integer
         author:
           type: string
+          description: Keycloak `sub` claim (UUID) — идентификатор актора, не имя.
         changed_at:
           type: string
           format: date-time
         changes_summary:
           type: string
+        event:
+          type: string
+          enum:
+          - CREATE
+          - UPDATE
+          - ARCHIVE
+          description: Тип события, породившего эту версию.
     Category:
       type: object
       properties:
