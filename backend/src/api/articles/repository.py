@@ -33,10 +33,19 @@ class SlugConflictError(HTTPException):
 
 
 class ArticleRepository:
-    """Read-only репозиторий статей.
+    """Репозиторий статей: read + write операции с ADR-0003 фильтром.
 
-    Write-операции (POST/PUT/PATCH/DELETE) появятся в E4 как отдельные
-    методы; на E2.1 — только чтение.
+    Read:
+    - `get_by_slug` (E2.1) — single article + storage-level filter.
+    - `list_filtered` (E2.2) — keyset-пагинация + filters.
+
+    Write (все с двух-уровневой авторизацией: source 404-mask на SQL +
+    target Level-2 в router там, где применимо):
+    - `create` (E4.1) — POST.
+    - `update` (E4.3) — PUT full-replace.
+    - `archive` (E4.4) — DELETE → status='ARCHIVED' (soft-delete).
+
+    PATCH partial и article_versions history — будущие эпики.
     """
 
     def __init__(self, session: AsyncSession) -> None:
