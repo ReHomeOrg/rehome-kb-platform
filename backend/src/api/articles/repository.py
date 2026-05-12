@@ -33,6 +33,20 @@ class SlugConflictError(HTTPException):
         )
 
 
+class PreconditionFailedError(HTTPException):
+    """HTTP 412 — If-Match не совпадает с current ETag (E5.2 #48).
+
+    Detail без leakage current ETag — client может узнать stale-status,
+    но не точное значение (защита от timing-based ETag enumeration).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail="Precondition failed: resource has been modified",
+        )
+
+
 class ArticleRepository:
     """Репозиторий статей: read + write операции с ADR-0003 фильтром.
 
@@ -277,6 +291,7 @@ class ArticleRepository:
         access_levels: frozenset[AccessLevel],
         *,
         actor_sub: str,
+        if_match: str | None = None,
     ) -> tuple[Article, str, str] | None:
         """Обновляет статью по slug; возвращает `(article, old_al, old_st)` или None.
 
@@ -304,6 +319,11 @@ class ArticleRepository:
 
         Race protection (E5.0 #40): `_acquire_slug_lock(slug)` берётся
         ПЕРВЫМ — сериализует concurrent writes того же slug.
+
+        Optimistic concurrency (E5.2 #48): `if_match` — opt-in client-side
+        check. Если передан и не совпадает с current ETag → 412
+        PreconditionFailedError. Check проходит ВНУТРИ advisory lock'а —
+        atomic c последующим UPDATE.
         """
         await self._acquire_slug_lock(slug)
         allowed_strings = [level.value for level in access_levels]
@@ -315,6 +335,15 @@ class ArticleRepository:
         article = result.scalar_one_or_none()
         if article is None:
             return None
+
+        # E5.2 optimistic concurrency check (within advisory lock for atomicity).
+        if if_match is not None:
+            # Lazy import чтобы избежать circular (etag → models → ...).
+            from src.api.articles.etag import compute_article_etag
+
+            current_etag = compute_article_etag(article)
+            if current_etag != if_match:
+                raise PreconditionFailedError
 
         old_access_level = article.access_level
         old_status = article.status

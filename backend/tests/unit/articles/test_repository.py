@@ -1751,3 +1751,102 @@ async def test_search_empty_access_levels_returns_empty() -> None:
     out, has_more = await repo.search("x", frozenset())
     assert out == []
     assert has_more is False
+
+
+# ============================================================
+# If-Match (E5.2 #48) — optimistic concurrency для update
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_update_if_match_mismatch_raises_precondition_failed(
+    fake_article: Article,
+) -> None:
+    """E5.2: if_match != current ETag → PreconditionFailedError (412)."""
+    from src.api.articles.repository import PreconditionFailedError
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock(return_value=None)
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result])
+
+    repo = ArticleRepository(session)
+    with pytest.raises(PreconditionFailedError) as exc_info:
+        await repo.update(
+            "the-slug",
+            _valid_input(),
+            frozenset({AccessLevel.PUBLIC}),
+            actor_sub="actor",
+            if_match='W/"stale-etag"',  # не совпадает с current
+        )
+    assert exc_info.value.status_code == 412
+
+
+@pytest.mark.asyncio
+async def test_update_if_match_match_proceeds(
+    fake_article: Article,
+) -> None:
+    """E5.2: if_match совпадает с current ETag → update идёт нормально."""
+    from src.api.articles.etag import compute_article_etag
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result, max_result])
+
+    repo = ArticleRepository(session)
+    correct_etag = compute_article_etag(fake_article)
+    out = await repo.update(
+        "the-slug",
+        _valid_input(),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+        if_match=correct_etag,
+    )
+    assert out is not None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_no_if_match_legacy(
+    fake_article: Article,
+) -> None:
+    """E5.2: без if_match — legacy update без ETag check."""
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 0
+    session.execute = AsyncMock(side_effect=[MagicMock(), select_result, max_result])
+
+    repo = ArticleRepository(session)
+    out = await repo.update(
+        "the-slug",
+        _valid_input(),
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+        # if_match=None (default)
+    )
+    assert out is not None

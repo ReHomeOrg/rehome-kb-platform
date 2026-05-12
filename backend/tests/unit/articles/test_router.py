@@ -700,6 +700,7 @@ def _override_put_update(
         access_levels: frozenset[Any],
         *,
         actor_sub: str,
+        if_match: str | None = None,
     ) -> tuple[Article, str, str] | None:
         if return_value is None:
             return None
@@ -1769,3 +1770,272 @@ def test_search_extra_field_rejected(client: TestClient) -> None:
     """`extra='forbid'` — unknown поля → 422."""
     response = client.post("/api/v1/articles/search", json={"q": "x", "random": "field"})
     assert response.status_code == 422
+
+
+# ============================================================
+# ETag + If-None-Match + If-Match (E5.2 #48)
+# ============================================================
+
+
+def test_get_article_returns_etag_and_cache_headers(
+    client: TestClient,
+    override_session: Callable[[Article | None], None],
+    fake_article: Article,
+) -> None:
+    override_session(fake_article)
+    response = client.get(f"/api/v1/articles/{fake_article.slug}")
+    assert response.status_code == 200
+    assert response.headers["ETag"].startswith('W/"')
+    assert response.headers["Cache-Control"] == "public, max-age=60"
+    # Vary: Authorization — B1 plan-review (RFC 7234 §4.1).
+    assert response.headers["Vary"] == "Authorization"
+
+
+def test_get_article_if_none_match_returns_304(
+    client: TestClient,
+    override_session: Callable[[Article | None], None],
+    fake_article: Article,
+) -> None:
+    override_session(fake_article)
+    # First request — capture ETag.
+    first = client.get(f"/api/v1/articles/{fake_article.slug}")
+    etag = first.headers["ETag"]
+    # Second request — same ETag.
+    override_session(fake_article)
+    second = client.get(
+        f"/api/v1/articles/{fake_article.slug}",
+        headers={"If-None-Match": etag},
+    )
+    assert second.status_code == 304
+    # 304 body — пустой.
+    assert second.content == b""
+    # ETag и Cache-Control должны быть в 304 response.
+    assert second.headers["ETag"] == etag
+    assert second.headers["Cache-Control"] == "public, max-age=60"
+    assert second.headers["Vary"] == "Authorization"
+
+
+def test_get_article_if_none_match_mismatch_returns_200(
+    client: TestClient,
+    override_session: Callable[[Article | None], None],
+    fake_article: Article,
+) -> None:
+    override_session(fake_article)
+    response = client.get(
+        f"/api/v1/articles/{fake_article.slug}",
+        headers={"If-None-Match": 'W/"stale"'},
+    )
+    assert response.status_code == 200
+    # Новый ETag присутствует.
+    assert response.headers["ETag"] != 'W/"stale"'
+
+
+def test_put_with_if_match_passes_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Router передаёт If-Match header → repo.update."""
+    captured: dict[str, Any] = {}
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        access_levels: Any,
+        *,
+        actor_sub: str,
+        if_match: str | None = None,
+    ) -> tuple[Article, str, str] | None:
+        captured["if_match"] = if_match
+        return fake_article, "PUBLIC", "PUBLISHED"
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.update", _fake)
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/my-slug",
+            json={
+                "slug": "my-slug",
+                "title": "T",
+                "body_markdown": "B",
+                "category": "c",
+                "audience": "tenant",
+                "access_level": "PUBLIC",
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "If-Match": 'W/"abc123"',
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+    assert response.status_code == 200
+    assert captured["if_match"] == 'W/"abc123"'
+
+
+def test_put_without_if_match_passes_none_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Legacy behavior: без If-Match → if_match=None в repo."""
+    captured: dict[str, Any] = {}
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        access_levels: Any,
+        *,
+        actor_sub: str,
+        if_match: str | None = None,
+    ) -> tuple[Article, str, str] | None:
+        captured["if_match"] = if_match
+        return fake_article, "PUBLIC", "PUBLISHED"
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.update", _fake)
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        client.put(
+            "/api/v1/articles/my-slug",
+            json={
+                "slug": "my-slug",
+                "title": "T",
+                "body_markdown": "B",
+                "category": "c",
+                "audience": "tenant",
+                "access_level": "PUBLIC",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+    assert captured["if_match"] is None
+
+
+def test_put_with_stale_if_match_returns_412(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repo.update raises PreconditionFailedError → router 412."""
+    from src.api.articles.repository import PreconditionFailedError
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        access_levels: Any,
+        *,
+        actor_sub: str,
+        if_match: str | None = None,
+    ) -> tuple[Article, str, str] | None:
+        raise PreconditionFailedError
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.update", _fake)
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/my-slug",
+            json={
+                "slug": "my-slug",
+                "title": "T",
+                "body_markdown": "B",
+                "category": "c",
+                "audience": "tenant",
+                "access_level": "PUBLIC",
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "If-Match": 'W/"stale"',
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+    assert response.status_code == 412
+
+
+def test_history_returns_etag_and_cache_headers(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.api.articles.models import ArticleVersion
+
+    aid = uuid4()
+    v1 = ArticleVersion(
+        article_id=aid,
+        version=1,
+        event="CREATE",
+        author_sub="x",
+        new_status="DRAFT",
+        new_access_level="PUBLIC",
+    )
+    v1.changed_at = datetime(2026, 5, 12, tzinfo=UTC)
+    _override_list_versions(monkeypatch, [v1])
+    try:
+        response = client.get("/api/v1/articles/test-slug/history")
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+    assert response.headers["ETag"].startswith('W/"')
+    assert response.headers["Cache-Control"] == "public, max-age=60"
+    assert response.headers["Vary"] == "Authorization"
+
+
+def test_history_if_none_match_returns_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.api.articles.models import ArticleVersion
+
+    aid = uuid4()
+    v1 = ArticleVersion(
+        article_id=aid,
+        version=1,
+        event="CREATE",
+        author_sub="x",
+        new_status="DRAFT",
+        new_access_level="PUBLIC",
+    )
+    v1.changed_at = datetime(2026, 5, 12, tzinfo=UTC)
+    _override_list_versions(monkeypatch, [v1])
+    try:
+        first = client.get("/api/v1/articles/test/history")
+        etag = first.headers["ETag"]
+        _override_list_versions(monkeypatch, [v1])
+        second = client.get(
+            "/api/v1/articles/test/history",
+            headers={"If-None-Match": etag},
+        )
+    finally:
+        _cleanup_session_override()
+    assert second.status_code == 304
+    assert second.content == b""
