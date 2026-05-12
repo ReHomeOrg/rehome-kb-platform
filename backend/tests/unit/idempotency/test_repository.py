@@ -72,6 +72,7 @@ async def test_save_inserts_entry_with_24h_ttl() -> None:
     session = MagicMock()
     session.add = MagicMock(side_effect=lambda obj: added.append(obj))
     session.flush = AsyncMock(return_value=None)
+    session.commit = AsyncMock(return_value=None)
     repo = IdempotencyKeyRepository(session)
     entry = await repo.save(
         key="k",
