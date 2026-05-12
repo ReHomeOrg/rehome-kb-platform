@@ -6,7 +6,7 @@ write) добавляются в следующих эпиках через до
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 
 from src.api.articles.audit import (
     log_article_archived,
@@ -19,6 +19,11 @@ from src.api.articles.cursor import (
     decode_score_cursor,
     encode_cursor,
     encode_score_cursor,
+)
+from src.api.articles.etag import (
+    DEFAULT_CACHE_HEADERS,
+    compute_article_etag,
+    compute_history_etag,
 )
 from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.articles.schemas import (
@@ -157,13 +162,15 @@ async def list_articles(
 
 @router.get(
     "/{slug}",
-    response_model=ArticleResponse,
     summary="Получить статью по slug",
     responses={
+        200: {"description": "Статья"},
+        304: {"description": "Не изменилась с last ETag"},
         404: {"description": "Статья не существует или недоступна текущему scope"},
     },
 )
 async def get_article_by_slug(
+    response: Response,
     slug: str = Path(
         ...,
         min_length=1,
@@ -171,9 +178,10 @@ async def get_article_by_slug(
         pattern=SLUG_PATTERN,
         description="Канонический идентификатор статьи (ADR-0006)",
     ),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: ArticleRepository = Depends(get_article_repository),
-) -> ArticleResponse:
+) -> Any:
     """Отдаёт опубликованную статью с фильтрацией по access_level.
 
     ADR-0008: router принимает `ArticleRepository`, не `AsyncSession` —
@@ -182,6 +190,10 @@ async def get_article_by_slug(
 
     Маскировка: если статья существует, но scope её не видит, возвращаем 404
     (не 403) — клиент не должен узнавать факт существования закрытого ресурса.
+
+    E5.2: ETag header + `If-None-Match` → 304 Not Modified (conditional GET).
+    `Vary: Authorization` — shared proxy не leaks STAFF body anonymous'у.
+    ETag computes ПОСЛЕ source check — не утекает visibility.
     """
     if not access_levels:
         # Defence-in-depth: compute_access_levels всегда возвращает минимум
@@ -195,6 +207,19 @@ async def get_article_by_slug(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Article not found",
         )
+
+    # E5.2: compute ETag после source check (не leak visibility).
+    etag = compute_article_etag(article)
+    if if_none_match is not None and if_none_match == etag:
+        # 304 Not Modified: только headers, no body.
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED,
+            headers={"ETag": etag, **DEFAULT_CACHE_HEADERS},
+        )
+
+    response.headers["ETag"] = etag
+    for k, v in DEFAULT_CACHE_HEADERS.items():
+        response.headers[k] = v
     return ArticleResponse.model_validate(article)
 
 
@@ -287,6 +312,7 @@ async def create_article(
         401: {"description": "Не аутентифицирован"},
         403: {"description": "Недостаточный scope или target access_level недоступен"},
         404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
+        412: {"description": "If-Match не совпадает с current ETag (E5.2)"},
         422: {"description": "Невалидный payload или slug-mismatch"},
     },
 )
@@ -299,6 +325,7 @@ async def replace_article(
         pattern=SLUG_PATTERN,
         description="Канонический идентификатор статьи (ADR-0006)",
     ),
+    if_match: str | None = Header(default=None, alias="If-Match"),
     claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
@@ -333,7 +360,13 @@ async def replace_article(
     # что target ему недоступен; источник статьи остаётся опаковым.
     ensure_can_write_access_level(payload.access_level, access_levels)
 
-    updated = await repo.update(slug, payload, access_levels, actor_sub=claims["sub"])
+    updated = await repo.update(
+        slug,
+        payload,
+        access_levels,
+        actor_sub=claims["sub"],
+        if_match=if_match,
+    )
     if updated is None:
         # Source check (ADR-0003 mask): нет статьи ИЛИ scope её не видит.
         raise HTTPException(
@@ -407,13 +440,15 @@ async def archive_article(
 
 @router.get(
     "/{slug}/history",
-    response_model=ArticleHistoryResponse,
     summary="История изменений статьи",
     responses={
+        200: {"description": "История версий"},
+        304: {"description": "Не изменилась с last ETag"},
         404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
     },
 )
 async def get_article_history(
+    response: Response,
     slug: str = Path(
         ...,
         min_length=1,
@@ -421,9 +456,10 @@ async def get_article_history(
         pattern=SLUG_PATTERN,
         description="Канонический идентификатор статьи (ADR-0006)",
     ),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: ArticleRepository = Depends(get_article_repository),
-) -> ArticleHistoryResponse:
+) -> Any:
     """История версий статьи в порядке `version DESC`.
 
     Visibility наследуется от parent article (ADR-0003 source-mask):
@@ -432,6 +468,9 @@ async def get_article_history(
     статьи скрыта (даже для writer'а) — endpoint следует публичному read
     инварианту. Editor-history (`/staff/.../history`) — отдельный endpoint
     в будущем (E4.x).
+
+    E5.2: ETag (от max version) + `If-None-Match` → 304.
+    `Vary: Authorization` — shared-proxy safety.
     """
     if not access_levels:
         # Defence-in-depth (как в `GET /articles/{slug}`).
@@ -443,6 +482,18 @@ async def get_article_history(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Article not found",
         )
+
+    # E5.2: ETag computes ПОСЛЕ source check (не leak visibility).
+    etag = compute_history_etag(versions)
+    if if_none_match is not None and if_none_match == etag:
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED,
+            headers={"ETag": etag, **DEFAULT_CACHE_HEADERS},
+        )
+
+    response.headers["ETag"] = etag
+    for k, v in DEFAULT_CACHE_HEADERS.items():
+        response.headers[k] = v
 
     # Мапим `author_sub → author` явно для соответствия OpenAPI.
     return ArticleHistoryResponse(
