@@ -8,11 +8,13 @@ router'ы не имеют права работать напрямую с AsyncS
 от обхода фильтрации в обход type-system.
 """
 
+from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
 from src.api.auth.scope import AccessLevel
+from src.api.db import get_session
 
 
 class ArticleRepository:
@@ -56,3 +58,15 @@ class ArticleRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+def get_article_repository(
+    session: AsyncSession = Depends(get_session),
+) -> ArticleRepository:
+    """FastAPI Depends-factory для ArticleRepository.
+
+    Router'ы используют ИМЕННО эту dependency, не `get_session` напрямую —
+    так инвариант ADR-0008 «router не работает с AsyncSession» защищён
+    type-system'ом: signature endpoint'а не содержит AsyncSession.
+    """
+    return ArticleRepository(session)

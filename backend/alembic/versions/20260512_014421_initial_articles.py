@@ -77,8 +77,11 @@ def upgrade() -> None:
         sa.UniqueConstraint("slug", name="uq_articles_slug"),
         # CHECK constraints — БД отвергает запись с невалидным enum-значением
         # даже если ORM/Pydantic будет обойдены.
+        # OpenAPI Audience enum (docs/handoff/01_postanovka/04_openapi.yaml).
+        # Синхронизировано с Article.allowed_audiences() — тест
+        # test_models_check_sync ловит расхождение.
         sa.CheckConstraint(
-            "audience IN ('tenant', 'landlord', 'all', 'staff')",
+            "audience IN ('all', 'guest', 'tenant', 'landlord', 'agent', 'staff')",
             name="ck_articles_audience",
         ),
         sa.CheckConstraint(

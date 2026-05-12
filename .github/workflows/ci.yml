@@ -261,7 +261,8 @@ jobs:
           # ADR-0003: запросы к articles/documents/premises_cards/chunks
           # должны идти через ORM-репозиторий, не через text(). Это блокирует
           # обход storage-level фильтра через сырой SQL.
-          if grep -rEn 'text\(["'\''].*(SELECT|UPDATE|DELETE|INSERT).*(articles|documents|premises_cards|chunks)' \
+          # `f?` ловит f-string варианты: text("..."), text(f"..."), text(rf"...").
+          if grep -rEn 'text\([rRfFbB]{0,2}["'\''].*(SELECT|UPDATE|DELETE|INSERT).*(articles|documents|premises_cards|chunks)' \
              --include='*.py' backend/; then
             echo "❌ Найден raw text() SQL для access_level-protected таблицы — используй Repository"
             exit 1

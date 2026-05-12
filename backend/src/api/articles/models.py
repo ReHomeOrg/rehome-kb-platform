@@ -85,9 +85,14 @@ class Article(Base):
     def __repr__(self) -> str:  # pragma: no cover (debug only)
         return f"<Article slug={self.slug!r} status={self.status!r}>"
 
+    # Источник истины для enum-значений — OpenAPI schema (docs/handoff/
+    # 01_postanovka/04_openapi.yaml: components/schemas/{Audience,
+    # ArticleStatus, AccessLevel}). Эти tuple'ы дублируются в CHECK
+    # constraint миграции 0001_initial_articles; test_models_check_sync.py
+    # гарантирует, что значения не разъедутся.
     @staticmethod
     def allowed_audiences() -> tuple[str, ...]:
-        return ("tenant", "landlord", "all", "staff")
+        return ("all", "guest", "tenant", "landlord", "agent", "staff")
 
     @staticmethod
     def allowed_statuses() -> tuple[str, ...]:
