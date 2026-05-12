@@ -34,6 +34,12 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
     )
 
+    # LLM provider selection (E3 Chat MVP). 'mock' для dev/test
+    # (детерминистический echo), 'vllm' — production self-hosted
+    # (адаптер в E3.7). Unknown value — ValueError из factory.
+    llm_provider: str = Field(default="mock", alias="LLM_PROVIDER")
+    llm_max_tokens: int = Field(default=1024, alias="LLM_MAX_TOKENS")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
