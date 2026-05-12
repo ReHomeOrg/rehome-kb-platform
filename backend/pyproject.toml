@@ -57,13 +57,17 @@ module = "tests.*"
 disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
+# По умолчанию исключаем integration-тесты — они требуют docker compose
+# Keycloak + uvicorn (отдельный CI job `Integration (Keycloak)`).
+# Запуск integration: `pytest tests/integration -m integration`.
 addopts = "-v --strict-markers"
 asyncio_mode = "auto"
 markers = [
     "security: security tests (access_level bypass attempts)",
+    "integration: integration tests requiring docker compose Keycloak (#21 / E1.3.4)",
 ]
 
 [tool.coverage.run]

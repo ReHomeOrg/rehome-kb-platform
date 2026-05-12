@@ -20,10 +20,13 @@ class Settings(BaseSettings):
     # Keycloak / OIDC settings. См. ADR-0007.
     keycloak_url: str = Field(default="http://localhost:8080", alias="KC_URL")
     keycloak_realm: str = Field(default="rehome", alias="KC_REALM")
-    keycloak_audience: str = Field(default="account", alias="KC_AUDIENCE")
-    # На E1.3.2 audience-проверка отключена до integration теста с реальным
-    # Keycloak (E1.3.4). TODO(#17 follow-up): после E1.3.4 включить True.
-    verify_aud: bool = Field(default=False, alias="KC_VERIFY_AUD")
+    # Реальный `aud` для m2m токенов обеспечивается audience mapper в
+    # realm-export.json (см. infra/keycloak/realm-export.json clients[0]).
+    # Issue #21 (E1.3.4) добавил mapper и включил verify_aud по умолчанию.
+    keycloak_audience: str = Field(
+        default="rehome-platform-m2m", alias="KC_AUDIENCE"
+    )
+    verify_aud: bool = Field(default=True, alias="KC_VERIFY_AUD")
 
     model_config = SettingsConfigDict(
         env_file=None,

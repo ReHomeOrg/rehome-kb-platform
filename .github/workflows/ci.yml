@@ -156,6 +156,80 @@ jobs:
         run: npm audit --omit=dev --audit-level=critical
 
   # ============================================================
+  # Integration: end-to-end с реальным Keycloak (docker compose)
+  # Закрыто в Issue #21 (E1.3.4). Запускает Keycloak через
+  # infra/docker-compose.yml + uvicorn backend, прогоняет тесты
+  # помеченные @pytest.mark.integration.
+  # ============================================================
+  integration:
+    name: Integration (Keycloak)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Start Keycloak + Postgres
+        working-directory: infra
+        run: docker compose up -d keycloak postgres-keycloak
+
+      - name: Wait for Keycloak ready (smoke-test)
+        working-directory: infra
+        run: bash keycloak/smoke-test.sh
+        env:
+          HEALTH_RETRIES: "90"  # 3 минуты на cold-start Keycloak в CI
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Start backend uvicorn (background)
+        working-directory: backend
+        env:
+          KC_URL: http://localhost:8080
+          KC_REALM: rehome
+          KC_AUDIENCE: rehome-platform-m2m
+          KC_VERIFY_AUD: "true"
+        run: |
+          nohup uvicorn src.api.main:app --host 127.0.0.1 --port 8000 \
+            > /tmp/uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1; then
+              echo "uvicorn ready"; break
+            fi
+            sleep 1
+          done
+
+      - name: Run integration tests
+        working-directory: backend
+        env:
+          KC_URL: http://localhost:8080
+          KC_REALM: rehome
+          KC_M2M_CLIENT_SECRET: rehome-platform-m2m-local-dev-secret
+          KB_API_URL: http://127.0.0.1:8000
+        run: pytest tests/integration -m integration -v
+
+      - name: Show uvicorn log on failure
+        if: failure()
+        run: cat /tmp/uvicorn.log || true
+
+      - name: Show Keycloak log on failure
+        if: failure()
+        working-directory: infra
+        run: docker compose logs keycloak || true
+
+      - name: Stop services
+        if: always()
+        working-directory: infra
+        run: docker compose down -v
+
+  # ============================================================
   # Анти-костыли: проверка кода на типичные ошибки
   # ============================================================
   anti-crutches:

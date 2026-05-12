@@ -34,13 +34,12 @@ class OIDCVerifier:
         self._settings = settings
         self._jwks_client = PyJWKClient(settings.keycloak_jwks_url)
         if not settings.verify_aud:
-            # ВАЖНО: на E1.3.2 audience проверка отключена через flag.
-            # TODO(#17 follow-up E1.3.4): включить verify_aud=True после
-            # integration теста с реальным Keycloak (тогда увидим, какой
-            # `aud` отдаёт Keycloak для m2m и browser токенов).
+            # Audience verification отключена через KC_VERIFY_AUD=false override.
+            # По умолчанию verify_aud=True (закрыто в Issue #21 / E1.3.4 после
+            # добавления audience mapper в realm-export.json).
             logger.warning(
                 "auth.audience_verification_disabled",
-                extra={"reason": "E1.3.2 phase — pending integration test in E1.3.4"},
+                extra={"reason": "KC_VERIFY_AUD=false override"},
             )
 
     def verify(self, token: str) -> dict[str, Any]:
