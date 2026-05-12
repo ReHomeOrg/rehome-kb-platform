@@ -12,7 +12,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import cast, func, literal, select, tuple_
+from sqlalchemy import cast, func, literal, select, text, tuple_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,12 +153,38 @@ class ArticleRepository:
         has_more = len(rows) > limit
         return rows[:limit], has_more
 
+    async def _acquire_slug_lock(self, slug: str) -> None:
+        """Advisory transaction lock на hashtext(slug) для serialization writes.
+
+        **Postgres-specific** (SQLite-fallback unit-тесты подменяют session).
+        Lock берётся через `pg_advisory_xact_lock` — авто-релиз на commit/
+        rollback (включая connection drop). Сериализует concurrent writes
+        одной и той же статьи (по slug); НЕ блокирует read.
+
+        Race-fix для E2.3 `_next_version` (#36, #40): без lock'а два
+        concurrent PUT того же slug получат одинаковый MAX(version) →
+        UNIQUE constraint violation → 500. С lock'ом — второй writer ждёт
+        первого, читает свежий MAX, INSERT'ит version+1 normally.
+
+        `hashtext(slug)` — Postgres builtin int4 hash. Collision-risk
+        ~1/2^31 — не correctness issue, только slight performance
+        degradation при coincidental collision (две разные статьи
+        сериализуются как одна).
+
+        Вызывается ПЕРВЫМ в `update/archive/patch` — ДО SELECT article.
+        Закрывает TOCTOU window для всей последовательности (SELECT →
+        mutate → next_version → INSERT version → commit).
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:slug))").bindparams(slug=slug)
+        )
+
     async def _next_version(self, article_id: UUID) -> int:
         """MAX(version) + 1 для article_id; 1 если версий ещё нет.
 
-        Race: concurrent write двух writers получит одинаковый next; UNIQUE
-        (article_id, version) constraint защищает — один из двух упадёт
-        IntegrityError → 500. Backlog E5 (ETag + advisory lock).
+        Race protection: `_acquire_slug_lock(slug)` берётся в write-методах
+        ДО этого вызова — concurrent writers того же slug сериализуются,
+        UNIQUE (article_id, version) violation не возникает.
         """
         stmt = select(func.max(ArticleVersion.version)).where(
             ArticleVersion.article_id == article_id
@@ -275,7 +301,11 @@ class ArticleRepository:
         IntegrityError (CHECK violations) пробрасываются → 500. Pydantic
         валидация защищает от слов нарушения; backlog #28 для полного
         enum-rollout, до тех пор это знаемый risk.
+
+        Race protection (E5.0 #40): `_acquire_slug_lock(slug)` берётся
+        ПЕРВЫМ — сериализует concurrent writes того же slug.
         """
+        await self._acquire_slug_lock(slug)
         allowed_strings = [level.value for level in access_levels]
         stmt = select(Article).where(
             Article.slug == slug,
@@ -345,7 +375,11 @@ class ArticleRepository:
         `updated_at` не обновится (нет UPDATE SQL). 204 всё равно
         возвращается per RFC 7231. Audit-log пишется с `was_status=
         'ARCHIVED'` — сигнал повторной DELETE для алертинга.
+
+        Race protection (E5.0 #40): `_acquire_slug_lock(slug)` берётся
+        ПЕРВЫМ — сериализует concurrent writes того же slug.
         """
+        await self._acquire_slug_lock(slug)
         allowed_strings = [level.value for level in access_levels]
         stmt = select(Article).where(
             Article.slug == slug,
@@ -405,8 +439,12 @@ class ArticleRepository:
         через PATCH создаёт event=UPDATE (НЕ event=ARCHIVE) — намеренное
         различие с DELETE для семантики history. Для архивации лучше DELETE.
 
+        Race protection (E5.0 #40): `_acquire_slug_lock(slug)` берётся
+        ПЕРВЫМ — сериализует concurrent writes того же slug.
+
         Возвращает `(article, old_access_level, old_status)` или None для router.
         """
+        await self._acquire_slug_lock(slug)
         allowed_strings = [level.value for level in access_levels]
         stmt = select(Article).where(
             Article.slug == slug,

@@ -417,3 +417,64 @@ def test_patch_empty_payload_returns_200_no_version(
     history = kb_client.get(f"/api/v1/articles/{slug}/history")
     # Только 1 версия (CREATE из POST).
     assert len(history.json()["data"]) == 1
+
+
+# ============================================================
+# Concurrent write race-fix (E5.0 #40)
+# ============================================================
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_put_same_slug_both_succeed(m2m_token: str, db_cleanup: list[str]) -> None:
+    """E5.0: два одновременных PUT того же slug → ОБА 200 (advisory lock
+    сериализует; UNIQUE version constraint не нарушается).
+
+    Без fix: один из двух с ~50% вероятностью получит 500 (IntegrityError на
+    UNIQUE (article_id, version)). С fix: оба успешно, версии = {2, 3}.
+    """
+    import asyncio
+
+    import httpx
+
+    slug = f"e50-race-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+    auth = {"Authorization": f"Bearer {m2m_token}"}
+    kb_base = os.environ.get("KB_API_URL", "http://127.0.0.1:8000")
+
+    # Создаём статью.
+    async with httpx.AsyncClient(base_url=kb_base, timeout=10.0) as client:
+        post = await client.post("/api/v1/articles", headers=auth, json=_payload(slug))
+        assert post.status_code == 201
+
+        # Параллельные PUT того же slug.
+        async def _put(title: str) -> httpx.Response:
+            return await client.put(
+                f"/api/v1/articles/{slug}",
+                headers=auth,
+                json={**_payload(slug), "title": title},
+            )
+
+        results = await asyncio.gather(
+            _put("Concurrent A"),
+            _put("Concurrent B"),
+            return_exceptions=True,
+        )
+
+    # Оба запроса — 200 (нет 500).
+    assert len(results) == 2
+    for r in results:
+        assert not isinstance(r, BaseException), f"Unexpected exception: {r}"
+        assert isinstance(r, httpx.Response)
+        assert r.status_code == 200, r.text
+
+    # /history содержит 3 версии: CREATE (v=1) + 2 × UPDATE (v=2, v=3).
+    import httpx as _httpx
+
+    async with _httpx.AsyncClient(base_url=kb_base, timeout=10.0) as client:
+        history = await client.get(f"/api/v1/articles/{slug}/history")
+    assert history.status_code == 200
+    versions = history.json()["data"]
+    assert len(versions) == 3
+    version_numbers = sorted(v["version"] for v in versions)
+    assert version_numbers == [1, 2, 3]
