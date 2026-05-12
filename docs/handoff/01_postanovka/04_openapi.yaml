@@ -295,6 +295,14 @@ paths:
             Cache-Control:
               schema:
                 type: string
+            Vary:
+              description: |
+                Фиксируется как `Authorization` для предотвращения утечки
+                STAFF-ответа через shared proxy анонимному пользователю
+                (ADR-0003, RFC 7234 §4.1).
+              schema:
+                type: string
+                example: Authorization
           content:
             application/json:
               schema:
@@ -306,6 +314,21 @@ paths:
                       $ref: '#/components/schemas/Article'
         '304':
           description: Не изменилось с last ETag
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Vary:
+              description: |
+                Фиксируется как `Authorization` для предотвращения утечки
+                STAFF-ответа через shared proxy анонимному пользователю
+                (ADR-0003, RFC 7234 §4.1).
+              schema:
+                type: string
+                example: Authorization
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -344,6 +367,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
     patch:
       tags:
       - Articles
@@ -399,9 +424,28 @@ paths:
           type: string
           pattern: ^[a-z0-9-]+$
       - $ref: '#/components/parameters/RequestId'
+      - name: If-None-Match
+        in: header
+        schema:
+          type: string
       responses:
         '200':
           description: История версий
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Vary:
+              description: |
+                Фиксируется как `Authorization` для предотвращения утечки
+                STAFF-ответа через shared proxy анонимному пользователю
+                (ADR-0003, RFC 7234 §4.1).
+              schema:
+                type: string
+                example: Authorization
           content:
             application/json:
               schema:
@@ -413,6 +457,23 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/ArticleVersion'
+        '304':
+          description: Не изменилось с last ETag
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Vary:
+              description: |
+                Фиксируется как `Authorization` для предотвращения утечки
+                STAFF-ответа через shared proxy анонимному пользователю
+                (ADR-0003, RFC 7234 §4.1).
+              schema:
+                type: string
+                example: Authorization
   /api/v1/articles/search:
     post:
       tags:
@@ -4577,6 +4638,19 @@ components:
             $ref: '#/components/schemas/Error'
     Conflict:
       description: Конфликт версий или дубликат
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: |
+        `If-Match` не совпадает с current ETag статьи (optimistic
+        concurrency, RFC 7232 §4.2). Клиент должен перечитать ресурс
+        и повторить запрос с актуальным ETag.
+
+        Security-инвариант (anti-leak): current ETag в поле `detail`
+        ответа НЕ возвращается. Это защищает от enumeration по версии
+        статьи через сравнение тел 412-ответов (см. PR #49).
       content:
         application/problem+json:
           schema:
