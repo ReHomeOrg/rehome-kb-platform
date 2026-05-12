@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from src.api.articles.models import Article
 from src.api.articles.repository import ArticleRepository
@@ -372,3 +373,80 @@ async def test_list_filtered_empty_access_levels_returns_empty(
     rows, has_more = await repo.list_filtered(frozenset(), limit=20)
     assert rows == []
     assert has_more is False
+
+
+# ============================================================
+# create tests
+# ============================================================
+
+
+def _valid_input() -> Any:
+    from src.api.articles.schemas import ArticleInput
+
+    return ArticleInput(
+        slug="new-article",
+        title="Тайтл",
+        body_markdown="# Body",
+        category="guide",
+        audience="tenant",
+        access_level=AccessLevel.PUBLIC,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_inserts_article_and_returns_with_fields() -> None:
+    """Happy path: add → flush → commit → refresh → возврат Article."""
+    session = MagicMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock(return_value=None)
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    session.rollback = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    result = await repo.create(_valid_input())
+    assert result.slug == "new-article"
+    assert result.access_level == "PUBLIC"  # StrEnum → str для DB
+    session.add.assert_called_once()
+    session.flush.assert_awaited_once()
+    session.commit.assert_awaited_once()
+    session.refresh.assert_awaited_once_with(result)
+
+
+@pytest.mark.asyncio
+async def test_create_slug_conflict_raises_409() -> None:
+    """IntegrityError с `uq_articles_slug` → SlugConflictError(409)."""
+    from src.api.articles.repository import SlugConflictError
+
+    session = MagicMock()
+    session.add = MagicMock()
+    # `orig` exception text имитирует asyncpg unique violation message.
+    orig = Exception("duplicate key value violates unique constraint 'uq_articles_slug'")
+    session.flush = AsyncMock(side_effect=IntegrityError("INSERT...", {}, orig))
+    session.commit = AsyncMock(return_value=None)
+    session.rollback = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    with pytest.raises(SlugConflictError) as exc:
+        await repo.create(_valid_input())
+    assert exc.value.status_code == 409
+    session.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_unknown_integrity_error_propagated() -> None:
+    """IntegrityError, не slug-conflict (например CHECK violation) → 500/пробрасывается."""
+    session = MagicMock()
+    session.add = MagicMock()
+    orig = Exception("violates check constraint 'ck_articles_audience'")
+    session.flush = AsyncMock(side_effect=IntegrityError("INSERT...", {}, orig))
+    session.commit = AsyncMock(return_value=None)
+    session.rollback = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    with pytest.raises(IntegrityError):
+        await repo.create(_valid_input())
+    session.rollback.assert_awaited_once()
+
+
+# Импорт IntegrityError для тестов выше — добавим в начале файла.

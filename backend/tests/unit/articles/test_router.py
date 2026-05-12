@@ -344,3 +344,325 @@ def test_list_articles_no_filter_passes_none_to_repo(
     assert capture["audience"] is None
     assert capture["language"] is None
     assert capture["cursor"] is None
+
+
+# ============================================================
+# POST /api/v1/articles — write endpoint (E4.1)
+# ============================================================
+
+
+def _post_payload(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "slug": "new-article",
+        "title": "Тайтл",
+        "body_markdown": "# Body",
+        "category": "guide",
+        "audience": "tenant",
+        "access_level": "PUBLIC",
+    }
+    base.update(overrides)
+    return base
+
+
+def _override_post_create(
+    monkeypatch: pytest.MonkeyPatch,
+    return_article: Article | None = None,
+    raise_exc: Exception | None = None,
+) -> None:
+    """Подменяет ArticleRepository.create."""
+
+    async def _fake(self: Any, payload: Any) -> Article:
+        if raise_exc is not None:
+            raise raise_exc
+        assert return_article is not None
+        # Имитируем server-defaults через подстановку из payload.
+        return_article.slug = payload.slug
+        return_article.title = payload.title
+        return_article.body_markdown = payload.body_markdown
+        return_article.category = payload.category
+        return_article.audience = payload.audience
+        return_article.access_level = payload.access_level.value
+        return_article.status = payload.status
+        return_article.language = payload.language
+        return_article.tags = list(payload.tags)
+        return return_article
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_post_articles_401_without_token(client: TestClient) -> None:
+    """Гость без токена → 401 (через require_authenticated)."""
+    response = client.post("/api/v1/articles", json=_post_payload())
+    assert response.status_code == 401
+
+
+def test_post_articles_401_with_invalid_token(client: TestClient) -> None:
+    """Невалидный JWT → 401 (через get_current_claims → InvalidTokenError)."""
+    response = client.post(
+        "/api/v1/articles",
+        json=_post_payload(),
+        headers={"Authorization": "Bearer not.a.valid.jwt"},
+    )
+    assert response.status_code == 401
+
+
+def test_post_articles_403_when_tenant_scope(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+) -> None:
+    """tenant scope не содержит STAFF → 403 (через require_access_level)."""
+    token = make_jwt(roles=["tenant"])
+    response = client.post(
+        "/api/v1/articles",
+        json=_post_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_post_articles_201_when_staff_admin_creates_public(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="admin-user-sub")
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(slug="brand-new", access_level="PUBLIC"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 201, response.text
+    assert response.headers["Location"] == "/api/v1/articles/brand-new"
+    body = response.json()
+    assert body["slug"] == "brand-new"
+    assert body["access_level"] == "PUBLIC"
+
+
+@pytest.mark.security
+def test_post_articles_403_when_staff_admin_tries_hr_restricted(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """ADR-0003 critical write-extension: staff_admin БЕЗ HR_RESTRICTED → 403."""
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(access_level="HR_RESTRICTED"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 403
+    assert "access_level" in response.json()["detail"].lower()
+
+
+@pytest.mark.security
+def test_post_articles_201_when_staff_hr_creates_hr_restricted(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Positive: staff_hr ИМЕЕТ HR_RESTRICTED level → может создать.
+
+    Этот тест защищает от регрессии в `SCOPE_TO_ACCESS_LEVELS` map —
+    если кто-то случайно уберёт HR_RESTRICTED из staff_hr, тест упадёт.
+    """
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_hr"], sub="hr-user")
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(slug="hr-article", access_level="HR_RESTRICTED"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["access_level"] == "HR_RESTRICTED"
+
+
+@pytest.mark.parametrize(
+    "broken_payload",
+    [
+        {},  # пустой
+        {
+            "slug": "ok",
+            "title": "ok",
+            "body_markdown": "x",
+            "category": "c",
+            "audience": "a",
+        },  # нет access_level
+        {
+            **{
+                "slug": "BadSlug",
+                "title": "x",
+                "body_markdown": "x",
+                "category": "c",
+                "audience": "a",
+                "access_level": "PUBLIC",
+            }
+        },  # bad slug pattern
+        {
+            **{
+                "slug": "ok",
+                "title": "x",
+                "body_markdown": "x",
+                "category": "c",
+                "audience": "a",
+                "access_level": "INVALID",
+            }
+        },  # bad enum
+        {
+            **{
+                "slug": "ok",
+                "title": "x",
+                "body_markdown": "x",
+                "category": "c",
+                "audience": "a",
+                "access_level": "PUBLIC",
+                "extra": "field",
+            }
+        },  # extra forbidden
+    ],
+)
+def test_post_articles_422_when_payload_invalid(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    broken_payload: dict[str, Any],
+) -> None:
+    """Pydantic schema валидирует до router-логики → 422.
+
+    Даже без токена 422 теоретически возможен, но FastAPI обычно сначала
+    запускает body parsing — поэтому добавляем токен, чтобы не получить
+    401 раньше валидации (мы тестируем именно валидацию).
+    """
+    token = make_jwt(roles=["staff_admin"])
+    response = client.post(
+        "/api/v1/articles",
+        json=broken_payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_post_articles_409_when_slug_exists(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.api.articles.repository import SlugConflictError
+
+    _override_post_create(monkeypatch, raise_exc=SlugConflictError("dup"))
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(slug="dup"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 409
+
+
+def test_post_articles_audit_log_emitted_without_content(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ФЗ-152: audit-log содержит метаданные, НЕ body_markdown/title/summary."""
+    import logging
+
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="actor-sub-uuid")
+        caplog.set_level(logging.INFO, logger="rehome.kb.audit")
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(slug="audit-test", access_level="PUBLIC"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 201
+    # Запись присутствует
+    audit_records = [r for r in caplog.records if r.name == "rehome.kb.audit"]
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec.getMessage() == "articles.created"
+    # Метаданные присутствуют.
+    assert getattr(rec, "actor_sub", None) == "actor-sub-uuid"
+    assert getattr(rec, "slug", None) == "audit-test"
+    assert getattr(rec, "access_level", None) == "PUBLIC"
+    # Контент НЕ должен утекать.
+    for attr in ("body_markdown", "title", "summary", "short_answer"):
+        assert not hasattr(rec, attr), f"Audit log утекает '{attr}'"
+
+
+def test_post_articles_actor_sub_from_jwt_not_payload(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Security: actor_sub берётся из JWT, не из payload. Атака с подменой автора отклоняется."""
+    import logging
+
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="real-actor")
+        caplog.set_level(logging.INFO, logger="rehome.kb.audit")
+        # Попытка передать `actor_sub` в payload → должна быть отвергнута
+        # (extra='forbid' в schema).
+        response = client.post(
+            "/api/v1/articles",
+            json={**_post_payload(slug="x"), "actor_sub": "spoofed-actor"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    # Schema отвергает unknown field → 422.
+    assert response.status_code == 422
+
+
+@pytest.mark.security
+def test_post_articles_staff_support_cannot_create_legal(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """staff_support имеет STAFF и ниже, но не LEGAL → 403."""
+    _override_post_create(monkeypatch, return_article=fake_article)
+    try:
+        token = make_jwt(roles=["staff_support"])
+        response = client.post(
+            "/api/v1/articles",
+            json=_post_payload(access_level="LEGAL"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 403
