@@ -8,7 +8,7 @@ exposure для secret-категории.
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
@@ -50,6 +50,24 @@ class SendMessageInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str = Field(min_length=_CONTENT_MIN_LENGTH, max_length=_CONTENT_MAX_LENGTH)
+
+
+# Spec OpenAPI 04 line 1010: comment max_length=1000.
+_FEEDBACK_COMMENT_MAX_LENGTH = 1000
+
+
+class FeedbackInput(BaseModel):
+    """Payload для POST /chat/sessions/{id}/feedback (E3.5 #69).
+
+    OpenAPI 04 line 976-1013. message_id обязателен, rating ∈ {up, down}.
+    comment optional, max 1000 chars (anti-spam, anti-DoS на JSONB).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: UUID
+    rating: Literal["up", "down"]
+    comment: str | None = Field(default=None, max_length=_FEEDBACK_COMMENT_MAX_LENGTH)
 
 
 class ChatSessionResponse(BaseModel):

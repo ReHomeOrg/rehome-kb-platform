@@ -29,6 +29,7 @@ from src.api.chat.schemas import (
     ChatSessionDetailResponse,
     ChatSessionResponse,
     CreateSessionInput,
+    FeedbackInput,
     SendMessageInput,
 )
 from src.api.chat.sse import format_sse_event
@@ -279,3 +280,40 @@ async def delete_session(
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/sessions/{session_id}/feedback",
+    status_code=status.HTTP_201_CREATED,
+    summary="Оставить фидбек на ответ ассистента",
+)
+async def post_feedback(
+    session_id: UUID = Path(...),
+    payload: FeedbackInput = Body(...),
+    owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
+    repo: ChatRepository = Depends(get_chat_repository),
+) -> Response:
+    """`POST /chat/sessions/{id}/feedback` — feedback ratin/comment на message.
+
+    Двухступенчатый owner-gate (E3.5 #69):
+    1. session принадлежит caller'у (через `get_session_by_owner`).
+    2. message принадлежит указанной session (`WHERE session_id =`).
+
+    404 mask на любую из ошибок — клиент не различает причину.
+    Idempotent: повторный POST с тем же message_id overwrite'ит feedback.
+    """
+    user_id, session_token = owner
+    result = await repo.set_feedback(
+        payload.message_id,
+        session_id=session_id,
+        user_id=user_id,
+        session_token=session_token,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Session or message not found",
+        )
+    return Response(status_code=status.HTTP_201_CREATED)

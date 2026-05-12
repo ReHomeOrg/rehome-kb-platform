@@ -296,27 +296,138 @@ async def test_append_message_adds_to_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_feedback_updates_message() -> None:
-    msg = _make_message(uuid4())
-    session = _session_with_result(scalar=msg)
+async def test_set_feedback_owner_match_updates_message() -> None:
+    """E3.5: set_feedback с owner-match → updates feedback и returns message."""
+    target_session = _make_session(user_id=uuid4())
+    msg = _make_message(target_session.id, role="assistant", content="x")
+
+    # 2 SELECT: get_session_by_owner → message scoped to session
+    result_session = MagicMock()
+    result_session.scalar_one_or_none.return_value = target_session
+    result_msg = MagicMock()
+    result_msg.scalar_one_or_none.return_value = msg
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[result_session, result_msg])
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
     repo = ChatRepository(session)
-    result = await repo.set_feedback(msg.id, rating="up", comment="great")
+    result = await repo.set_feedback(
+        msg.id,
+        session_id=target_session.id,
+        user_id=target_session.user_id,
+        rating="up",
+        comment="great",
+    )
     assert result is msg
     assert msg.feedback == {"rating": "up", "comment": "great"}
 
 
 @pytest.mark.asyncio
 async def test_set_feedback_no_comment_omits_field() -> None:
-    msg = _make_message(uuid4())
-    session = _session_with_result(scalar=msg)
+    target_session = _make_session(user_id=uuid4())
+    msg = _make_message(target_session.id)
+    result_session = MagicMock()
+    result_session.scalar_one_or_none.return_value = target_session
+    result_msg = MagicMock()
+    result_msg.scalar_one_or_none.return_value = msg
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[result_session, result_msg])
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
     repo = ChatRepository(session)
-    await repo.set_feedback(msg.id, rating="down")
+    await repo.set_feedback(
+        msg.id,
+        session_id=target_session.id,
+        user_id=target_session.user_id,
+        rating="down",
+    )
     assert msg.feedback == {"rating": "down"}
 
 
 @pytest.mark.asyncio
-async def test_set_feedback_nonexistent_returns_none() -> None:
-    session = _session_with_result(scalar=None)
+@pytest.mark.security
+async def test_set_feedback_session_not_owned_returns_none() -> None:
+    """ADR-0003 adaptation: session не принадлежит caller'у → None (no DB)."""
+    session = _session_with_result(scalar=None)  # get_session_by_owner → None
     repo = ChatRepository(session)
-    result = await repo.set_feedback(uuid4(), rating="up")
+    result = await repo.set_feedback(
+        uuid4(),
+        session_id=uuid4(),
+        user_id=uuid4(),
+        rating="up",
+    )
     assert result is None
+    # Только 1 SQL (gate); SELECT message не выполнялся
+    assert session.execute.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_set_feedback_message_not_found_returns_none() -> None:
+    """Session ok, но message_id не существует → None."""
+    target_session = _make_session(user_id=uuid4())
+    result_session = MagicMock()
+    result_session.scalar_one_or_none.return_value = target_session
+    result_msg = MagicMock()
+    result_msg.scalar_one_or_none.return_value = None
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[result_session, result_msg])
+    repo = ChatRepository(session)
+    result = await repo.set_feedback(
+        uuid4(),
+        session_id=target_session.id,
+        user_id=target_session.user_id,
+        rating="up",
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_set_feedback_sql_includes_session_id_scope() -> None:
+    """Cross-session защита: SELECT message с фильтром по session_id."""
+    target_session = _make_session(user_id=uuid4())
+    result_session = MagicMock()
+    result_session.scalar_one_or_none.return_value = target_session
+    result_msg = MagicMock()
+    result_msg.scalar_one_or_none.return_value = None
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[result_session, result_msg])
+    repo = ChatRepository(session)
+    await repo.set_feedback(
+        uuid4(),
+        session_id=target_session.id,
+        user_id=target_session.user_id,
+        rating="up",
+    )
+    # 2nd execute — SELECT message; SQL содержит session_id фильтр
+    sql = str(session.execute.call_args_list[1][0][0].compile()).lower()
+    assert "session_id" in sql
+    assert "chat_messages.id" in sql
+
+
+@pytest.mark.asyncio
+async def test_set_feedback_overwrites_existing_feedback() -> None:
+    """Idempotent: повторный set с другим rating перезаписывает."""
+    target_session = _make_session(user_id=uuid4())
+    msg = _make_message(target_session.id)
+    msg.feedback = {"rating": "up", "comment": "good"}  # уже есть
+    result_session = MagicMock()
+    result_session.scalar_one_or_none.return_value = target_session
+    result_msg = MagicMock()
+    result_msg.scalar_one_or_none.return_value = msg
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[result_session, result_msg])
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    repo = ChatRepository(session)
+    await repo.set_feedback(
+        msg.id,
+        session_id=target_session.id,
+        user_id=target_session.user_id,
+        rating="down",
+        comment="bad",
+    )
+    assert msg.feedback == {"rating": "down", "comment": "bad"}
