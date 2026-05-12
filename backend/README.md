@@ -38,6 +38,29 @@ make test-cov       # pytest + coverage (порог 80%)
 | `KC_REALM` | `rehome` | Keycloak realm name (см. ADR-0007) |
 | `KC_AUDIENCE` | `account` | Ожидаемое значение `aud` claim |
 | `KC_VERIFY_AUD` | `false` | Проверка audience (на E1.3.2 отключена; будет true после E1.3.4) |
+| `DATABASE_URL` | `postgresql+asyncpg://kb:kb@localhost:5432/rehome_kb` | PostgreSQL для articles/... (ADR-0008) |
+
+## База данных
+
+PostgreSQL 16 + SQLAlchemy 2.x async + Alembic (см. ADR-0008).
+
+```bash
+# Запуск local-dev БД
+cd ../infra && docker compose up -d postgres-kb
+
+# Прогон миграций
+cd ../backend && make migrate
+
+# Создать новую миграцию из изменений моделей
+make migrate-create m="add foo column"
+
+# Откатить последнюю миграцию
+make migrate-downgrade
+```
+
+Все ORM-модели должны быть импортированы в `src/api/db/models_all.py`,
+иначе Alembic autogenerate их не увидит. Repository pattern обязателен —
+router'ы НЕ ходят в `AsyncSession` напрямую (ADR-0008).
 
 ## Auth
 
@@ -59,12 +82,27 @@ ADR-0007.
 
 ```
 backend/
+├── alembic/             — SQL migrations (ADR-0008)
+│   ├── env.py
+│   └── versions/
+├── alembic.ini
 ├── src/api/
-│   ├── main.py        — FastAPI app instance
-│   ├── config.py      — pydantic Settings (env-driven)
+│   ├── main.py          — FastAPI app instance
+│   ├── config.py        — pydantic Settings (env-driven)
+│   ├── db/              — async engine, sessionmaker, get_session
+│   │   ├── base.py      — DeclarativeBase
+│   │   ├── engine.py    — get_engine, get_session (FastAPI Depends)
+│   │   └── models_all.py — единая точка импорта моделей для Alembic
+│   ├── articles/        — ADR-0003: storage-level access_level filter
+│   │   ├── models.py    — Article ORM
+│   │   ├── repository.py — read-операции с обязательным WHERE access_level
+│   │   ├── router.py    — GET /articles/{slug}
+│   │   └── schemas.py   — Pydantic v2 ArticleResponse
+│   ├── auth/            — OIDC verifier, scope/access_level
 │   └── v1/
-│       ├── router.py  — APIRouter("/api/v1") + include subrouters
-│       └── health.py  — GET /health, GET /version
-└── tests/unit/
-    └── test_health.py
+│       ├── router.py    — APIRouter("/api/v1") + include subrouters
+│       └── health.py    — GET /health, GET /version
+└── tests/
+    ├── unit/            — pytest unit-тесты с моками
+    └── integration/     — end-to-end с реальным Keycloak + Postgres
 ```
