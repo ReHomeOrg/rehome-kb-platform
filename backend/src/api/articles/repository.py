@@ -11,13 +11,25 @@ router'ы не имеют права работать напрямую с AsyncS
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from sqlalchemy import literal, select, tuple_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
+from src.api.articles.schemas import ArticleInput
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
+
+
+class SlugConflictError(HTTPException):
+    """HTTP 409 — статья с таким slug уже существует."""
+
+    def __init__(self, slug: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Article with slug '{slug}' already exists",
+        )
 
 
 class ArticleRepository:
@@ -119,6 +131,50 @@ class ArticleRepository:
         rows = list(result.scalars().all())
         has_more = len(rows) > limit
         return rows[:limit], has_more
+
+    async def create(self, payload: ArticleInput) -> Article:
+        """Создаёт статью из валидированного payload'а.
+
+        Pydantic уже проверил schema (slug pattern, length, required, enum
+        для access_level). Здесь — только DB-уровень: unique slug.
+
+        IntegrityError → 409 SlugConflictError. Другие IntegrityError
+        (CHECK constraints на audience/status) теоретически возможны если
+        Pydantic пропустит (audience пока str без enum-валидации); тогда
+        они уходят в 500 — это документировано в плане как risk до E4.x
+        rollout'а enum-валидации на все поля.
+
+        Commit здесь, не в endpoint: один insert = один commit; FastAPI
+        `get_session` использует `async with`, без явного commit изменения
+        откатятся. Нам нужен commit для возврата ID/created_at server-defaults.
+        """
+        # `access_level` — AccessLevel enum (StrEnum); .value даёт строку
+        # для записи в БД (колонка String, см. models.py).
+        article = Article(
+            slug=payload.slug,
+            title=payload.title,
+            body_markdown=payload.body_markdown,
+            category=payload.category,
+            audience=payload.audience,
+            access_level=payload.access_level.value,
+            status=payload.status,
+            language=payload.language,
+            tags=list(payload.tags),
+        )
+        self._session.add(article)
+        try:
+            await self._session.flush()
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            # Конкретный код constraint у asyncpg / unique violation.
+            # Проверяем по тексту message — фильтруем именно slug-conflict;
+            # остальные IntegrityError (CHECK) пробрасываем как есть → 500.
+            if "uq_articles_slug" in str(exc.orig) or "articles_slug_key" in str(exc.orig):
+                raise SlugConflictError(payload.slug) from exc
+            raise
+        await self._session.refresh(article)
+        return article
 
 
 def get_article_repository(

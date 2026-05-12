@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import Depends, Request
 
-from src.api.auth.exceptions import ForbiddenError
+from src.api.auth.exceptions import ForbiddenError, UnauthorizedError
 from src.api.auth.oidc import OIDCVerifier
 from src.api.auth.scope import (
     AccessLevel,
@@ -106,6 +106,24 @@ def get_current_claims(
     if token is None:
         return None
     return verifier.verify(token)
+
+
+def require_authenticated(
+    claims: dict[str, Any] | None = Depends(get_current_claims),
+) -> dict[str, Any]:
+    """401 если токена нет (для write-endpoint'ов).
+
+    `require_access_level(...)` отдаёт 403 для guest (отсутствует уровень),
+    но семантически правильно 401 «нужен токен». Эта dependency идёт
+    **перед** `require_access_level(...)` в write-цепочках.
+
+    Возвращает claims — после `Depends(require_authenticated)` можно
+    безопасно использовать `claims["sub"]` без `.get()` (KeyError = bug в
+    Keycloak inv ariant, должно громко падать).
+    """
+    if claims is None:
+        raise UnauthorizedError(detail="Authentication required")
+    return claims
 
 
 def get_current_roles(
