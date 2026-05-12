@@ -150,7 +150,7 @@ async def test_list_tags_no_q_does_not_add_ilike(
     await repo.list_tags(frozenset({AccessLevel.PUBLIC}))
     sql = str(empty_session.execute.call_args[0][0].compile()).lower()
     assert " ilike " not in sql
-    assert "lower(tag) like" not in sql
+    assert " like lower(" not in sql
 
 
 @pytest.mark.asyncio
@@ -164,8 +164,9 @@ async def test_list_tags_with_q_adds_ilike_with_escape(
     params = compiled.params
     # На default dialect (нет real Postgres) `.ilike()` рендерится как
     # `LOWER(x) LIKE LOWER(y)`; на postgresql — как `ILIKE`. Проверяем
-    # семантическое наличие case-insensitive substring match.
-    assert " ilike " in sql or "lower(tag) like" in sql
+    # семантическое наличие case-insensitive substring match (без жёсткой
+    # привязки к имени column-alias, которое SQLA генерирует).
+    assert " ilike " in sql or " like lower(" in sql
     # bind содержит pattern '%договор%' (substring match)
     assert any(isinstance(v, str) and v == "%договор%" for v in params.values())
 

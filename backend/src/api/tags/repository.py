@@ -9,7 +9,7 @@ AsyncSession напрямую.
 """
 
 from fastapi import Depends
-from sqlalchemy import ColumnElement, func, literal, select
+from sqlalchemy import ColumnElement, func, literal, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
@@ -63,11 +63,16 @@ class TagRepository:
             # раньше, чтобы не гонять SQL впустую.
             return []
 
-        # jsonb_array_elements_text(tags) — Postgres lateral unnest JSONB-
-        # массива в setof text. `column_valued("tag")` рендерится в FROM
-        # (как `, jsonb_array_elements_text(articles.tags) AS tag`), что
-        # делает alias `tag` доступным в SELECT/WHERE/GROUP BY.
-        tag = func.jsonb_array_elements_text(Article.tags).column_valued("tag")
+        # jsonb_array_elements_text(articles.tags) — Postgres setof text
+        # unnest JSONB-массива. Поскольку функция ссылается на колонку
+        # articles.tags, требуется LATERAL join — иначе Postgres парсит
+        # FROM left-to-right и `articles` ещё не в scope.
+        # `table_valued("tag")` + `.lateral()` рендерится как
+        # `FROM articles, LATERAL jsonb_array_elements_text(articles.tags) AS tag(tag)`.
+        tag_tbl = (
+            func.jsonb_array_elements_text(Article.tags).table_valued("tag").lateral()
+        )
+        tag_col = tag_tbl.c.tag
 
         count_expr = func.count(literal(1)).label("article_count")
 
@@ -77,13 +82,15 @@ class TagRepository:
         ]
         if q is not None:
             pattern = f"%{_escape_ilike(q)}%"
-            where_clauses.append(tag.ilike(pattern, escape="\\"))
+            where_clauses.append(tag_col.ilike(pattern, escape="\\"))
 
         stmt = (
-            select(tag.label("name"), count_expr)
+            select(tag_col.label("name"), count_expr)
+            .select_from(Article)
+            .join(tag_tbl, true())
             .where(*where_clauses)
-            .group_by(tag)
-            .order_by(count_expr.desc(), tag.asc())
+            .group_by(tag_col)
+            .order_by(count_expr.desc(), tag_col.asc())
             .limit(limit)
         )
         result = await self._session.execute(stmt)
