@@ -7,7 +7,7 @@ Alembic autogenerate видит только те таблицы, чьи мод�
 
 from src.api.articles.models import Article, ArticleVersion
 from src.api.categories.models import Category
-from src.api.chat.models import ChatMessage, ChatSession
+from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
 from src.api.documents.models import Document
 from src.api.idempotency.models import IdempotencyKey
 
@@ -15,6 +15,7 @@ __all__ = [
     "Article",
     "ArticleVersion",
     "Category",
+    "ChatEscalation",
     "ChatMessage",
     "ChatSession",
     "Document",

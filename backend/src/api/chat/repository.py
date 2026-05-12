@@ -17,7 +17,7 @@ from fastapi import Depends
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.chat.models import ChatMessage, ChatSession
+from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
 from src.api.db import get_session
 
 # TTL named constants (CLAUDE.md §5.2: no magic numbers).
@@ -286,6 +286,44 @@ class ChatRepository:
         await self._session.flush()
         await self._session.commit()
         return message
+
+    async def create_escalation(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        session_token: UUID | None = None,
+        reason: str | None = None,
+        priority: str = "normal",
+    ) -> ChatEscalation | None:
+        """Создать escalation ticket для session (E3.6 #71).
+
+        Owner-gate: session должна принадлежать caller'у (через
+        `get_session_by_owner`). None → return None → 404 mask.
+
+        `user_id` (если есть) сохраняется в `requested_by_user_id` для
+        audit. Anon — NULL.
+
+        Multiple escalations allowed (без dedupe) — каждый вызов
+        создаёт новый ticket с уникальным id. Idempotency-Key — backlog.
+        """
+        session = await self.get_session_by_owner(
+            session_id, user_id=user_id, session_token=session_token
+        )
+        if session is None:
+            return None
+
+        escalation = ChatEscalation(
+            session_id=session_id,
+            requested_by_user_id=user_id,
+            reason=reason,
+            priority=priority,
+        )
+        self._session.add(escalation)
+        await self._session.flush()
+        await self._session.refresh(escalation)
+        await self._session.commit()
+        return escalation
 
 
 def get_chat_repository(
