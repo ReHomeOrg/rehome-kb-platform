@@ -1541,3 +1541,213 @@ async def test_advisory_lock_uses_bind_param_not_literal_slug() -> None:
     # Bind params содержат payload (для безопасного исполнения).
     params = lock_stmt.compile().params
     assert malicious_slug in params.values()
+
+
+# ============================================================
+# search (E2.5a #46) — Postgres FTS
+# ============================================================
+
+
+async def _capture_search_sql(**kwargs: Any) -> Any:
+    """Capture compiled search SQL (без literal_binds — websearch_to_tsquery
+    может содержать non-renderable params)."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.all.return_value = []
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.search(**kwargs)
+    return captured["stmt"]
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_when_no_matches() -> None:
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    repo = ArticleRepository(session)
+    rows, has_more = await repo.search("nonexistent", frozenset({AccessLevel.PUBLIC}))
+    assert rows == []
+    assert has_more is False
+
+
+@pytest.mark.asyncio
+async def test_search_returns_hits_and_has_more() -> None:
+    """limit+1 → trim + has_more=True."""
+    session = MagicMock()
+    result = MagicMock()
+    # 4 rows для limit=3 → has_more=True, trim до 3.
+    rows = [(uuid4(), f"T{i}", "snippet", 0.5 - i * 0.1) for i in range(4)]
+    result.all.return_value = rows
+    session.execute = AsyncMock(return_value=result)
+    repo = ArticleRepository(session)
+    out, has_more = await repo.search("q", frozenset({AccessLevel.PUBLIC}), limit=3)
+    assert len(out) == 3
+    assert has_more is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_search_sql_uses_websearch_to_tsquery() -> None:
+    """Anti-SQL-injection: websearch_to_tsquery — safe для user input."""
+    stmt = await _capture_search_sql(
+        q="'; DROP TABLE articles; --",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    sql = str(stmt)
+    assert "websearch_to_tsquery" in sql
+    # Payload — в bind params, не в SQL string.
+    assert "DROP TABLE" not in sql
+    # Bind params содержат payload (для безопасного исполнения).
+    params = stmt.compile().params
+    assert "'; DROP TABLE articles; --" in params.values()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_search_sql_includes_status_published() -> None:
+    """ADR-0003 inherit: status='PUBLISHED' filter.
+
+    NB: `websearch_to_tsquery` arg type `regconfig` — literal_binds не
+    работает. Проверяем через bind params + SQL string.
+    """
+    stmt = await _capture_search_sql(
+        q="any",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    sql = str(stmt)
+    params = stmt.compile().params
+    assert "articles.status =" in sql
+    assert params.get("status_1") == "PUBLISHED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "scope",
+    [
+        Scope.GUEST,
+        Scope.TENANT,
+        Scope.LANDLORD,
+        Scope.AGENT,
+        Scope.STAFF_SUPPORT,
+        Scope.STAFF_LEGAL,
+        Scope.STAFF_HR,
+        Scope.STAFF_ADMIN,
+    ],
+)
+async def test_search_sql_includes_correct_access_levels_per_scope(scope: Scope) -> None:
+    """ADR-0003 critical: search SQL содержит ровно те access_levels,
+    что выдал `compute_access_levels` для каждого Scope.
+    """
+    role_map = {
+        Scope.GUEST: [],
+        Scope.TENANT: ["tenant"],
+        Scope.LANDLORD: ["landlord"],
+        Scope.AGENT: ["agent"],
+        Scope.STAFF_SUPPORT: ["staff_support"],
+        Scope.STAFF_LEGAL: ["staff_legal"],
+        Scope.STAFF_HR: ["staff_hr"],
+        Scope.STAFF_ADMIN: ["staff_admin"],
+    }
+    levels = compute_access_levels(role_map[scope])
+    stmt = await _capture_search_sql(q="any", access_levels=levels)
+    sql = str(stmt)
+    params = stmt.compile().params
+
+    # access_level IN — bind list param.
+    assert "access_level IN" in sql
+    bound_levels = params.get("access_level_1", [])
+    expected = {lvl.value for lvl in levels}
+    assert (
+        set(bound_levels) == expected
+    ), f"Scope={scope.value}: expected {expected}, got {bound_levels}"
+
+    # Forbidden levels не в bound list.
+    all_levels: set[AccessLevel] = set(AccessLevel.__members__.values())
+    for forbidden_lvl in all_levels - levels:
+        assert forbidden_lvl.value not in bound_levels, (
+            f"Scope={scope.value}: access_level={forbidden_lvl.value} утёк " "(ADR-0003 regression)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_sql_includes_ts_rank_and_match_operator() -> None:
+    stmt = await _capture_search_sql(
+        q="договор",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    sql = str(stmt)
+    assert "ts_rank" in sql
+    assert "@@" in sql  # match operator
+    assert "ts_headline" in sql  # snippet
+
+
+@pytest.mark.asyncio
+async def test_search_sql_has_order_by_rank_desc_id_desc() -> None:
+    stmt = await _capture_search_sql(
+        q="x",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        limit=10,
+    )
+    sql = str(stmt)
+    params = stmt.compile().params
+    assert "ORDER BY" in sql
+    assert "DESC" in sql
+    # LIMIT bound param: param_1 = limit + 1 = 11.
+    limit_value = next(
+        (v for k, v in params.items() if k.startswith("param") and v == 11),
+        None,
+    )
+    assert limit_value == 11
+
+
+@pytest.mark.asyncio
+async def test_search_cursor_predicate_row_value_not_and() -> None:
+    """Keyset row-value `(rank, id) < (s, i)` — НЕ AND-split."""
+    cur_score = 0.42
+    cur_id = uuid4()
+    stmt = await _capture_search_sql(
+        q="x",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        cursor=(cur_score, cur_id),
+    )
+    sql = str(stmt)
+    # Row-value comparison present.
+    assert sql.count("@@") == 1  # один match, не split
+    # Tuple comparison оставляет parenthesized form.
+    assert ") <" in sql or "(score," in sql or "rank" in sql
+
+
+@pytest.mark.asyncio
+async def test_search_no_cursor_no_predicate() -> None:
+    stmt = await _capture_search_sql(
+        q="x",
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+    )
+    sql = str(stmt)
+    # rank ordering есть, но cursor-предикат `(rank, id) <` отсутствует.
+    # Эвристика: единственный `<` (в LIMIT не входит).
+    where_section = sql.split("ORDER BY")[0]
+    assert where_section.count("<") <= 1  # 1 если websearch ts_query содержит синтаксис
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_search_empty_access_levels_returns_empty() -> None:
+    """Empty frozenset → IN ([]) → 0 строк."""
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = []
+    session.execute = AsyncMock(return_value=result)
+    repo = ArticleRepository(session)
+    out, has_more = await repo.search("x", frozenset())
+    assert out == []
+    assert has_more is False

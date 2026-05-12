@@ -14,7 +14,12 @@ from src.api.articles.audit import (
     log_article_updated,
 )
 from src.api.articles.authorization import ensure_can_write_access_level
-from src.api.articles.cursor import decode_cursor, encode_cursor
+from src.api.articles.cursor import (
+    decode_cursor,
+    decode_score_cursor,
+    encode_cursor,
+    encode_score_cursor,
+)
 from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.articles.schemas import (
     ArticleHistoryResponse,
@@ -22,9 +27,12 @@ from src.api.articles.schemas import (
     ArticlePatch,
     ArticleResponse,
     ArticlesListResponse,
+    ArticlesSearchResponse,
     ArticleSummary,
     ArticleVersionResponse,
     PaginationInfo,
+    SearchHit,
+    SearchInput,
 )
 from src.api.auth.dependency import (
     get_current_access_levels,
@@ -506,3 +514,67 @@ async def patch_article(
         new_status=article.status,
     )
     return ArticleResponse.model_validate(article)
+
+
+@router.post(
+    "/search",
+    response_model=ArticlesSearchResponse,
+    summary="Полнотекстовый поиск по статьям (Postgres FTS, E2.5a)",
+    responses={
+        400: {"description": "Невалидный cursor"},
+        422: {"description": "Невалидный body (q empty/too long, limit out of range)"},
+    },
+)
+async def search_articles(
+    payload: SearchInput,
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ArticleRepository = Depends(get_article_repository),
+) -> ArticlesSearchResponse:
+    """Search через `websearch_to_tsquery('russian', q)` + GIN index.
+
+    ADR-0003 inherit: `status='PUBLISHED'` + `access_level IN (...)` фильтр
+    на SQL — anonymous видит только PUBLIC PUBLISHED статьи.
+
+    Cursor валиден только для стабильного `q` — rank query-dependent.
+    """
+    if not access_levels:
+        # Defence-in-depth (как в `GET /articles/{slug}`).
+        raise UnauthorizedError(detail="No access levels resolved")
+
+    # Whitespace-only q → 422 (Pydantic min_length=1 уже ловит "", но не "   ").
+    if not payload.q.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="q must not be whitespace-only",
+        )
+
+    decoded_cursor = decode_score_cursor(payload.cursor) if payload.cursor else None
+
+    rows, has_more = await repo.search(
+        payload.q,
+        access_levels,
+        cursor=decoded_cursor,
+        limit=payload.limit,
+    )
+
+    hits = [
+        SearchHit(
+            id=row_id,
+            title=title,
+            snippet=snippet,
+            # Clip к 1.0 — OpenAPI говорит 0..1; ts_rank теоретически > 1
+            # на длинных query c повторяющимися словами.
+            score=min(score, 1.0),
+        )
+        for row_id, title, snippet, score in rows
+    ]
+
+    cursor_next: str | None = None
+    if rows and has_more:
+        last_id, _, _, last_score = rows[-1]
+        cursor_next = encode_score_cursor(last_score, last_id)
+
+    return ArticlesSearchResponse(
+        data=hits,
+        pagination=PaginationInfo(cursor_next=cursor_next, has_more=has_more),
+    )
