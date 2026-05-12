@@ -8,6 +8,7 @@ GigaChat/YandexGPT теоретически в будущем) без право
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
 
@@ -67,3 +68,23 @@ class LLMProvider(ABC):
         этой точки, retry-safe).
         """
         raise NotImplementedError
+
+    async def stream(
+        self,
+        messages: list[LLMMessage],
+        system_prompt: str,
+        max_tokens: int = 1024,
+    ) -> AsyncIterator[str]:
+        """Yield response по частям (для SSE — E3.4 #67).
+
+        Базовая реализация — fallback через `complete()`: provider'ы
+        без native streaming yield'ят весь ответ одним chunk'ом. Vllm
+        adapter (E3.7) override'нет с реальным upstream streaming.
+
+        Retry-safety: caller (router) собирает chunks в memory list,
+        вызывает `record_chat_turn` только после успешного завершения
+        итератора. Exception здесь → mid-stream `event: error` без
+        persist'а.
+        """
+        response = await self.complete(messages, system_prompt, max_tokens)
+        yield response.content
