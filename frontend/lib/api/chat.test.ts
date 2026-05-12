@@ -169,3 +169,41 @@ describe("chat API", () => {
     expect(headers.get("X-Chat-Session-Token")).toBeNull();
   });
 });
+
+describe("streamMessage SSE parsing", () => {
+  it("yields chunks parsed from SSE stream", async () => {
+    const { streamMessage } = await import("./chat");
+    const body = (
+      'event: chunk\ndata: {"text":"Hello"}\n\n' +
+      'event: chunk\ndata: {"text":" world"}\n\n' +
+      'event: message-end\ndata: {"message_id":"m1","total_tokens":5}\n\n' +
+      'event: done\ndata: {}\n\n'
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(new TextEncoder().encode(body).buffer, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const events: Array<{ event: string; data: unknown }> = [];
+    for await (const ev of streamMessage("s", { content: "hi" })) {
+      events.push(ev);
+    }
+    const names = events.map((e) => e.event);
+    expect(names).toEqual(["chunk", "chunk", "message-end", "done"]);
+    expect((events[0].data as { text: string }).text).toBe("Hello");
+    expect((events[2].data as { message_id: string }).message_id).toBe("m1");
+  });
+
+  it("throws ApiError if upstream not ok", async () => {
+    const { streamMessage } = await import("./chat");
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "not found" }), { status: 404 }),
+    );
+    await expect(async () => {
+      for await (const ev of streamMessage("s", { content: "hi" })) {
+        void ev;
+      }
+    }).rejects.toMatchObject({ status: 404 });
+  });
+});
