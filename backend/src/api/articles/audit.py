@@ -31,3 +31,36 @@ def log_article_created(*, actor_sub: str, slug: str, access_level: str) -> None
             "access_level": access_level,
         },
     )
+
+
+def log_article_updated(
+    *,
+    actor_sub: str,
+    slug: str,
+    old_access_level: str,
+    new_access_level: str,
+    old_status: str,
+    new_status: str,
+) -> None:
+    """Структурированный audit-event «articles.updated» с дельтой visibility/state.
+
+    Логируем только дельту по двум audit-значимым полям: access_level
+    (видимость статьи) и status (publication state). Контент-дифф
+    (title/body/summary/short_answer) НЕ логируется — ФЗ-152 паттерн
+    как в `log_article_created` (см. E4.1).
+
+    NB: best-effort после commit'а — same risk as `log_article_created`
+    (E4.x с DB-таблицей audit_log закроет at-least-once гарантию).
+    """
+    logger.info(
+        "articles.updated",
+        extra={
+            "event": "articles.updated",
+            "actor_sub": actor_sub,
+            "slug": slug,
+            "old_access_level": old_access_level,
+            "new_access_level": new_access_level,
+            "old_status": old_status,
+            "new_status": new_status,
+        },
+    )

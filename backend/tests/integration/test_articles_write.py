@@ -150,3 +150,106 @@ def test_create_invalid_payload_returns_422(kb_client: httpx.Client, m2m_token: 
         json={**_payload("BAD-SLUG-UPPERCASE")},
     )
     assert response.status_code == 422
+
+
+# ============================================================
+# PUT /api/v1/articles/{slug} — replace endpoint (E4.3)
+# ============================================================
+
+
+@pytest.mark.integration
+def test_put_roundtrip_post_then_put_then_get(
+    kb_client: httpx.Client,
+    m2m_token: str,
+    db_cleanup: list[str],
+) -> None:
+    """POST → PUT → GET roundtrip. Содержимое после PUT возвращается GET'ом."""
+    slug = f"e43-rt-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+
+    # POST initial state.
+    post = kb_client.post(
+        "/api/v1/articles",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug, "PUBLIC"),
+    )
+    assert post.status_code == 201, post.text
+
+    # PUT — меняем title и body, оставляем access_level=PUBLIC.
+    new_payload = {
+        **_payload(slug, "PUBLIC"),
+        "title": "Updated title via PUT",
+        "body_markdown": "# Updated body",
+    }
+    put = kb_client.put(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=new_payload,
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["title"] == "Updated title via PUT"
+
+    # GET без токена возвращает обновлённое содержимое.
+    get_resp = kb_client.get(f"/api/v1/articles/{slug}")
+    assert get_resp.status_code == 200
+    body = get_resp.json()
+    assert body["title"] == "Updated title via PUT"
+    assert body["body_markdown"] == "# Updated body"
+
+
+@pytest.mark.integration
+@pytest.mark.security
+def test_put_hr_restricted_target_blocked_for_staff_admin(
+    kb_client: httpx.Client,
+    m2m_token: str,
+    db_cleanup: list[str],
+) -> None:
+    """ADR-0003 Level-2: m2m client (staff_admin) не может ставить target=HR_RESTRICTED."""
+    slug = f"e43-hr-target-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+
+    # Сначала POST PUBLIC статью.
+    post = kb_client.post(
+        "/api/v1/articles",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug, "PUBLIC"),
+    )
+    assert post.status_code == 201
+
+    # PUT с target=HR_RESTRICTED → 403 (target check срабатывает ДО source check).
+    put = kb_client.put(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug, "HR_RESTRICTED"),
+    )
+    assert put.status_code == 403
+
+
+@pytest.mark.integration
+def test_put_nonexistent_article_returns_404(kb_client: httpx.Client, m2m_token: str) -> None:
+    slug = f"e43-missing-{uuid4().hex[:8]}"
+    response = kb_client.put(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug),
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.integration
+def test_put_slug_mismatch_returns_422(kb_client: httpx.Client, m2m_token: str) -> None:
+    response = kb_client.put(
+        "/api/v1/articles/path-slug",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload("body-slug-different"),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+def test_put_without_token_returns_401(kb_client: httpx.Client) -> None:
+    response = kb_client.put(
+        "/api/v1/articles/whatever",
+        json=_payload("whatever"),
+    )
+    assert response.status_code == 401

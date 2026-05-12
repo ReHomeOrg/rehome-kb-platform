@@ -176,6 +176,64 @@ class ArticleRepository:
         await self._session.refresh(article)
         return article
 
+    async def update(
+        self,
+        slug: str,
+        payload: ArticleInput,
+        access_levels: frozenset[AccessLevel],
+    ) -> tuple[Article, str, str] | None:
+        """Обновляет статью по slug; возвращает `(article, old_al, old_st)` или None.
+
+        Авторизация (ADR-0003 source-side):
+        - `access_level IN (current_levels)` — writer не видит чужие
+          статьи → возвращаем None → router 404 (маскировка существования).
+        - **НЕ фильтруем `status='PUBLISHED'`**: writer должен видеть свои
+          DRAFT/ARCHIVED статьи для редактирования. Это намеренное
+          отличие от `get_by_slug`. Read-эндпоинт без auth скрывает
+          DRAFT через статусный фильтр; PUT с `require_access_level(STAFF)`
+          снимает его — writer уже доверенный.
+
+        Авторизация target-side (Level-2 ADR-0003) — обязанность router'а
+        через `ensure_can_write_access_level(payload.access_level, levels)`,
+        ДО вызова этого метода. Иначе кто-то может через repo напрямую
+        повысить visibility за пределы своего scope.
+
+        Возвращаемый tuple: новый Article + старые access_level/status
+        для audit-log дельты (см. `log_article_updated`).
+
+        IntegrityError handling: consistent с `create` (E4.1) — unknown
+        IntegrityError (CHECK violations) пробрасываются → 500. Pydantic
+        валидация защищает от слов нарушения; backlog #28 для полного
+        enum-rollout, до тех пор это знаемый risk.
+        """
+        allowed_strings = [level.value for level in access_levels]
+        stmt = select(Article).where(
+            Article.slug == slug,
+            Article.access_level.in_(allowed_strings),
+        )
+        result = await self._session.execute(stmt)
+        article = result.scalar_one_or_none()
+        if article is None:
+            return None
+
+        old_access_level = article.access_level
+        old_status = article.status
+
+        # In-place mutation: SQLAlchemy unit-of-work зафиксирует через commit.
+        # slug НЕ обновляется (path = identifier, router отвергает mismatch 422).
+        article.title = payload.title
+        article.body_markdown = payload.body_markdown
+        article.category = payload.category
+        article.audience = payload.audience
+        article.access_level = payload.access_level.value
+        article.status = payload.status
+        article.language = payload.language
+        article.tags = list(payload.tags)
+
+        await self._session.commit()
+        await self._session.refresh(article)
+        return article, old_access_level, old_status
+
 
 def get_article_repository(
     session: AsyncSession = Depends(get_session),
