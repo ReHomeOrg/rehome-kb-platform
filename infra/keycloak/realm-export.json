@@ -69,7 +69,20 @@
       "attributes": {
         "client_credentials.use_refresh_token": "false",
         "access.token.lifespan": "3600"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-rehome-platform-m2m",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "rehome-platform-m2m",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "rehome-web-spa",
