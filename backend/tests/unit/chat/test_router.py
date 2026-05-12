@@ -169,12 +169,17 @@ def test_post_invalid_jwt_returns_401(
     assert resp.status_code == 401
 
 
-def test_post_m2m_jwt_non_uuid_sub_falls_back_to_anon_flow(
+def test_post_jwt_non_uuid_sub_falls_back_to_anon_flow(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock],
     make_jwt: Callable[..., str],
 ) -> None:
-    """m2m client_id обычно не UUID — graceful degradation в anon."""
+    """JWT с не-UUID sub — graceful degradation в anon flow.
+
+    NB: реальные Keycloak m2m service-accounts имеют UUID-format sub,
+    поэтому в integration попадают в authorized flow. Этот unit-тест
+    проверяет защитный путь для нестандартных sub.
+    """
     create_mock, *_ = override_repo
     create_mock.return_value = _make_session(user_id=None)
 
@@ -184,7 +189,7 @@ def test_post_m2m_jwt_non_uuid_sub_falls_back_to_anon_flow(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 201
-    # user_id=None в repo call
+    # user_id=None в repo call (sub не UUID)
     assert create_mock.call_args.kwargs["user_id"] is None
     # X-Chat-Session-Token в headers (anon)
     assert "X-Chat-Session-Token" in resp.headers

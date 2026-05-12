@@ -69,6 +69,7 @@ def _session_with_result(scalar: object = None, scalars_all: list[object] | None
     session.add = MagicMock()
     session.flush = AsyncMock()
     session.refresh = AsyncMock()
+    session.commit = AsyncMock()
     return session
 
 

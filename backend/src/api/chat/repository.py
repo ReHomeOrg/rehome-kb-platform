@@ -63,6 +63,7 @@ class ChatRepository:
         self._session.add(session)
         await self._session.flush()
         await self._session.refresh(session)
+        await self._session.commit()
         return session
 
     async def get_session_by_owner(
@@ -134,6 +135,7 @@ class ChatRepository:
             return False
         session.deleted_at = datetime.now(UTC)
         await self._session.flush()
+        await self._session.commit()
         return True
 
     async def list_messages(
@@ -190,6 +192,7 @@ class ChatRepository:
         self._session.add(message)
         await self._session.flush()
         await self._session.refresh(message)
+        await self._session.commit()
         return message
 
     async def set_feedback(
@@ -216,6 +219,7 @@ class ChatRepository:
             payload["comment"] = comment
         message.feedback = payload
         await self._session.flush()
+        await self._session.commit()
         return message
 
 

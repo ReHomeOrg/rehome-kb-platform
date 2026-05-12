@@ -81,10 +81,14 @@ def test_anon_get_without_token_returns_404(
 
 
 @pytest.mark.integration
-def test_m2m_token_creates_anon_session(
+def test_m2m_token_creates_authorized_session(
     kb_client: httpx.Client, m2m_token: str, cleanup_sessions: list[str]
 ) -> None:
-    """m2m sub не UUID — graceful degradation в anon flow."""
+    """m2m service-account имеет UUID-format sub в Keycloak → authorized flow.
+
+    user_id заполняется из sub; X-Chat-Session-Token НЕ возвращается
+    (authorized client идентифицируется JWT'ом).
+    """
     r1 = kb_client.post(
         "/api/v1/chat/sessions",
         headers={"Authorization": f"Bearer {m2m_token}"},
@@ -92,9 +96,10 @@ def test_m2m_token_creates_anon_session(
     assert r1.status_code == 201
     body = r1.json()
     cleanup_sessions.append(body["id"])
-    # m2m → anon: user_id null, session_token в header
-    assert body["user_id"] is None
-    assert r1.headers.get("X-Chat-Session-Token") is not None
+    # Keycloak m2m service-account имеет UUID-sub → authorized flow
+    assert body["user_id"] is not None
+    # Authorized: no X-Chat-Session-Token header
+    assert r1.headers.get("X-Chat-Session-Token") is None
 
 
 @pytest.mark.integration
