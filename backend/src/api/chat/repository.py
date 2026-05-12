@@ -195,6 +195,50 @@ class ChatRepository:
         await self._session.commit()
         return message
 
+    async def record_chat_turn(
+        self,
+        session_id: UUID,
+        *,
+        user_content: str,
+        assistant_content: str,
+        citations: list[dict[str, Any]] | None = None,
+        token_count: int | None = None,
+        duration_ms: int | None = None,
+    ) -> ChatMessage:
+        """Атомарно записать пару user+assistant в одной транзакции (E3.3).
+
+        Используется POST /messages endpoint'ом: LLM call идёт ПЕРЕД этим
+        методом, поэтому при LLM exception ни user, ни assistant НЕ
+        записываются — retry-safe.
+
+        **Precondition**: caller обязан проверить ownership session ДО
+        этого вызова (через `get_session_by_owner`).
+
+        Возвращает `assistant` сообщение (для router response).
+        """
+        user_msg = ChatMessage(
+            session_id=session_id,
+            role="user",
+            content=user_content,
+            citations=[],
+            token_count=None,
+            duration_ms=None,
+        )
+        assistant_msg = ChatMessage(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_content,
+            citations=citations or [],
+            token_count=token_count,
+            duration_ms=duration_ms,
+        )
+        self._session.add(user_msg)
+        self._session.add(assistant_msg)
+        await self._session.flush()
+        await self._session.refresh(assistant_msg)
+        await self._session.commit()
+        return assistant_msg
+
     async def set_feedback(
         self,
         message_id: UUID,

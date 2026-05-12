@@ -37,6 +37,21 @@ class CreateSessionInput(BaseModel):
     context: ChatContext | None = None
 
 
+# Content bounds из OpenAPI 04 (line 950-952): minLength=1, maxLength=2000.
+# Defence-in-depth: те же ограничения и в этом Pydantic model, и в БД
+# (chat_messages.content TEXT, без CHECK на длину — Pydantic 422 ловит).
+_CONTENT_MIN_LENGTH = 1
+_CONTENT_MAX_LENGTH = 2000
+
+
+class SendMessageInput(BaseModel):
+    """Payload для POST /chat/sessions/{id}/messages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=_CONTENT_MIN_LENGTH, max_length=_CONTENT_MAX_LENGTH)
+
+
 class ChatSessionResponse(BaseModel):
     """ChatSession в response (без session_token для security)."""
 
