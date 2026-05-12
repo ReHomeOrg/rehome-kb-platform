@@ -130,25 +130,9 @@ def test_post_message_without_token_returns_404(
     assert r2.status_code == 404
 
 
-@pytest.mark.integration
-def test_post_message_sse_accept_returns_406(
-    kb_client: httpx.Client, cleanup_sessions: list[str]
-) -> None:
-    """Accept: text/event-stream → 406 в E3.3 (SSE deferred to E3.4)."""
-    r1 = kb_client.post("/api/v1/chat/sessions")
-    session_id = r1.json()["id"]
-    cleanup_sessions.append(session_id)
-    token = r1.headers["X-Chat-Session-Token"]
-
-    r2 = kb_client.post(
-        f"/api/v1/chat/sessions/{session_id}/messages",
-        json={"content": "x"},
-        headers={
-            "X-Chat-Session-Token": token,
-            "Accept": "text/event-stream",
-        },
-    )
-    assert r2.status_code == 406
+# SSE Accept handling — раньше возвращал 406 (E3.3 placeholder).
+# E3.4 (#67) реализовал реальный streaming; тесты для SSE — в
+# tests/integration/test_chat_sse.py.
 
 
 @pytest.mark.integration

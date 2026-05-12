@@ -9,10 +9,14 @@
 POST /messages, SSE, feedback, escalate — E3.3+.
 """
 
+import logging
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
+from fastapi.responses import StreamingResponse
 
 from src.api.auth.dependency import get_current_scope
 from src.api.auth.scope import Scope
@@ -27,8 +31,15 @@ from src.api.chat.schemas import (
     CreateSessionInput,
     SendMessageInput,
 )
+from src.api.chat.sse import format_sse_event
 from src.api.chat.system_prompt import SYSTEM_PROMPT
 from src.api.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+# Rough token estimate для message-end / token_count в streaming. Совпадает
+# с MockProvider's chars/4 heuristic; vLLM (E3.7) заменит на tokenizer count.
+_CHARS_PER_TOKEN = 4
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -103,10 +114,84 @@ async def get_session_detail(
     return ChatSessionDetailResponse.from_models(session, messages)
 
 
+def _build_llm_history(history_messages: list[object], new_user_content: str) -> list[LLMMessage]:
+    """Конвертировать DB messages + new user content в LLMMessage list.
+
+    `cast(LLMRole, ...)` — m.role в БД CHECK-constrained ∈ {user,
+    assistant, system}, mypy не знает. Defensive: на безопасно широкий
+    `object` ruff жалоб не будет, но runtime у Pydantic нет.
+    """
+    llm_messages: list[LLMMessage] = []
+    for m in history_messages:
+        role = cast(LLMRole, getattr(m, "role"))  # noqa: B009 — ORM attr
+        content = cast(str, getattr(m, "content"))  # noqa: B009
+        llm_messages.append(LLMMessage(role=role, content=content))
+    llm_messages.append(LLMMessage(role="user", content=new_user_content))
+    return llm_messages
+
+
+async def _stream_message_events(
+    session_id: UUID,
+    user_content: str,
+    history_messages: list[object],
+    llm: LLMProvider,
+    repo: ChatRepository,
+    max_tokens: int,
+) -> AsyncIterator[str]:
+    """Generator для SSE streaming (E3.4).
+
+    Events:
+    - `message-start` (без message_id, см. architect deviation Issue #67)
+    - `chunk` per LLM yield
+    - `error` если LLM exception (NO DB write)
+    - `message-end` с message_id, total_tokens
+    - `done`
+
+    Retry-safety: chunks в memory, `record_chat_turn` только после
+    успешного завершения LLM iteration.
+    """
+    yield format_sse_event(
+        "message-start",
+        {"created_at": datetime.now(UTC).isoformat()},
+    )
+
+    llm_messages = _build_llm_history(history_messages, user_content)
+    chunks: list[str] = []
+    try:
+        async for chunk in llm.stream(llm_messages, SYSTEM_PROMPT, max_tokens=max_tokens):
+            chunks.append(chunk)
+            yield format_sse_event("chunk", {"text": chunk})
+    except Exception:
+        # Defensive: НЕ эхо'им детали exception'а в SSE event
+        # (могут содержать sensitive info от upstream LLM).
+        logger.exception("chat.sse_stream_failed", extra={"session_id": str(session_id)})
+        yield format_sse_event("error", {"message": "LLM upstream error"})
+        return
+
+    full_content = "".join(chunks)
+    token_count = len(full_content) // _CHARS_PER_TOKEN
+
+    # Atomic persist после успешного stream'а — retry-safe.
+    assistant_msg = await repo.record_chat_turn(
+        session_id,
+        user_content=user_content,
+        assistant_content=full_content,
+        citations=[],
+        token_count=token_count,
+        duration_ms=None,
+    )
+
+    yield format_sse_event(
+        "message-end",
+        {"message_id": str(assistant_msg.id), "total_tokens": token_count},
+    )
+    yield format_sse_event("done", {})
+
+
 @router.post(
     "/sessions/{session_id}/messages",
     response_model=ChatMessageResponse,
-    summary="Отправить сообщение в чат (JSON mode)",
+    summary="Отправить сообщение в чат (JSON или SSE)",
 )
 async def send_message(
     session_id: UUID = Path(...),
@@ -116,31 +201,20 @@ async def send_message(
     repo: ChatRepository = Depends(get_chat_repository),
     llm: LLMProvider = Depends(get_llm_provider),
     settings: Settings = Depends(get_settings),
-) -> ChatMessageResponse:
-    """`POST /chat/sessions/{id}/messages` — JSON-mode answer.
+) -> ChatMessageResponse | StreamingResponse:
+    """`POST /chat/sessions/{id}/messages` — JSON или SSE mode.
 
-    Flow:
+    Branch по Accept header:
+    - `text/event-stream` → SSE streaming (E3.4): yield chunks live,
+      persist в конце.
+    - `application/json` / `*/*` → JSON mode (E3.3): wait → return.
+
+    Оба mode:
     1. Owner-gate session через `get_session_by_owner`. None → 404.
-    2. Build conversation history (existing messages + new user content).
-    3. Call LLMProvider.complete (БЕЗ DB writes — retry-safe).
-    4. `record_chat_turn` — atomic INSERT обоих сообщений.
-    5. Return assistant ChatMessageResponse.
-
-    SSE streaming (Accept: text/event-stream) → 406 Not Acceptable
-    с указанием на E3.4. После landing E3.4 — заменяем на actual streaming.
+    2. Build conversation history.
+    3. Call LLM (стриминг или complete).
+    4. `record_chat_turn` — atomic INSERT обоих сообщений (после LLM).
     """
-    # SSE explicit request — НЕ поддержано в этом эпике (E3.4).
-    # Точное совпадение accept ('text/event-stream') считаем явным запросом
-    # SSE. `*/*` (browser default) — fallthrough к JSON.
-    if "text/event-stream" in accept.lower():
-        raise HTTPException(
-            status_code=status.HTTP_406_NOT_ACCEPTABLE,
-            detail=(
-                "SSE streaming будет реализован в E3.4. "
-                "Используйте Accept: application/json для JSON-mode."
-            ),
-        )
-
     user_id, session_token = owner
     session = await repo.get_session_by_owner(
         session_id, user_id=user_id, session_token=session_token
@@ -148,26 +222,30 @@ async def send_message(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Build LLM history: существующие messages + новый user content.
-    # NB: `get_session_by_owner` уже сделал owner-gate, повторно НЕ вызываем
-    # `list_messages` через тот же gate — это лишний SQL. Делаем raw read.
     history = await repo.list_messages(session_id, user_id=user_id, session_token=session_token)
-    # `m.role` — str из БД, но CHECK constraint гарантирует ∈ {user,
-    # assistant, system}. cast() избегает mypy false-positive без
-    # дополнительных runtime checks.
-    llm_messages = [LLMMessage(role=cast(LLMRole, m.role), content=m.content) for m in history]
-    llm_messages.append(LLMMessage(role="user", content=payload.content))
 
-    # LLM call идёт ПЕРЕД любым DB write — если provider exception,
-    # DB не тронута, клиент retry без duplicate.
+    if "text/event-stream" in accept.lower():
+        # SSE mode (E3.4).
+        return StreamingResponse(
+            _stream_message_events(
+                session_id,
+                payload.content,
+                list(history),
+                llm,
+                repo,
+                settings.llm_max_tokens,
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
+
+    # JSON mode (E3.3) — wait full completion.
+    llm_messages = _build_llm_history(list(history), payload.content)
     response = await llm.complete(
         llm_messages,
         SYSTEM_PROMPT,
         max_tokens=settings.llm_max_tokens,
     )
-
-    # Atomic: user + assistant в одной транзакции.
-    # citations всегда [] в E3.3 — RAG будет в kb-search эпике.
     assistant_msg = await repo.record_chat_turn(
         session_id,
         user_content=payload.content,
