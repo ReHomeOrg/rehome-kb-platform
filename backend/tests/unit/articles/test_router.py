@@ -6,6 +6,7 @@
 
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -371,7 +372,7 @@ def _override_post_create(
 ) -> None:
     """Подменяет ArticleRepository.create."""
 
-    async def _fake(self: Any, payload: Any) -> Article:
+    async def _fake(self: Any, payload: Any, *, actor_sub: str) -> Article:
         if raise_exc is not None:
             raise raise_exc
         assert return_article is not None
@@ -697,6 +698,8 @@ def _override_put_update(
         slug: str,
         payload: Any,
         access_levels: frozenset[Any],
+        *,
+        actor_sub: str,
     ) -> tuple[Article, str, str] | None:
         if return_value is None:
             return None
@@ -954,6 +957,8 @@ def _override_delete_archive(
         self: Any,
         slug: str,
         access_levels: frozenset[Any],
+        *,
+        actor_sub: str,
     ) -> tuple[str, str] | None:
         return return_value
 
@@ -1274,3 +1279,127 @@ def test_list_articles_tags_query_max_length_enforced(client: TestClient) -> Non
     raw = "a" * 601
     response = client.get(f"/api/v1/articles?tags={raw}")
     assert response.status_code == 422
+
+
+# ============================================================
+# GET /api/v1/articles/{slug}/history (E2.3 #36)
+# ============================================================
+
+
+def _override_list_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    return_value: list[Any] | None,
+) -> None:
+    """Подменяет ArticleRepository.list_versions."""
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        access_levels: frozenset[Any],
+    ) -> list[Any] | None:
+        return return_value
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.list_versions", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_get_history_200_returns_versions_desc(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.api.articles.models import ArticleVersion
+
+    aid = uuid4()
+    v2 = ArticleVersion(
+        article_id=aid,
+        version=2,
+        event="UPDATE",
+        author_sub="user-2",
+        old_status="DRAFT",
+        new_status="PUBLISHED",
+        old_access_level="PUBLIC",
+        new_access_level="PUBLIC",
+        changes_summary="Updated",
+    )
+    v2.changed_at = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)
+    v1 = ArticleVersion(
+        article_id=aid,
+        version=1,
+        event="CREATE",
+        author_sub="user-1",
+        new_status="DRAFT",
+        new_access_level="PUBLIC",
+        changes_summary="Article created",
+    )
+    v1.changed_at = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+    _override_list_versions(monkeypatch, [v2, v1])  # already DESC
+    try:
+        response = client.get("/api/v1/articles/some-slug/history")
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["data"]) == 2
+    # Map: author_sub → author per OpenAPI.
+    assert body["data"][0]["version"] == 2
+    assert body["data"][0]["author"] == "user-2"
+    assert body["data"][0]["event"] == "UPDATE"
+    assert body["data"][1]["version"] == 1
+    assert body["data"][1]["author"] == "user-1"
+    assert body["data"][1]["event"] == "CREATE"
+    # Контент НЕ возвращается (body_markdown/title — нет).
+    for item in body["data"]:
+        assert "body_markdown" not in item
+        assert "title" not in item
+
+
+def test_get_history_404_when_article_not_found(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0003 source-mask: invisible article → 404."""
+    _override_list_versions(monkeypatch, None)
+    try:
+        response = client.get("/api/v1/articles/missing/history")
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+@pytest.mark.security
+def test_get_history_404_when_scope_cannot_see(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anonymous user пытается /history для STAFF статьи → 404."""
+    _override_list_versions(monkeypatch, None)
+    try:
+        # Без токена — guest scope, get_by_slug отсекает STAFF → None.
+        response = client.get("/api/v1/articles/staff-article/history")
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+def test_get_history_empty_array_when_no_versions(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Edge case: статья видна, но версий нет (defensive — не должно
+    случиться в нормальном flow). 200 + пустой массив."""
+    _override_list_versions(monkeypatch, [])
+    try:
+        response = client.get("/api/v1/articles/edge/history")
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+    assert response.json() == {"data": []}

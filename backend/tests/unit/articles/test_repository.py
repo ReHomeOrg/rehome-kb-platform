@@ -395,7 +395,7 @@ def _valid_input() -> Any:
 
 @pytest.mark.asyncio
 async def test_create_inserts_article_and_returns_with_fields() -> None:
-    """Happy path: add → flush → commit → refresh → возврат Article."""
+    """Happy path: add(Article) → flush → add(ArticleVersion v=1) → commit → refresh."""
     session = MagicMock()
     session.add = MagicMock()
     session.flush = AsyncMock(return_value=None)
@@ -404,13 +404,43 @@ async def test_create_inserts_article_and_returns_with_fields() -> None:
     session.rollback = AsyncMock(return_value=None)
 
     repo = ArticleRepository(session)
-    result = await repo.create(_valid_input())
+    result = await repo.create(_valid_input(), actor_sub="test-actor")
     assert result.slug == "new-article"
     assert result.access_level == "PUBLIC"  # StrEnum → str для DB
-    session.add.assert_called_once()
+    # E2.3: add() вызывается дважды — Article + ArticleVersion v=1.
+    assert session.add.call_count == 2
     session.flush.assert_awaited_once()
     session.commit.assert_awaited_once()
     session.refresh.assert_awaited_once_with(result)
+
+
+@pytest.mark.asyncio
+async def test_create_inserts_version_1_in_same_transaction() -> None:
+    """E2.3: первая версия (event=CREATE) добавлена в session перед commit."""
+    from src.api.articles.models import ArticleVersion
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.flush = AsyncMock(return_value=None)
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+    session.rollback = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    await repo.create(_valid_input(), actor_sub="actor-123")
+
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert len(versions) == 1
+    v = versions[0]
+    assert v.version == 1
+    assert v.event == "CREATE"
+    assert v.author_sub == "actor-123"
+    assert v.old_status is None
+    assert v.new_status == "DRAFT"
+    assert v.old_access_level is None
+    assert v.new_access_level == "PUBLIC"
+    assert v.changes_summary == "Article created"
 
 
 @pytest.mark.asyncio
@@ -428,7 +458,7 @@ async def test_create_slug_conflict_raises_409() -> None:
 
     repo = ArticleRepository(session)
     with pytest.raises(SlugConflictError) as exc:
-        await repo.create(_valid_input())
+        await repo.create(_valid_input(), actor_sub="test-actor")
     assert exc.value.status_code == 409
     session.rollback.assert_awaited_once()
 
@@ -455,6 +485,7 @@ async def test_update_returns_article_when_writer_can_see_it(
         "kak-podpisat-dogovor",
         payload,
         frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}),
+        actor_sub="test-actor",
     )
     assert out is not None
     article, old_al, old_st = out
@@ -477,7 +508,9 @@ async def test_update_returns_none_when_article_not_found() -> None:
     session.commit = AsyncMock(return_value=None)
 
     repo = ArticleRepository(session)
-    out = await repo.update("nonexistent", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    out = await repo.update(
+        "nonexistent", _valid_input(), frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor"
+    )
     assert out is None
     session.commit.assert_not_awaited()
 
@@ -494,7 +527,9 @@ async def test_update_returns_none_when_scope_cannot_see() -> None:
     session.commit = AsyncMock(return_value=None)
 
     repo = ArticleRepository(session)
-    out = await repo.update("hr-article", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    out = await repo.update(
+        "hr-article", _valid_input(), frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor"
+    )
     assert out is None
     session.commit.assert_not_awaited()
 
@@ -514,7 +549,9 @@ async def test_update_sql_does_not_filter_status_published() -> None:
     session = MagicMock()
     session.execute = AsyncMock(side_effect=_capture)
     repo = ArticleRepository(session)
-    await repo.update("some-slug", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    await repo.update(
+        "some-slug", _valid_input(), frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor"
+    )
     sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
     # access_level filter обязателен.
     assert "access_level IN" in sql
@@ -561,7 +598,7 @@ async def test_update_sql_includes_correct_access_levels_per_scope(
     session = MagicMock()
     session.execute = AsyncMock(side_effect=_capture)
     repo = ArticleRepository(session)
-    await repo.update("any-slug", _valid_input(), levels)
+    await repo.update("any-slug", _valid_input(), levels, actor_sub="test-actor")
     sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
 
     assert "access_level IN" in sql
@@ -589,7 +626,7 @@ async def test_create_unknown_integrity_error_propagated() -> None:
 
     repo = ArticleRepository(session)
     with pytest.raises(IntegrityError):
-        await repo.create(_valid_input())
+        await repo.create(_valid_input(), actor_sub="test-actor")
     session.rollback.assert_awaited_once()
 
 
@@ -618,7 +655,9 @@ async def test_archive_returns_status_and_access_level_when_found(
     session = _build_session_with_article(fake_article)
     repo = ArticleRepository(session)
 
-    out = await repo.archive("kak-podpisat", frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}))
+    out = await repo.archive(
+        "kak-podpisat", frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}), actor_sub="test-actor"
+    )
     assert out == ("PUBLISHED", "PUBLIC")
     # Мутация выполнена.
     assert fake_article.status == "ARCHIVED"
@@ -633,7 +672,7 @@ async def test_archive_draft_article_succeeds(fake_article: Article) -> None:
     session = _build_session_with_article(fake_article)
     repo = ArticleRepository(session)
 
-    out = await repo.archive("draft-slug", frozenset({AccessLevel.STAFF}))
+    out = await repo.archive("draft-slug", frozenset({AccessLevel.STAFF}), actor_sub="test-actor")
     assert out == ("DRAFT", "STAFF")
     assert fake_article.status == "ARCHIVED"
     session.commit.assert_awaited_once()
@@ -653,7 +692,7 @@ async def test_archive_idempotent_no_op_for_already_archived(
     session = _build_session_with_article(fake_article)
     repo = ArticleRepository(session)
 
-    out = await repo.archive("already", frozenset({AccessLevel.PUBLIC}))
+    out = await repo.archive("already", frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor")
     assert out == ("ARCHIVED", "PUBLIC")
     assert fake_article.status == "ARCHIVED"  # без изменений
     session.commit.assert_not_awaited()  # NO-OP — commit не вызван
@@ -663,7 +702,7 @@ async def test_archive_idempotent_no_op_for_already_archived(
 async def test_archive_returns_none_when_article_not_found() -> None:
     session = _build_session_with_article(None)
     repo = ArticleRepository(session)
-    out = await repo.archive("missing", frozenset({AccessLevel.PUBLIC}))
+    out = await repo.archive("missing", frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor")
     assert out is None
     session.commit.assert_not_awaited()
 
@@ -675,7 +714,9 @@ async def test_archive_returns_none_when_scope_cannot_see() -> None:
     # Имитируем: SQL отфильтровал HR_RESTRICTED статью для staff_admin scope.
     session = _build_session_with_article(None)
     repo = ArticleRepository(session)
-    out = await repo.archive("hr-article", frozenset({AccessLevel.PUBLIC, AccessLevel.STAFF}))
+    out = await repo.archive(
+        "hr-article", frozenset({AccessLevel.PUBLIC, AccessLevel.STAFF}), actor_sub="test-actor"
+    )
     assert out is None
     session.commit.assert_not_awaited()
 
@@ -697,7 +738,7 @@ async def test_archive_sql_does_not_filter_status_published() -> None:
     session.commit = AsyncMock(return_value=None)
 
     repo = ArticleRepository(session)
-    await repo.archive("any", frozenset({AccessLevel.PUBLIC}))
+    await repo.archive("any", frozenset({AccessLevel.PUBLIC}), actor_sub="test-actor")
 
     sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
     assert "access_level IN" in sql
@@ -754,7 +795,7 @@ async def test_archive_sql_includes_correct_access_levels_per_scope(
     session.commit = AsyncMock(return_value=None)
 
     repo = ArticleRepository(session)
-    await repo.archive("any-slug", levels)
+    await repo.archive("any-slug", levels, actor_sub="test-actor")
     sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
 
     assert "access_level IN" in sql
@@ -885,3 +926,250 @@ async def test_list_filtered_combines_tags_with_category() -> None:
     assert "category" in sql
     assert "@>" in sql
     assert "access_level IN" in sql
+
+
+# ============================================================
+# list_versions + version recording (E2.3 #36)
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_update_inserts_version_with_next_number(fake_article: Article) -> None:
+    """E2.3: каждый update создаёт ArticleVersion с next_version = MAX + 1."""
+    from src.api.articles.models import ArticleVersion
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+
+    # Первый execute() — SELECT article (для update); второй — MAX(version).
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 3  # prev version was 3
+    session.execute = AsyncMock(side_effect=[select_result, max_result])
+
+    repo = ArticleRepository(session)
+    payload = _valid_input()
+    payload.access_level = AccessLevel.LOGGED
+    payload.status = "DRAFT"
+    await repo.update(
+        "kak-podpisat",
+        payload,
+        frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}),
+        actor_sub="alice-sub",
+    )
+
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert len(versions) == 1
+    v = versions[0]
+    assert v.version == 4  # MAX + 1
+    assert v.event == "UPDATE"
+    assert v.author_sub == "alice-sub"
+    assert v.old_status == "PUBLISHED"
+    assert v.new_status == "DRAFT"
+    assert v.old_access_level == "PUBLIC"
+    assert v.new_access_level == "LOGGED"
+
+
+@pytest.mark.asyncio
+async def test_archive_inserts_version_when_status_changes(fake_article: Article) -> None:
+    """E2.3: archive создаёт ArticleVersion (event=ARCHIVE)."""
+    from src.api.articles.models import ArticleVersion
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "STAFF"
+    fake_article.status = "PUBLISHED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[select_result, max_result])
+
+    repo = ArticleRepository(session)
+    await repo.archive("to-archive", frozenset({AccessLevel.STAFF}), actor_sub="hr-sub")
+
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert len(versions) == 1
+    v = versions[0]
+    assert v.version == 2
+    assert v.event == "ARCHIVE"
+    assert v.author_sub == "hr-sub"
+    assert v.old_status == "PUBLISHED"
+    assert v.new_status == "ARCHIVED"
+    # access_level не менялся, но фиксируем оба для consistency.
+    assert v.old_access_level == "STAFF"
+    assert v.new_access_level == "STAFF"
+
+
+@pytest.mark.asyncio
+async def test_archive_no_op_does_not_create_version(fake_article: Article) -> None:
+    """E2.3: уже-ARCHIVED не создаёт версию (idempotent no-op)."""
+    from src.api.articles.models import ArticleVersion
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "ARCHIVED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    session.execute = AsyncMock(return_value=select_result)
+
+    repo = ArticleRepository(session)
+    out = await repo.archive("already", frozenset({AccessLevel.PUBLIC}), actor_sub="actor")
+    assert out == ("ARCHIVED", "PUBLIC")
+
+    # ВАЖНО: версия НЕ создаётся.
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    assert versions == []
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_versions_returns_none_when_article_invisible() -> None:
+    """ADR-0003 source-mask: get_by_slug отсёк article → list_versions None → 404."""
+    # get_by_slug возвращает None — статья не видна.
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=result)
+
+    repo = ArticleRepository(session)
+    out = await repo.list_versions("hr-secret", frozenset({AccessLevel.PUBLIC}))
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_list_versions_returns_versions_when_article_visible(
+    fake_article: Article,
+) -> None:
+    from src.api.articles.models import ArticleVersion
+
+    fake_article.id = uuid4()
+    v1 = ArticleVersion(
+        article_id=fake_article.id,
+        version=1,
+        event="CREATE",
+        author_sub="a",
+        new_status="DRAFT",
+        new_access_level="PUBLIC",
+    )
+    v2 = ArticleVersion(
+        article_id=fake_article.id,
+        version=2,
+        event="UPDATE",
+        author_sub="b",
+        old_status="DRAFT",
+        new_status="PUBLISHED",
+        old_access_level="PUBLIC",
+        new_access_level="PUBLIC",
+    )
+
+    # Первый execute() — get_by_slug; второй — SELECT versions.
+    article_result = MagicMock()
+    article_result.scalar_one_or_none.return_value = fake_article
+    scalars_mock = MagicMock()
+    scalars_mock.all.return_value = [v2, v1]
+    versions_result = MagicMock()
+    versions_result.scalars.return_value = scalars_mock
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[article_result, versions_result])
+
+    repo = ArticleRepository(session)
+    out = await repo.list_versions("visible", frozenset({AccessLevel.PUBLIC}))
+    assert out is not None
+    assert len(out) == 2
+    assert out[0].version == 2  # DESC order
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_versions_inherits_access_level_filter_from_get_by_slug() -> None:
+    """ADR-0003: list_versions использует get_by_slug, который применяет
+    `access_level IN (...)` + `status='PUBLISHED'` фильтры. Проверяем что
+    первый SELECT (для article) содержит обоих.
+    """
+    captured: dict[str, Any] = {}
+    call_count = [0]
+
+    async def _capture(stmt: Any) -> Any:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            captured["article_stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+
+    repo = ArticleRepository(session)
+    await repo.list_versions("any-slug", frozenset({AccessLevel.STAFF}))
+
+    sql = str(captured["article_stmt"].compile(compile_kwargs={"literal_binds": True}))
+    # ADR-0003 invariants.
+    assert "access_level IN" in sql
+    assert "'STAFF'" in sql
+    # Read-инвариант (status='PUBLISHED').
+    assert "'PUBLISHED'" in sql
+
+
+@pytest.mark.asyncio
+async def test_update_creates_version_even_if_payload_unchanged(
+    fake_article: Article,
+) -> None:
+    """PUT всегда создаёт версию — это акт, не diff (per plan revision)."""
+    from src.api.articles.models import ArticleVersion
+
+    fake_article.id = uuid4()
+    fake_article.access_level = "PUBLIC"
+    fake_article.status = "PUBLISHED"
+
+    added: list[Any] = []
+    session = MagicMock()
+    session.add = MagicMock(side_effect=lambda obj: added.append(obj))
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+
+    select_result = MagicMock()
+    select_result.scalar_one_or_none.return_value = fake_article
+    max_result = MagicMock()
+    max_result.scalar.return_value = 1
+    session.execute = AsyncMock(side_effect=[select_result, max_result])
+
+    # Payload идентичен текущему article (access_level=PUBLIC, status=PUBLISHED).
+    payload = _valid_input()
+    # _valid_input: access_level=PUBLIC, status=DRAFT (default).
+    payload.status = "PUBLISHED"
+
+    repo = ArticleRepository(session)
+    await repo.update(
+        "same-slug",
+        payload,
+        frozenset({AccessLevel.PUBLIC}),
+        actor_sub="actor",
+    )
+
+    versions = [v for v in added if isinstance(v, ArticleVersion)]
+    # Версия создаётся даже когда "ничего не изменилось".
+    assert len(versions) == 1
+    assert versions[0].version == 2
+    assert versions[0].event == "UPDATE"

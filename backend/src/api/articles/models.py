@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Index, String, Text, func, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -102,6 +102,11 @@ class Article(Base):
     def allowed_access_levels() -> tuple[str, ...]:
         return ("PUBLIC", "LOGGED", "AGENT", "STAFF", "LEGAL", "HR_RESTRICTED")
 
+    @staticmethod
+    def allowed_events() -> tuple[str, ...]:
+        """Events для ArticleVersion (E2.3 #36). Sync с CHECK в миграции 0004."""
+        return ("CREATE", "UPDATE", "ARCHIVE")
+
     def to_dict(self) -> dict[str, Any]:
         """Используется в schemas.ArticleResponse.model_validate() через from_attributes."""
         return {
@@ -119,3 +124,52 @@ class Article(Base):
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+class ArticleVersion(Base):
+    """Запись истории изменений Article (E2.3 #36).
+
+    Каждая write-операция (create/update/archive) пишет version-row в
+    той же транзакции, что и INSERT/UPDATE articles — атомарно.
+    Snapshot тела статьи НЕ хранится (метаданные only); backlog для
+    compliance use case.
+
+    Visibility наследуется от parent article через router (404-mask):
+    `list_versions` сначала вызывает `get_by_slug`, если scope не видит
+    article → None → 404. Отдельного `access_level` у версий нет.
+    """
+
+    __tablename__ = "article_versions"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    article_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("articles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    event: Mapped[str] = mapped_column(String(16), nullable=False)
+    author_sub: Mapped[str] = mapped_column(String(255), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    old_status: Mapped[str | None] = mapped_column(String(16))
+    new_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    old_access_level: Mapped[str | None] = mapped_column(String(20))
+    new_access_level: Mapped[str] = mapped_column(String(20), nullable=False)
+    changes_summary: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        # Sequential numbering per article. Concurrent write при race
+        # получит IntegrityError — обрабатывается в repository (backlog E5).
+        # Index создаётся в миграции (DESC порядок для query «свежие сверху»).
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover (debug only)
+        return f"<ArticleVersion article_id={self.article_id} v={self.version}>"

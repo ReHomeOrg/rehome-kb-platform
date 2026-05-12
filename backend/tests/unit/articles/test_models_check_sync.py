@@ -17,35 +17,37 @@ import pytest
 
 from src.api.articles.models import Article
 
-MIGRATION_FILE = (
-    Path(__file__).parents[3] / "alembic" / "versions" / "20260512_014421_initial_articles.py"
-)
+MIGRATIONS_DIR = Path(__file__).parents[3] / "alembic" / "versions"
+
+INITIAL_MIGRATION = MIGRATIONS_DIR / "20260512_014421_initial_articles.py"
+VERSIONS_MIGRATION = MIGRATIONS_DIR / "20260512_103535_article_versions.py"
 
 
-def _extract_check_values(check_name: str) -> set[str]:
+def _extract_check_values(migration_file: Path, check_name: str) -> set[str]:
     """Достаёт literal-значения из CHECK constraint миграции по имени."""
-    content = MIGRATION_FILE.read_text(encoding="utf-8")
-    # Ищем строку `name="<check_name>"` и берём предшествующий ей `... IN (...)`.
+    content = migration_file.read_text(encoding="utf-8")
     pattern = rf'"([^"]+ IN \([^)]+\))",\s*name="{check_name}"'
     match = re.search(pattern, content)
     if match is None:
-        raise AssertionError(f"CHECK '{check_name}' не найден в миграции")
+        raise AssertionError(f"CHECK '{check_name}' не найден в миграции {migration_file.name}")
     in_clause = match.group(1)
-    # Достаём все 'literal' значения.
     values = re.findall(r"'([^']+)'", in_clause)
     return set(values)
 
 
 @pytest.mark.parametrize(
-    ("check_name", "method_name"),
+    ("migration", "check_name", "method_name"),
     [
-        ("ck_articles_audience", "allowed_audiences"),
-        ("ck_articles_status", "allowed_statuses"),
-        ("ck_articles_access_level", "allowed_access_levels"),
+        (INITIAL_MIGRATION, "ck_articles_audience", "allowed_audiences"),
+        (INITIAL_MIGRATION, "ck_articles_status", "allowed_statuses"),
+        (INITIAL_MIGRATION, "ck_articles_access_level", "allowed_access_levels"),
+        (VERSIONS_MIGRATION, "ck_article_versions_event", "allowed_events"),
     ],
 )
-def test_allowed_values_match_migration_check(check_name: str, method_name: str) -> None:
-    migration_values = _extract_check_values(check_name)
+def test_allowed_values_match_migration_check(
+    migration: Path, check_name: str, method_name: str
+) -> None:
+    migration_values = _extract_check_values(migration, check_name)
     app_values = set(getattr(Article, method_name)())
     assert migration_values == app_values, (
         f"Drift between migration CHECK '{check_name}' и "

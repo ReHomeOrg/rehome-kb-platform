@@ -12,12 +12,12 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import cast, literal, select, tuple_
+from sqlalchemy import cast, func, literal, select, tuple_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.articles.models import Article
+from src.api.articles.models import Article, ArticleVersion
 from src.api.articles.schemas import ArticleInput
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -153,24 +153,60 @@ class ArticleRepository:
         has_more = len(rows) > limit
         return rows[:limit], has_more
 
-    async def create(self, payload: ArticleInput) -> Article:
-        """Создаёт статью из валидированного payload'а.
+    async def _next_version(self, article_id: UUID) -> int:
+        """MAX(version) + 1 для article_id; 1 если версий ещё нет.
 
-        Pydantic уже проверил schema (slug pattern, length, required, enum
-        для access_level). Здесь — только DB-уровень: unique slug.
-
-        IntegrityError → 409 SlugConflictError. Другие IntegrityError
-        (CHECK constraints на audience/status) теоретически возможны если
-        Pydantic пропустит (audience пока str без enum-валидации); тогда
-        они уходят в 500 — это документировано в плане как risk до E4.x
-        rollout'а enum-валидации на все поля.
-
-        Commit здесь, не в endpoint: один insert = один commit; FastAPI
-        `get_session` использует `async with`, без явного commit изменения
-        откатятся. Нам нужен commit для возврата ID/created_at server-defaults.
+        Race: concurrent write двух writers получит одинаковый next; UNIQUE
+        (article_id, version) constraint защищает — один из двух упадёт
+        IntegrityError → 500. Backlog E5 (ETag + advisory lock).
         """
-        # `access_level` — AccessLevel enum (StrEnum); .value даёт строку
-        # для записи в БД (колонка String, см. models.py).
+        stmt = select(func.max(ArticleVersion.version)).where(
+            ArticleVersion.article_id == article_id
+        )
+        result = await self._session.execute(stmt)
+        current_max: int | None = result.scalar()
+        return (current_max or 0) + 1
+
+    def _build_version(
+        self,
+        *,
+        article_id: UUID,
+        version: int,
+        event: str,
+        author_sub: str,
+        old_status: str | None,
+        new_status: str,
+        old_access_level: str | None,
+        new_access_level: str,
+        summary: str | None,
+    ) -> ArticleVersion:
+        """Создаёт ArticleVersion-row для добавления в session.
+
+        НЕ commit'ит; вызывающая сторона делает commit в той же транзакции,
+        что и article INSERT/UPDATE — atomic.
+        """
+        return ArticleVersion(
+            article_id=article_id,
+            version=version,
+            event=event,
+            author_sub=author_sub,
+            old_status=old_status,
+            new_status=new_status,
+            old_access_level=old_access_level,
+            new_access_level=new_access_level,
+            changes_summary=summary,
+        )
+
+    async def create(self, payload: ArticleInput, *, actor_sub: str) -> Article:
+        """Создаёт статью + version-row (version=1, event=CREATE) atomic.
+
+        Pydantic уже проверил schema. IntegrityError по `uq_articles_slug` →
+        409 SlugConflictError. Прочие CHECK violations → 500 (backlog #28).
+
+        `actor_sub` — Keycloak `sub` claim писателя, для audit (E4.1) и
+        version (E2.3). Router передаёт из `claims["sub"]` после
+        `require_authenticated`.
+        """
         article = Article(
             slug=payload.slug,
             title=payload.title,
@@ -184,13 +220,24 @@ class ArticleRepository:
         )
         self._session.add(article)
         try:
+            # flush получает article.id (server-default UUID).
             await self._session.flush()
+            # E2.3: version-row в той же транзакции — atomic.
+            version_row = self._build_version(
+                article_id=article.id,
+                version=1,
+                event="CREATE",
+                author_sub=actor_sub,
+                old_status=None,
+                new_status=article.status,
+                old_access_level=None,
+                new_access_level=article.access_level,
+                summary="Article created",
+            )
+            self._session.add(version_row)
             await self._session.commit()
         except IntegrityError as exc:
             await self._session.rollback()
-            # Конкретный код constraint у asyncpg / unique violation.
-            # Проверяем по тексту message — фильтруем именно slug-conflict;
-            # остальные IntegrityError (CHECK) пробрасываем как есть → 500.
             if "uq_articles_slug" in str(exc.orig) or "articles_slug_key" in str(exc.orig):
                 raise SlugConflictError(payload.slug) from exc
             raise
@@ -202,6 +249,8 @@ class ArticleRepository:
         slug: str,
         payload: ArticleInput,
         access_levels: frozenset[AccessLevel],
+        *,
+        actor_sub: str,
     ) -> tuple[Article, str, str] | None:
         """Обновляет статью по slug; возвращает `(article, old_al, old_st)` или None.
 
@@ -251,6 +300,22 @@ class ArticleRepository:
         article.language = payload.language
         article.tags = list(payload.tags)
 
+        # E2.3: version-row в той же транзакции — atomic с UPDATE article.
+        # PUT всегда создаёт версию, даже если payload идентичен текущему
+        # состоянию (UPDATE — это акт, не diff; см. plan revision).
+        next_v = await self._next_version(article.id)
+        version_row = self._build_version(
+            article_id=article.id,
+            version=next_v,
+            event="UPDATE",
+            author_sub=actor_sub,
+            old_status=old_status,
+            new_status=article.status,
+            old_access_level=old_access_level,
+            new_access_level=article.access_level,
+            summary="Updated",
+        )
+        self._session.add(version_row)
         await self._session.commit()
         await self._session.refresh(article)
         return article, old_access_level, old_status
@@ -259,6 +324,8 @@ class ArticleRepository:
         self,
         slug: str,
         access_levels: frozenset[AccessLevel],
+        *,
+        actor_sub: str,
     ) -> tuple[str, str] | None:
         """Soft-delete: status → 'ARCHIVED'. Возвращает `(was_status,
         was_access_level)` или None если статья не найдена / scope не видит.
@@ -293,12 +360,57 @@ class ArticleRepository:
         was_access_level = article.access_level
 
         if was_status != "ARCHIVED":
-            # Мутируем только если ещё не архивирована — иначе no-op для
-            # сохранения `updated_at` (idempotent without side effects).
+            # Мутируем только если ещё не архивирована.
             article.status = "ARCHIVED"
+            # E2.3: version-row в той же транзакции.
+            next_v = await self._next_version(article.id)
+            version_row = self._build_version(
+                article_id=article.id,
+                version=next_v,
+                event="ARCHIVE",
+                author_sub=actor_sub,
+                old_status=was_status,
+                new_status="ARCHIVED",
+                old_access_level=was_access_level,
+                new_access_level=was_access_level,
+                summary=f"Archived (was: {was_status})",
+            )
+            self._session.add(version_row)
             await self._session.commit()
+        # else: already-ARCHIVED → no-op, version НЕ создаётся (idempotent).
 
         return was_status, was_access_level
+
+    async def list_versions(
+        self,
+        slug: str,
+        access_levels: frozenset[AccessLevel],
+    ) -> list[ArticleVersion] | None:
+        """Возвращает версии Article в порядке version DESC.
+
+        Visibility наследуется от parent article (ADR-0003 source-mask):
+        сначала `get_by_slug(slug, access_levels)` — если None → возвращаем
+        None → router 404. Иначе SELECT versions для `article.id`.
+
+        Это значит, что history non-PUBLISHED статьи (DRAFT/ARCHIVED) скрыта
+        от всех (даже writer'а) через этот endpoint — он наследует public
+        read-инвариант. Editor-history (`/staff/.../history`) — отдельный
+        endpoint в будущем (E4.x).
+
+        Список может быть пустой только при non-нормальном flow (статья
+        была вставлена напрямую в БД, минуя `create`); в production
+        нормально каждая статья имеет минимум version=1.
+        """
+        article = await self.get_by_slug(slug, access_levels)
+        if article is None:
+            return None
+        stmt = (
+            select(ArticleVersion)
+            .where(ArticleVersion.article_id == article.id)
+            .order_by(ArticleVersion.version.desc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
 
 
 def get_article_repository(
