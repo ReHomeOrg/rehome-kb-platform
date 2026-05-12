@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 
-from src.api.articles.audit import log_article_created
+from src.api.articles.audit import log_article_created, log_article_updated
 from src.api.articles.authorization import ensure_can_write_access_level
 from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.articles.repository import ArticleRepository, get_article_repository
@@ -177,4 +177,78 @@ async def create_article(
     )
 
     response.headers["Location"] = f"/api/v1/articles/{article.slug}"
+    return ArticleResponse.model_validate(article)
+
+
+@router.put(
+    "/{slug}",
+    response_model=ArticleResponse,
+    summary="Полностью заменить статью (требует scope ≥ staff_support)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Недостаточный scope или target access_level недоступен"},
+        404: {"description": "Статья не существует или недоступна (ADR-0003 mask)"},
+        422: {"description": "Невалидный payload или slug-mismatch"},
+    },
+)
+async def replace_article(
+    payload: ArticleInput,
+    slug: str = Path(
+        ...,
+        min_length=1,
+        max_length=200,
+        pattern=SLUG_PATTERN,
+        description="Канонический идентификатор статьи (ADR-0006)",
+    ),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: ArticleRepository = Depends(get_article_repository),
+) -> ArticleResponse:
+    """Полностью заменяет статью.
+
+    Авторизация (двух-уровневая, ADR-0003 источник + цель):
+    1. `require_authenticated` → 401 без токена.
+    2. `require_access_level(STAFF)` → 403 если scope < staff_support.
+    3. **Source check** (в `repo.update`): writer не видит исходник → 404.
+    4. **Target check**: `ensure_can_write_access_level(target, levels)` →
+       403 если writer пытается установить недоступный target.
+
+    Slug change через PUT запрещён: `payload.slug` должен совпадать с
+    `path.slug` (или 422). Переименование — через DELETE+POST.
+
+    Audit: метаданные старых/новых access_level и status; БЕЗ content
+    (ФЗ-152). Best-effort после commit (E4.x DB audit_log → at-least-once).
+    """
+    if payload.slug != slug:
+        # 422 — FastAPI/Starlette deprecate `HTTP_422_UNPROCESSABLE_ENTITY` в
+        # пользу `HTTP_422_UNPROCESSABLE_CONTENT`; используем код-литерал для
+        # совместимости с разными версиями Starlette до выравнивания в E5.
+        raise HTTPException(
+            status_code=422,
+            detail=("Slug in path and body must match; renaming is not supported in PUT"),
+        )
+
+    # Target check (ADR-0003 Level-2) — ДО source check, чтобы 403 не
+    # утекал информацию о существовании. Если 403 — клиент знает только,
+    # что target ему недоступен; источник статьи остаётся опаковым.
+    ensure_can_write_access_level(payload.access_level, access_levels)
+
+    updated = await repo.update(slug, payload, access_levels)
+    if updated is None:
+        # Source check (ADR-0003 mask): нет статьи ИЛИ scope её не видит.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Article not found",
+        )
+
+    article, old_access_level, old_status = updated
+    log_article_updated(
+        actor_sub=claims["sub"],
+        slug=article.slug,
+        old_access_level=old_access_level,
+        new_access_level=article.access_level,
+        old_status=old_status,
+        new_status=article.status,
+    )
     return ArticleResponse.model_validate(article)

@@ -666,3 +666,274 @@ def test_post_articles_staff_support_cannot_create_legal(
     finally:
         _cleanup_session_override()
     assert response.status_code == 403
+
+
+# ============================================================
+# PUT /api/v1/articles/{slug} — replace endpoint (E4.3)
+# ============================================================
+
+
+def _put_payload(slug: str = "my-slug", **overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "slug": slug,
+        "title": "Updated Title",
+        "body_markdown": "# Updated",
+        "category": "guide",
+        "audience": "tenant",
+        "access_level": "PUBLIC",
+    }
+    base.update(overrides)
+    return base
+
+
+def _override_put_update(
+    monkeypatch: pytest.MonkeyPatch,
+    return_value: tuple[Article, str, str] | None,
+) -> None:
+    """Подменяет ArticleRepository.update."""
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        access_levels: frozenset[Any],
+    ) -> tuple[Article, str, str] | None:
+        if return_value is None:
+            return None
+        article, old_al, old_st = return_value
+        article.slug = slug
+        article.title = payload.title
+        article.body_markdown = payload.body_markdown
+        article.category = payload.category
+        article.audience = payload.audience
+        article.access_level = payload.access_level.value
+        article.status = payload.status
+        article.language = payload.language
+        article.tags = list(payload.tags)
+        return article, old_al, old_st
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.update", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_put_articles_401_without_token(client: TestClient) -> None:
+    response = client.put("/api/v1/articles/my-slug", json=_put_payload())
+    assert response.status_code == 401
+
+
+def test_put_articles_403_when_tenant_scope(
+    client: TestClient, make_jwt: Callable[..., str]
+) -> None:
+    token = make_jwt(roles=["tenant"])
+    response = client.put(
+        "/api/v1/articles/my-slug",
+        json=_put_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_put_articles_200_when_staff_admin_updates_public(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    _override_put_update(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="admin-user")
+        response = client.put(
+            "/api/v1/articles/my-slug",
+            json=_put_payload("my-slug", access_level="PUBLIC"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["slug"] == "my-slug"
+    assert body["title"] == "Updated Title"
+
+
+def test_put_articles_404_when_article_not_found(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_put_update(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/missing",
+            json=_put_payload("missing"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+@pytest.mark.security
+def test_put_articles_404_when_scope_cannot_see(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0003 source mask: репозиторий вернул None для out-of-scope → 404."""
+    _override_put_update(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/hr-secret",
+            json=_put_payload("hr-secret", access_level="PUBLIC"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+@pytest.mark.security
+def test_put_articles_403_when_target_access_level_not_writable(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """ADR-0003 target Level-2: staff_admin не может ставить HR_RESTRICTED → 403.
+
+    Target check ДО source check — клиент не получает информацию о
+    существовании источника через 404 vs 403 timing.
+    """
+    _override_put_update(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/my-slug",
+            json=_put_payload("my-slug", access_level="HR_RESTRICTED"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 403
+
+
+def test_put_articles_422_when_slug_mismatch_path_vs_body(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Slug change через PUT отвергается — path = identifier."""
+    _override_put_update(monkeypatch, (fake_article, "PUBLIC", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.put(
+            "/api/v1/articles/path-slug",
+            json=_put_payload("body-slug"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 422
+    assert "slug" in response.json()["detail"].lower()
+
+
+@pytest.mark.parametrize(
+    "broken_payload",
+    [
+        {},
+        {
+            "slug": "ok",
+            "title": "x",
+            "body_markdown": "x",
+            "category": "c",
+            "audience": "a",
+        },
+        {
+            "slug": "ok",
+            "title": "x",
+            "body_markdown": "x",
+            "category": "c",
+            "audience": "a",
+            "access_level": "PUBLIC",
+            "extra": "field",
+        },
+    ],
+)
+def test_put_articles_422_when_payload_invalid(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    broken_payload: dict[str, Any],
+) -> None:
+    token = make_jwt(roles=["staff_admin"])
+    response = client.put(
+        "/api/v1/articles/ok",
+        json=broken_payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.security
+def test_put_articles_200_when_staff_hr_updates_hr_restricted(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+) -> None:
+    """Positive matrix guard: staff_hr ИМЕЕТ HR_RESTRICTED level → 200."""
+    _override_put_update(monkeypatch, (fake_article, "HR_RESTRICTED", "PUBLISHED"))
+    try:
+        token = make_jwt(roles=["staff_hr"], sub="hr-user")
+        response = client.put(
+            "/api/v1/articles/hr-doc",
+            json=_put_payload("hr-doc", access_level="HR_RESTRICTED"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200, response.text
+
+
+def test_put_articles_audit_log_emitted_without_content(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ФЗ-152: audit-log содержит метаданные дельты, НЕ body_markdown/title."""
+    import logging
+
+    _override_put_update(monkeypatch, (fake_article, "PUBLIC", "DRAFT"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="actor-uuid")
+        caplog.set_level(logging.INFO, logger="rehome.kb.audit")
+        response = client.put(
+            "/api/v1/articles/my-slug",
+            json=_put_payload("my-slug", access_level="LOGGED", status="PUBLISHED"),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 200
+    audit_records = [r for r in caplog.records if r.name == "rehome.kb.audit"]
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec.getMessage() == "articles.updated"
+    assert getattr(rec, "actor_sub", None) == "actor-uuid"
+    assert getattr(rec, "slug", None) == "my-slug"
+    assert getattr(rec, "old_access_level", None) == "PUBLIC"
+    assert getattr(rec, "new_access_level", None) == "LOGGED"
+    assert getattr(rec, "old_status", None) == "DRAFT"
+    assert getattr(rec, "new_status", None) == "PUBLISHED"
+    for attr in ("body_markdown", "title", "summary", "short_answer"):
+        assert not hasattr(rec, attr), f"Audit log утекает '{attr}'"
