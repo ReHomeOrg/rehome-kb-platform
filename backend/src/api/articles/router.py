@@ -33,6 +33,7 @@ from src.api.auth.dependency import (
 )
 from src.api.auth.exceptions import UnauthorizedError
 from src.api.auth.scope import AccessLevel
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 # Slug pattern из OpenAPI / ADR-0006: lowercase ASCII, цифры, дефисы.
 # 1..200 символов, не пустой. Защищает от path-injection и SQL-сюрпризов
@@ -208,7 +209,8 @@ async def create_article(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
-) -> ArticleResponse:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """Создаёт статью.
 
     Авторизация (двух-уровневая):
@@ -218,10 +220,27 @@ async def create_article(
        пытается создать статью с access_level, к которому сам не имеет
        доступа (ADR-0003 write-extension).
 
+    Idempotency-Key (E5.1 #44): если header `Idempotency-Key: <UUID>` есть
+    в request — `process_idempotency_key` либо replay'ит cached response
+    (если retry с тем же body), либо 409 (retry с другим body), либо
+    готовит save-callback для cache'ирования после execution.
+
     Audit log: после успешного commit'а — `articles.created` с метаданными
     (БЕЗ body_markdown/title — ФЗ-152). Best-effort на E4.1; E4.x будет
     писать audit в той же транзакции через DB-таблицу.
     """
+    # E5.1: если idempotency replay есть — возвращаем cached response.
+    # `JSONResponse` напрямую — bypass'ит `response_model=ArticleResponse`
+    # валидацию (cached body может быть от старого schema; trust cache).
+    if idempotency.replay is not None:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     ensure_can_write_access_level(payload.access_level, access_levels)
 
     article = await repo.create(payload, actor_sub=claims["sub"])
@@ -235,8 +254,21 @@ async def create_article(
         access_level=article.access_level,
     )
 
-    response.headers["Location"] = f"/api/v1/articles/{article.slug}"
-    return ArticleResponse.model_validate(article)
+    location = f"/api/v1/articles/{article.slug}"
+    response.headers["Location"] = location
+
+    article_response = ArticleResponse.model_validate(article)
+
+    # E5.1: cache response для retry-safety (если key передан).
+    # Save вызывается ТОЛЬКО на success path — 4xx/5xx exception bypass'ит
+    # save → fresh evaluation на retry (Stripe pattern).
+    await idempotency.save(
+        status_code=status.HTTP_201_CREATED,
+        body=article_response.model_dump(mode="json"),
+        headers={"Location": location},
+    )
+
+    return article_response
 
 
 @router.put(
