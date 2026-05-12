@@ -71,10 +71,18 @@ class IdempotencyKeyRepository:
         response_body: dict[str, Any],
         response_headers: dict[str, str],
     ) -> IdempotencyKey:
-        """INSERT новую запись cache с TTL=24h.
+        """INSERT новую запись cache с TTL=24h + commit.
 
-        Вызывается ПОСЛЕ успешного execution бизнес-логики, в той же
-        транзакции (advisory lock держится → атомарно с business commit).
+        Вызывается ПОСЛЕ успешного execution бизнес-логики (business code
+        уже сделал свой commit). `save` коммитит явно — иначе при
+        закрытии `get_session` контекста pending transaction откатится и
+        idempotency-row не persistится (retry получит cache miss).
+
+        Trade-off: commit отпускает advisory lock от dependency. Real-world
+        race window между business-commit (lock release #1) и save-commit
+        (lock release #2 + persist) минимален; concurrent retry до persist
+        получит cache miss и execute'нет второй раз — то же что без E5.1.
+        Полная защита — single-transaction-per-request (E5.x refactor).
         """
         entry = IdempotencyKey(
             key=key,
@@ -87,7 +95,7 @@ class IdempotencyKeyRepository:
             expires_at=datetime.now(UTC) + DEFAULT_TTL,
         )
         self._session.add(entry)
-        await self._session.flush()
+        await self._session.commit()
         return entry
 
 
