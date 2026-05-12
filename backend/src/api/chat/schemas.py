@@ -70,6 +70,34 @@ class FeedbackInput(BaseModel):
     comment: str | None = Field(default=None, max_length=_FEEDBACK_COMMENT_MAX_LENGTH)
 
 
+# Reason bound для escalation — anti-DoS на TEXT-column.
+_ESCALATE_REASON_MAX_LENGTH = 2000
+
+
+class EscalateInput(BaseModel):
+    """Payload для POST /chat/sessions/{id}/escalate (E3.6 #71).
+
+    OpenAPI 04 line 1014-1059. Все поля optional — пустой POST →
+    priority='normal' (default).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=_ESCALATE_REASON_MAX_LENGTH)
+    priority: Literal["low", "normal", "high"] = "normal"
+
+
+class EscalateResponse(BaseModel):
+    """Response для POST /escalate.
+
+    `ticket_id` — UUID created escalation. `estimated_response_time_minutes`
+    — hardcoded mapping по priority (см. router).
+    """
+
+    ticket_id: UUID
+    estimated_response_time_minutes: int
+
+
 class ChatSessionResponse(BaseModel):
     """ChatSession в response (без session_token для security)."""
 

@@ -29,6 +29,8 @@ from src.api.chat.schemas import (
     ChatSessionDetailResponse,
     ChatSessionResponse,
     CreateSessionInput,
+    EscalateInput,
+    EscalateResponse,
     FeedbackInput,
     SendMessageInput,
 )
@@ -41,6 +43,15 @@ logger = logging.getLogger(__name__)
 # Rough token estimate для message-end / token_count в streaming. Совпадает
 # с MockProvider's chars/4 heuristic; vLLM (E3.7) заменит на tokenizer count.
 _CHARS_PER_TOKEN = 4
+
+# Hardcoded mapping priority → estimated SLA (minutes). MVP-уровень;
+# real values придут из E6 admin / kb-monitoring (наблюдаемая median
+# response time из очереди тикетов).
+_ESTIMATED_RESPONSE_BY_PRIORITY: dict[str, int] = {
+    "low": 60,
+    "normal": 30,
+    "high": 10,
+}
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -317,3 +328,45 @@ async def post_feedback(
             detail="Session or message not found",
         )
     return Response(status_code=status.HTTP_201_CREATED)
+
+
+@router.post(
+    "/sessions/{session_id}/escalate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=EscalateResponse,
+    summary="Эскалация на оператора поддержки",
+)
+async def post_escalate(
+    session_id: UUID = Path(...),
+    payload: EscalateInput | None = Body(default=None),
+    owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
+    repo: ChatRepository = Depends(get_chat_repository),
+) -> EscalateResponse:
+    """`POST /chat/sessions/{id}/escalate` — создать ticket эскалации.
+
+    Body optional: пустой POST → priority='normal', reason=None.
+
+    Owner-gate через `create_escalation`. 404 mask если session не owned.
+
+    Multiple escalations allowed — каждый POST создаёт новый ticket с
+    уникальным id. Webhook delivery в support system — backlog
+    (E5 webhooks эпик).
+    """
+    user_id, session_token = owner
+    reason = payload.reason if payload is not None else None
+    priority = payload.priority if payload is not None else "normal"
+
+    escalation = await repo.create_escalation(
+        session_id,
+        user_id=user_id,
+        session_token=session_token,
+        reason=reason,
+        priority=priority,
+    )
+    if escalation is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return EscalateResponse(
+        ticket_id=escalation.id,
+        estimated_response_time_minutes=_ESTIMATED_RESPONSE_BY_PRIORITY[escalation.priority],
+    )

@@ -161,3 +161,79 @@ class ChatMessage(Base):
     def allowed_roles() -> tuple[str, ...]:
         """Источник истины для CHECK constraint sync (test_models_check_sync)."""
         return ("user", "assistant", "system")
+
+
+class ChatEscalation(Base):
+    """Тикет эскалации chat-сессии на оператора поддержки (E3.6 #71).
+
+    ID совпадает с `ticket_id` в API response. Создаётся per POST /escalate
+    (без dedupe). Status переходы (`pending → in_progress → resolved`) —
+    backlog (E6 Admin или kb-monitoring эпик).
+
+    `requested_by_user_id` — JWT sub при authorized, NULL при anonymous.
+    Используется для audit (кто запросил эскалацию).
+    """
+
+    __tablename__ = "chat_escalations"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    session_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        server_default=text("'normal'"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "priority IN ('low', 'normal', 'high')",
+            name="ck_chat_escalations_priority",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'in_progress', 'resolved')",
+            name="ck_chat_escalations_status",
+        ),
+        Index(
+            "ix_chat_escalations_status_priority",
+            "status",
+            "priority",
+        ),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover (debug only)
+        return (
+            f"<ChatEscalation id={self.id!r} session_id={self.session_id!r} "
+            f"priority={self.priority!r} status={self.status!r}>"
+        )
+
+    @staticmethod
+    def allowed_priorities() -> tuple[str, ...]:
+        return ("low", "normal", "high")
+
+    @staticmethod
+    def allowed_statuses() -> tuple[str, ...]:
+        return ("pending", "in_progress", "resolved")
