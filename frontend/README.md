@@ -37,12 +37,39 @@ make build       # Next.js production build
 
 ## Переменные окружения
 
-На E1.2 frontend не использует внешних переменных. Когда будет
-интеграция с API gateway (E2):
+| Имя | Default | Назначение |
+|---|---|---|
+| `NEXT_PUBLIC_KC_URL` | `http://localhost:8080` | Keycloak base URL |
+| `NEXT_PUBLIC_KC_REALM` | `rehome` | Realm name |
+| `NEXT_PUBLIC_KC_CLIENT_ID` | `rehome-web-spa` | OAuth client_id (SPA) |
+| `KC_REDIRECT_URI` | `http://localhost:3000/api/auth/callback/keycloak` | OAuth callback URI (см. ADR-0007) |
+| `KC_POST_LOGOUT_URI` | `http://localhost:3000/` | Куда вернуться после logout |
+| `NEXT_PUBLIC_KB_API_URL` | _(E2+)_ | Base URL для kb-API gateway (Production: `https://api.rehome.one/kb`) |
 
-| Имя | Назначение |
-|---|---|
-| `NEXT_PUBLIC_KB_API_URL` | Base URL для kb-API gateway (Production: `https://api.rehome.one/kb`) |
+## Auth flow
+
+OAuth 2.0 Authorization Code + PKCE (RFC 7636) — manual implementation
+без NextAuth.js. См. ADR-0007 для обоснования и Issue #19 для деталей.
+
+```
+Browser → /login (UI page)
+       → GET /api/auth/login
+           - generate PKCE verifier + state
+           - set short-lived HttpOnly cookies (5 min)
+           - 302 to Keycloak /auth
+       → Keycloak login form → user authenticates
+       → GET /api/auth/callback/keycloak?code=...&state=...
+           - validate state vs cookie (OAuth-CSRF protection)
+           - POST /token (code + code_verifier)
+           - set kb_session HttpOnly cookie (TTL = expires_in)
+           - 302 to /
+       → POST /api/auth/logout
+           - delete kb_session cookie
+           - 302 to Keycloak /logout
+```
+
+Backend (PR #18) валидирует `kb_session` cookie через JWKS и вычисляет
+scope из `realm_access.roles`.
 
 ## Структура
 
