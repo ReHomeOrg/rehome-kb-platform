@@ -38,7 +38,12 @@ async def db_cleanup() -> AsyncIterator[list[str]]:
         await conn.close()
 
 
-def _payload(slug: str, access_level: str = "PUBLIC") -> dict[str, str]:
+def _payload(
+    slug: str, access_level: str = "PUBLIC", status_value: str = "PUBLISHED"
+) -> dict[str, str]:
+    """Payload по умолчанию `status=PUBLISHED` — иначе GET после POST вернёт 404
+    (ADR-0003: read фильтрует `status='PUBLISHED'`).
+    """
     return {
         "slug": slug,
         "title": f"Test {slug}",
@@ -46,6 +51,7 @@ def _payload(slug: str, access_level: str = "PUBLIC") -> dict[str, str]:
         "category": "guide",
         "audience": "tenant",
         "access_level": access_level,
+        "status": status_value,
     }
 
 
