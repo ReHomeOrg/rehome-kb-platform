@@ -1,8 +1,14 @@
-# reHome KB — local-dev infrastructure (Keycloak + Postgres backend для Keycloak)
+# reHome KB — local-dev infrastructure
 #
-# Запуск: cd infra && docker compose up -d keycloak postgres-keycloak
+# Сервисы:
+#   - postgres-keycloak — БД для Keycloak (порт изолирован, без проброса)
+#   - keycloak          — SSO (порты 8080, 9000)
+#   - postgres-kb       — БД для kb-API (articles/...) на порту 5432
+#
+# Запуск: cd infra && docker compose up -d
+# Запуск только нужных: docker compose up -d postgres-kb
 # Документация: infra/keycloak/README.md
-# ADR: docs/adr/0007-keycloak-realm-structure.md
+# ADR: docs/adr/0007-keycloak-realm-structure.md, docs/adr/0008-orm-sqlalchemy-in-gateway.md
 #
 # Production deployment — отдельный Issue Phase 2 (TLS, HA, prod credentials).
 
@@ -56,6 +62,25 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres-kb:
+    image: postgres:16
+    container_name: rehome-kb-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_KB_DB:-rehome_kb}
+      POSTGRES_USER: ${POSTGRES_KB_USER:-kb}
+      POSTGRES_PASSWORD: ${POSTGRES_KB_PASSWORD:-kb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-kb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_KB_USER:-kb} -d ${POSTGRES_KB_DB:-rehome_kb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-keycloak-data:
     name: rehome-kb-postgres-keycloak-data
+  postgres-kb-data:
+    name: rehome-kb-postgres-kb-data
