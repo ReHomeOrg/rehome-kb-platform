@@ -19,8 +19,10 @@ from src.api.auth.scope import AccessLevel
 # Маппинг scope → разрешённые confidentiality. Иерархия:
 # - PUBLIC scope видит только PUBLIC документы
 # - LOGGED видит PUBLIC + INTERNAL (внутренние документы для логин-ов)
-# - STAFF/AGENT видят все 3 уровня (RESTRICTED — для сотрудников)
-# AGENT/LEGAL/HR_RESTRICTED — TODO (см. backlog issue).
+# - STAFF/LEGAL/HR_RESTRICTED видят все 3 уровня
+# - AGENT — пока conservative (PUBLIC + INTERNAL), tuning см. Issue #58.
+# Уточнение AGENT/LEGAL/HR_RESTRICTED при появлении реальных use-case'ов
+# (kb-files эпик) — Issue #58.
 CONFIDENTIALITY_BY_SCOPE: dict[AccessLevel, frozenset[str]] = {
     AccessLevel.PUBLIC: frozenset({"PUBLIC"}),
     AccessLevel.LOGGED: frozenset({"PUBLIC", "INTERNAL"}),
