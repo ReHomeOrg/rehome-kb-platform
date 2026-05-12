@@ -26,6 +26,8 @@ def test_get_article_returns_200_when_found(
     assert body["title"] == fake_article.title
     assert body["status"] == "PUBLISHED"
     assert body["audience"] == "tenant"
+    # OpenAPI ArticleSummary требует access_level в каждом ответе.
+    assert body["access_level"] == "PUBLIC"
 
 
 def test_get_article_returns_404_when_missing(

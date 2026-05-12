@@ -25,6 +25,12 @@ class ArticleResponse(BaseModel):
     summary: str | None = None
     body_markdown: str
     audience: str
+    # OpenAPI ArticleSummary требует access_level в каждом ответе.
+    # Это безопасно: пользователь и так получил статью, значит видит её
+    # уровень. Информация полезна клиенту для UI badge «Только для staff».
+    # Поля audience/status/language пока str (drift от OpenAPI enum
+    # допустим до E4 — там добавим Pydantic enum-валидацию).
+    access_level: str
     language: str
     category: str
     tags: list[str]
