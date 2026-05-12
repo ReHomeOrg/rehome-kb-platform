@@ -328,22 +328,9 @@ def test_post_message_anon_with_session_token_works(
 
 
 # ---------------------------------------------------------------------------
-# SSE Accept handling
-
-
-def test_post_message_sse_accept_returns_406(
-    client: TestClient,
-    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
-    override_llm: AsyncMock,
-) -> None:
-    """Accept: text/event-stream → 406 (SSE deferred to E3.4)."""
-    resp = client.post(
-        f"/api/v1/chat/sessions/{uuid4()}/messages",
-        json={"content": "x"},
-        headers={"Accept": "text/event-stream"},
-    )
-    assert resp.status_code == 406
-    assert "E3.4" in resp.json()["detail"]
+# SSE Accept handling — E3.4 landed real streaming.
+# Detailed SSE tests перенесены в test_messages_sse.py. Здесь оставляем
+# только wildcard regression — гарантия что */* всё ещё JSON-mode.
 
 
 def test_post_message_wildcard_accept_returns_json(
