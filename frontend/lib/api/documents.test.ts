@@ -42,4 +42,38 @@ describe("documents API", () => {
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain(`/documents/${uuid}`);
   });
+
+  it("listDocuments with related_entity + cursor + limit", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [],
+          pagination: { cursor_next: null, has_more: false },
+        }),
+      ),
+    );
+    await listDocuments({
+      related_entity: "user:abc",
+      cursor: "x",
+      limit: 50,
+    });
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("related_entity=user");
+    expect(String(url)).toContain("cursor=x");
+    expect(String(url)).toContain("limit=50");
+  });
+
+  it("listDocuments without filters → bare URL", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [],
+          pagination: { cursor_next: null, has_more: false },
+        }),
+      ),
+    );
+    await listDocuments();
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).not.toContain("?");
+  });
 });
