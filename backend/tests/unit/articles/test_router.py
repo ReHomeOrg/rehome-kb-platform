@@ -937,3 +937,194 @@ def test_put_articles_audit_log_emitted_without_content(
     assert getattr(rec, "new_status", None) == "PUBLISHED"
     for attr in ("body_markdown", "title", "summary", "short_answer"):
         assert not hasattr(rec, attr), f"Audit log утекает '{attr}'"
+
+
+# ============================================================
+# DELETE /api/v1/articles/{slug} — soft-delete endpoint (E4.4)
+# ============================================================
+
+
+def _override_delete_archive(
+    monkeypatch: pytest.MonkeyPatch,
+    return_value: tuple[str, str] | None,
+) -> None:
+    """Подменяет ArticleRepository.archive."""
+
+    async def _fake(
+        self: Any,
+        slug: str,
+        access_levels: frozenset[Any],
+    ) -> tuple[str, str] | None:
+        return return_value
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.archive", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_delete_articles_401_without_token(client: TestClient) -> None:
+    response = client.delete("/api/v1/articles/my-slug")
+    assert response.status_code == 401
+
+
+def test_delete_articles_403_when_tenant_scope(
+    client: TestClient, make_jwt: Callable[..., str]
+) -> None:
+    token = make_jwt(roles=["tenant"])
+    response = client.delete(
+        "/api/v1/articles/my-slug",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+def test_delete_articles_204_when_staff_admin_archives_public(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_delete_archive(monkeypatch, ("PUBLISHED", "PUBLIC"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="admin-user")
+        response = client.delete(
+            "/api/v1/articles/my-slug",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 204
+    assert response.content == b""  # 204 No Content
+
+
+def test_delete_articles_404_when_article_not_found(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _override_delete_archive(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.delete(
+            "/api/v1/articles/missing",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+@pytest.mark.security
+def test_delete_articles_404_when_scope_cannot_see(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0003 source mask: репозиторий вернул None для out-of-scope → 404."""
+    _override_delete_archive(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.delete(
+            "/api/v1/articles/hr-secret",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404
+
+
+def test_delete_articles_204_idempotent_for_already_archived(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RFC 7231 идемпотентность: повторная DELETE → 204 (was_status=ARCHIVED)."""
+    _override_delete_archive(monkeypatch, ("ARCHIVED", "PUBLIC"))
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.delete(
+            "/api/v1/articles/already-archived",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 204
+
+
+def test_delete_articles_audit_log_emitted_without_content(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ФЗ-152: audit-log содержит метаданные (actor_sub, slug, was_status,
+    was_access_level), НЕ content."""
+    import logging
+
+    _override_delete_archive(monkeypatch, ("PUBLISHED", "STAFF"))
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="actor-uuid")
+        caplog.set_level(logging.INFO, logger="rehome.kb.audit")
+        response = client.delete(
+            "/api/v1/articles/my-slug",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 204
+    audit_records = [r for r in caplog.records if r.name == "rehome.kb.audit"]
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec.getMessage() == "articles.archived"
+    assert getattr(rec, "actor_sub", None) == "actor-uuid"
+    assert getattr(rec, "slug", None) == "my-slug"
+    assert getattr(rec, "was_status", None) == "PUBLISHED"
+    assert getattr(rec, "was_access_level", None) == "STAFF"
+    # Контент НЕ должен утекать.
+    for attr in ("body_markdown", "title", "summary", "short_answer"):
+        assert not hasattr(rec, attr), f"Audit log утекает '{attr}'"
+
+
+@pytest.mark.security
+def test_delete_articles_staff_hr_can_archive_hr_restricted(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive matrix (per Reviewer N5): staff_hr ИМЕЕТ HR_RESTRICTED → 204."""
+    _override_delete_archive(monkeypatch, ("PUBLISHED", "HR_RESTRICTED"))
+    try:
+        token = make_jwt(roles=["staff_hr"], sub="hr-user")
+        response = client.delete(
+            "/api/v1/articles/hr-doc",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 204
+
+
+@pytest.mark.security
+def test_delete_articles_staff_admin_cannot_archive_hr_restricted(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative matrix (per Reviewer N5): staff_admin БЕЗ HR_RESTRICTED → 404
+    (source mask). Репозиторий возвращает None — статья не видна.
+    """
+    _override_delete_archive(monkeypatch, None)
+    try:
+        token = make_jwt(roles=["staff_admin"])
+        response = client.delete(
+            "/api/v1/articles/hr-doc",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        _cleanup_session_override()
+    assert response.status_code == 404

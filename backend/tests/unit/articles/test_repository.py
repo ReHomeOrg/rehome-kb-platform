@@ -593,4 +593,178 @@ async def test_create_unknown_integrity_error_propagated() -> None:
     session.rollback.assert_awaited_once()
 
 
-# Импорт IntegrityError для тестов выше — добавим в начале файла.
+# ============================================================
+# archive tests (E4.4)
+# ============================================================
+
+
+def _build_session_with_article(article: Article | None) -> Any:
+    """AsyncSession-мок: SELECT возвращает указанный Article (или None)."""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = article
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock(return_value=None)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_archive_returns_status_and_access_level_when_found(
+    fake_article: Article,
+) -> None:
+    """Happy: статья найдена, status был PUBLISHED, возвращаем оба поля + commit."""
+    fake_article.status = "PUBLISHED"
+    fake_article.access_level = "PUBLIC"
+    session = _build_session_with_article(fake_article)
+    repo = ArticleRepository(session)
+
+    out = await repo.archive("kak-podpisat", frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}))
+    assert out == ("PUBLISHED", "PUBLIC")
+    # Мутация выполнена.
+    assert fake_article.status == "ARCHIVED"
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_archive_draft_article_succeeds(fake_article: Article) -> None:
+    """Writer может архивировать DRAFT — нет status='PUBLISHED' filter."""
+    fake_article.status = "DRAFT"
+    fake_article.access_level = "STAFF"
+    session = _build_session_with_article(fake_article)
+    repo = ArticleRepository(session)
+
+    out = await repo.archive("draft-slug", frozenset({AccessLevel.STAFF}))
+    assert out == ("DRAFT", "STAFF")
+    assert fake_article.status == "ARCHIVED"
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_archive_idempotent_no_op_for_already_archived(
+    fake_article: Article,
+) -> None:
+    """Per Reviewer N3: уже ARCHIVED → no-op (без UPDATE / без touch updated_at).
+
+    Возвращаем `was_status='ARCHIVED'` — router логирует, но в БД нет
+    мутации (commit НЕ awaited).
+    """
+    fake_article.status = "ARCHIVED"
+    fake_article.access_level = "PUBLIC"
+    session = _build_session_with_article(fake_article)
+    repo = ArticleRepository(session)
+
+    out = await repo.archive("already", frozenset({AccessLevel.PUBLIC}))
+    assert out == ("ARCHIVED", "PUBLIC")
+    assert fake_article.status == "ARCHIVED"  # без изменений
+    session.commit.assert_not_awaited()  # NO-OP — commit не вызван
+
+
+@pytest.mark.asyncio
+async def test_archive_returns_none_when_article_not_found() -> None:
+    session = _build_session_with_article(None)
+    repo = ArticleRepository(session)
+    out = await repo.archive("missing", frozenset({AccessLevel.PUBLIC}))
+    assert out is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_archive_returns_none_when_scope_cannot_see() -> None:
+    """ADR-0003 source-mask: scope-out-of-reach неотличимо от nonexistent (404)."""
+    # Имитируем: SQL отфильтровал HR_RESTRICTED статью для staff_admin scope.
+    session = _build_session_with_article(None)
+    repo = ArticleRepository(session)
+    out = await repo.archive("hr-article", frozenset({AccessLevel.PUBLIC, AccessLevel.STAFF}))
+    assert out is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_archive_sql_does_not_filter_status_published() -> None:
+    """Writer может архивировать DRAFT/ARCHIVED — нет статусного filter."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    session.commit = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    await repo.archive("any", frozenset({AccessLevel.PUBLIC}))
+
+    sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+    assert "access_level IN" in sql
+    assert "slug" in sql
+    # ВАЖНО: status='PUBLISHED' filter ОТСУТСТВУЕТ.
+    assert "'PUBLISHED'" not in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "scope",
+    [
+        Scope.GUEST,
+        Scope.TENANT,
+        Scope.LANDLORD,
+        Scope.AGENT,
+        Scope.STAFF_SUPPORT,
+        Scope.STAFF_LEGAL,
+        Scope.STAFF_HR,
+        Scope.STAFF_ADMIN,
+    ],
+)
+async def test_archive_sql_includes_correct_access_levels_per_scope(
+    scope: Scope,
+) -> None:
+    """ADR-0003 regression: SQL содержит ровно те access_levels, что выдал
+    `compute_access_levels` для каждого Scope (per Reviewer N1).
+
+    Особо: STAFF_ADMIN БЕЗ HR_RESTRICTED — не может архивировать HR.
+    STAFF_HR ИМЕЕТ HR_RESTRICTED — может.
+    """
+    role_map = {
+        Scope.GUEST: [],
+        Scope.TENANT: ["tenant"],
+        Scope.LANDLORD: ["landlord"],
+        Scope.AGENT: ["agent"],
+        Scope.STAFF_SUPPORT: ["staff_support"],
+        Scope.STAFF_LEGAL: ["staff_legal"],
+        Scope.STAFF_HR: ["staff_hr"],
+        Scope.STAFF_ADMIN: ["staff_admin"],
+    }
+    levels = compute_access_levels(role_map[scope])
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    session.commit = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    await repo.archive("any-slug", levels)
+    sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+
+    assert "access_level IN" in sql
+    for lvl in levels:
+        assert f"'{lvl.value}'" in sql
+
+    # Forbidden levels не должны попасть в IN.
+    all_levels: set[AccessLevel] = set(AccessLevel.__members__.values())
+    for forbidden_lvl in all_levels - levels:
+        assert f"'{forbidden_lvl.value}'" not in sql, (
+            f"Scope={scope.value}: access_level={forbidden_lvl.value} утёк в SQL "
+            "(ADR-0003 regression)"
+        )

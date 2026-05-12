@@ -234,6 +234,51 @@ class ArticleRepository:
         await self._session.refresh(article)
         return article, old_access_level, old_status
 
+    async def archive(
+        self,
+        slug: str,
+        access_levels: frozenset[AccessLevel],
+    ) -> tuple[str, str] | None:
+        """Soft-delete: status → 'ARCHIVED'. Возвращает `(was_status,
+        was_access_level)` или None если статья не найдена / scope не видит.
+
+        Авторизация (ADR-0003 source-side, как `update`):
+        - `access_level IN (current_levels)` — writer не видит чужую → None
+          → router 404 (маскировка).
+        - **НЕ фильтруем `status='PUBLISHED'`** — writer может архивировать
+          DRAFT/уже-ARCHIVED статью (идемпотентность DELETE per RFC 7231).
+
+        Target Level-2 check (`access_level` change) НЕ требуется: DELETE
+        меняет `status`, не `access_level`. Writer прошёл source check —
+        этого достаточно.
+
+        **Идемпотентность с no-op для already-ARCHIVED** (per Reviewer N3):
+        если статья уже `ARCHIVED`, мы НЕ мутируем `status` — это значит
+        `updated_at` не обновится (нет UPDATE SQL). 204 всё равно
+        возвращается per RFC 7231. Audit-log пишется с `was_status=
+        'ARCHIVED'` — сигнал повторной DELETE для алертинга.
+        """
+        allowed_strings = [level.value for level in access_levels]
+        stmt = select(Article).where(
+            Article.slug == slug,
+            Article.access_level.in_(allowed_strings),
+        )
+        result = await self._session.execute(stmt)
+        article = result.scalar_one_or_none()
+        if article is None:
+            return None
+
+        was_status = article.status
+        was_access_level = article.access_level
+
+        if was_status != "ARCHIVED":
+            # Мутируем только если ещё не архивирована — иначе no-op для
+            # сохранения `updated_at` (idempotent without side effects).
+            article.status = "ARCHIVED"
+            await self._session.commit()
+
+        return was_status, was_access_level
+
 
 def get_article_repository(
     session: AsyncSession = Depends(get_session),
