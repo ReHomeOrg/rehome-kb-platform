@@ -434,6 +434,150 @@ async def test_create_slug_conflict_raises_409() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_returns_article_when_writer_can_see_it(
+    fake_article: Article,
+) -> None:
+    """Happy path: writer видит статью (access_level matches) → обновляет."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = fake_article
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock(return_value=None)
+    session.refresh = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    payload = _valid_input()
+    # Изменяем visibility и status в payload, чтобы дельта была видна.
+    payload.access_level = AccessLevel.LOGGED  # was PUBLIC
+    payload.status = "ARCHIVED"  # was PUBLISHED
+
+    out = await repo.update(
+        "kak-podpisat-dogovor",
+        payload,
+        frozenset({AccessLevel.PUBLIC, AccessLevel.LOGGED}),
+    )
+    assert out is not None
+    article, old_al, old_st = out
+    assert article is fake_article
+    assert old_al == "PUBLIC"
+    assert old_st == "PUBLISHED"
+    # In-place mutation проверим.
+    assert article.access_level == "LOGGED"
+    assert article.status == "ARCHIVED"
+    session.commit.assert_awaited_once()
+    session.refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_returns_none_when_article_not_found() -> None:
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    out = await repo.update("nonexistent", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    assert out is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_update_returns_none_when_scope_cannot_see() -> None:
+    """ADR-0003 source-side: scope-out-of-reach неотличимо от nonexistent (404 mask)."""
+    session = MagicMock()
+    result = MagicMock()
+    # Имитируем: SQL отфильтровал статью (access_level не в нашем наборе).
+    result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=result)
+    session.commit = AsyncMock(return_value=None)
+
+    repo = ArticleRepository(session)
+    out = await repo.update("hr-article", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    assert out is None
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_update_sql_does_not_filter_status_published() -> None:
+    """Writer должен видеть DRAFT/ARCHIVED — НЕТ статусного фильтра."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.update("some-slug", _valid_input(), frozenset({AccessLevel.PUBLIC}))
+    sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+    # access_level filter обязателен.
+    assert "access_level IN" in sql
+    assert "slug" in sql
+    # status='PUBLISHED' filter — ОТСУТСТВУЕТ (writer видит drafts).
+    assert "'PUBLISHED'" not in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "scope",
+    [
+        Scope.STAFF_SUPPORT,
+        Scope.STAFF_LEGAL,
+        Scope.STAFF_HR,
+        Scope.STAFF_ADMIN,
+    ],
+)
+async def test_update_sql_includes_correct_access_levels_per_scope(
+    scope: Scope,
+) -> None:
+    """ADR-0003 critical: SQL содержит ровно те access_levels, что выдал
+    `compute_access_levels` для каждого write-capable Scope.
+
+    Особо: staff_admin БЕЗ HR_RESTRICTED — не должен видеть HR статьи
+    для update (404 mask). staff_hr ИМЕЕТ HR_RESTRICTED.
+    """
+    role_map = {
+        Scope.STAFF_SUPPORT: ["staff_support"],
+        Scope.STAFF_LEGAL: ["staff_legal"],
+        Scope.STAFF_HR: ["staff_hr"],
+        Scope.STAFF_ADMIN: ["staff_admin"],
+    }
+    levels = compute_access_levels(role_map[scope])
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.update("any-slug", _valid_input(), levels)
+    sql = str(captured["stmt"].compile(compile_kwargs={"literal_binds": True}))
+
+    assert "access_level IN" in sql
+    for lvl in levels:
+        assert f"'{lvl.value}'" in sql
+
+    # Forbidden levels не должны попасть в IN.
+    all_levels: set[AccessLevel] = set(AccessLevel.__members__.values())
+    for forbidden_lvl in all_levels - levels:
+        assert f"'{forbidden_lvl.value}'" not in sql, (
+            f"Scope={scope.value}: access_level={forbidden_lvl.value} утёк в SQL "
+            "(ADR-0003 regression)"
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_unknown_integrity_error_propagated() -> None:
     """IntegrityError, не slug-conflict (например CHECK violation) → 500/пробрасывается."""
     session = MagicMock()
