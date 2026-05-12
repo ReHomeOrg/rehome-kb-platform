@@ -108,4 +108,64 @@ describe("chat API", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect((init as RequestInit).method).toBe("DELETE");
   });
+
+  it("createSession defaults to empty context body", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "s" }), { status: 201 }),
+    );
+    await createSession();
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({});
+  });
+
+  it("createSession propagates context object", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "s" }), { status: 201 }),
+    );
+    await createSession({ context: { page_url: "https://x" } });
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.context.page_url).toBe("https://x");
+  });
+
+  it("createSession throws ApiError on 4xx", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "bad" }), { status: 422 }),
+    );
+    await expect(createSession()).rejects.toMatchObject({ status: 422 });
+  });
+
+  it("escalate with empty input still POSTs", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ticket_id: "t",
+          estimated_response_time_minutes: 30,
+        }),
+        { status: 201 },
+      ),
+    );
+    await escalate("s");
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({});
+  });
+
+  it("postFeedback without comment", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 201 }));
+    await postFeedback("s", { message_id: "m", rating: "down" });
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({ message_id: "m", rating: "down" });
+  });
+
+  it("getSession without sessionToken — no header", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "s", messages: [] })),
+    );
+    await getSession("s");
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers((init as RequestInit).headers);
+    expect(headers.get("X-Chat-Session-Token")).toBeNull();
+  });
 });
