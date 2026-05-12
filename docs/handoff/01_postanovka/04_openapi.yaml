@@ -684,8 +684,16 @@ paths:
       tags:
       - Documents
       summary: Скачать файл документа
-      description: Возвращает 302 redirect на signed URL в MinIO с TTL 5 минут
+      description: |
+        Возвращает 302 redirect на signed URL в MinIO с TTL 5 минут.
+
+        ⚠️ ВРЕМЕННОЕ СОСТОЯНИЕ (Issue #56 / #59): текущая реализация
+        возвращает HTTP 501 Not Implemented — MinIO infrastructure
+        будет поднят в kb-files эпике. Architect approved deviation
+        (см. Issue #56 body). После завершения kb-files эпика
+        вернёмся к описанной здесь 302-семантике.
       operationId: downloadDocumentFile
+      x-deferred-to-epic: kb-files
       parameters:
       - name: id
         in: path
