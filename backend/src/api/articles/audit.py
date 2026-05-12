@@ -33,6 +33,35 @@ def log_article_created(*, actor_sub: str, slug: str, access_level: str) -> None
     )
 
 
+def log_article_archived(
+    *,
+    actor_sub: str,
+    slug: str,
+    was_status: str,
+    was_access_level: str,
+) -> None:
+    """Структурированный audit-event «articles.archived» (soft-delete).
+
+    Минимум полезной информации: actor_sub + slug + был ли status уже
+    ARCHIVED (`was_status='ARCHIVED'` — повторная архивация, сигнал для
+    алертинга) + старый access_level (forensic — кому статья была
+    доступна перед архивированием).
+
+    NB: best-effort после commit — наследуется от `log_article_created`
+    (E4.1) / `log_article_updated` (E4.3); E4.x DB audit_log → at-least-once.
+    """
+    logger.info(
+        "articles.archived",
+        extra={
+            "event": "articles.archived",
+            "actor_sub": actor_sub,
+            "slug": slug,
+            "was_status": was_status,
+            "was_access_level": was_access_level,
+        },
+    )
+
+
 def log_article_updated(
     *,
     actor_sub: str,

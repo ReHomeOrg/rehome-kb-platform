@@ -253,3 +253,81 @@ def test_put_without_token_returns_401(kb_client: httpx.Client) -> None:
         json=_payload("whatever"),
     )
     assert response.status_code == 401
+
+
+# ============================================================
+# DELETE /api/v1/articles/{slug} — soft-delete (E4.4)
+# ============================================================
+
+
+@pytest.mark.integration
+def test_delete_archives_and_get_returns_404(
+    kb_client: httpx.Client,
+    m2m_token: str,
+    db_cleanup: list[str],
+) -> None:
+    """POST PUBLISHED → DELETE → GET без токена возвращает 404 (read скрывает ARCHIVED)."""
+    slug = f"e44-arch-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+
+    post = kb_client.post(
+        "/api/v1/articles",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug, "PUBLIC"),
+    )
+    assert post.status_code == 201
+
+    delete = kb_client.delete(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    assert delete.status_code == 204
+
+    # GET без токена: read filter `status='PUBLISHED'` скрывает ARCHIVED.
+    get_resp = kb_client.get(f"/api/v1/articles/{slug}")
+    assert get_resp.status_code == 404
+
+
+@pytest.mark.integration
+def test_delete_idempotent_204_on_second_call(
+    kb_client: httpx.Client,
+    m2m_token: str,
+    db_cleanup: list[str],
+) -> None:
+    """RFC 7231: повторная DELETE на уже-ARCHIVED статью → 204."""
+    slug = f"e44-idem-{uuid4().hex[:8]}"
+    db_cleanup.append(slug)
+
+    post = kb_client.post(
+        "/api/v1/articles",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+        json=_payload(slug, "PUBLIC"),
+    )
+    assert post.status_code == 201
+
+    first = kb_client.delete(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    assert first.status_code == 204
+
+    second = kb_client.delete(
+        f"/api/v1/articles/{slug}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    assert second.status_code == 204
+
+
+@pytest.mark.integration
+def test_delete_nonexistent_returns_404(kb_client: httpx.Client, m2m_token: str) -> None:
+    response = kb_client.delete(
+        f"/api/v1/articles/e44-missing-{uuid4().hex[:8]}",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.integration
+def test_delete_without_token_returns_401(kb_client: httpx.Client) -> None:
+    response = kb_client.delete("/api/v1/articles/whatever")
+    assert response.status_code == 401
