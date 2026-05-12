@@ -1128,3 +1128,149 @@ def test_delete_articles_staff_admin_cannot_archive_hr_restricted(
     finally:
         _cleanup_session_override()
     assert response.status_code == 404
+
+
+# ============================================================
+# GET /api/v1/articles?tags=... — tags filter (E2.4)
+# ============================================================
+
+
+def _override_list_filtered_capture_tags(
+    monkeypatch: pytest.MonkeyPatch,
+    capture: dict[str, Any],
+) -> None:
+    """Подменяет list_filtered, сохраняя `tags` kwarg."""
+
+    async def _fake(
+        self: Any,
+        access_levels: frozenset[Any],
+        **kwargs: Any,
+    ) -> tuple[list[Article], bool]:
+        capture.update(kwargs)
+        return [], False
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.list_filtered", _fake)
+
+    from src.api.db import get_session
+    from src.api.main import app
+
+    async def _empty_session() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_session] = _empty_session
+
+
+def test_list_articles_tags_csv_parsed_to_list(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=договор,наниматель")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] == ["договор", "наниматель"]
+
+
+def test_list_articles_tags_strip_whitespace(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=%20%20договор%20,%20наниматель%20%20")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] == ["договор", "наниматель"]
+
+
+def test_list_articles_tags_dedupe(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=foo,foo,bar,foo")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] == ["foo", "bar"]
+
+
+def test_list_articles_tags_empty_string_treated_as_none(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] is None
+
+
+def test_list_articles_tags_whitespace_only_treated_as_none(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=%20%20%20")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] is None
+
+
+def test_list_articles_tags_only_commas_treated_as_none(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?tags=,,,` → strip filter empty → None (фильтр не применяется)."""
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=,,,")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] is None
+
+
+def test_list_articles_too_many_tags_returns_422(client: TestClient) -> None:
+    """>10 тегов → 422."""
+    tags = ",".join(f"tag{i}" for i in range(11))
+    response = client.get(f"/api/v1/articles?tags={tags}")
+    assert response.status_code == 422
+    # Detail не echo'ит user-input (без конкретных tags в сообщении).
+    detail = response.json()["detail"]
+    assert "10" in str(detail)
+
+
+def test_list_articles_tag_too_long_returns_422(client: TestClient) -> None:
+    """Тег >50 символов → 422."""
+    long_tag = "a" * 51
+    response = client.get(f"/api/v1/articles?tags={long_tag}")
+    assert response.status_code == 422
+
+
+def test_list_articles_tags_no_filter_passes_none(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] is None
+
+
+def test_list_articles_tags_query_max_length_enforced(client: TestClient) -> None:
+    """`?tags=` с >600 символов отвергается Query max_length (FastAPI 422)."""
+    raw = "a" * 601
+    response = client.get(f"/api/v1/articles?tags={raw}")
+    assert response.status_code == 422

@@ -768,3 +768,120 @@ async def test_archive_sql_includes_correct_access_levels_per_scope(
             f"Scope={scope.value}: access_level={forbidden_lvl.value} утёк в SQL "
             "(ADR-0003 regression)"
         )
+
+
+# ============================================================
+# list_filtered tags filter (E2.4)
+# ============================================================
+
+
+async def _capture_list_filtered_compiled(**kwargs: Any) -> Any:
+    """Возвращает скомпилированный statement (без literal_binds).
+
+    JSONB литералы нельзя render'ить через `literal_binds=True` (SQLAlchemy
+    CompileError). Для tags-тестов используем default compile() и проверяем
+    как SQL string, так и bind-params через `.params`.
+    """
+    captured: dict[str, Any] = {}
+
+    async def _capture(stmt: Any) -> Any:
+        captured["stmt"] = stmt
+        scalars = MagicMock()
+        scalars.all.return_value = []
+        result = MagicMock()
+        result.scalars.return_value = scalars
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=_capture)
+    repo = ArticleRepository(session)
+    await repo.list_filtered(**kwargs)
+    return captured["stmt"].compile()
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_with_single_tag_adds_containment_predicate() -> None:
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        tags=["договор"],
+    )
+    sql = str(compiled)
+    assert "tags @> CAST" in sql
+    assert "AS JSONB" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_with_multiple_tags_uses_single_array_param() -> None:
+    """AND-семантика: single array bind param, не N отдельных предикатов."""
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        tags=["договор", "наниматель"],
+    )
+    sql = str(compiled)
+    assert sql.count("@>") == 1
+    # В params могут быть и другие list-bindings (access_level IN — тоже list);
+    # достаточно убедиться, что наш tags-list присутствует целиком.
+    list_params = [v for v in compiled.params.values() if isinstance(v, list)]
+    assert ["договор", "наниматель"] in list_params
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_with_empty_tags_list_omits_filter() -> None:
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        tags=[],
+    )
+    sql = str(compiled)
+    assert "@>" not in sql
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_with_none_tags_omits_filter() -> None:
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        tags=None,
+    )
+    sql = str(compiled)
+    assert "@>" not in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_filtered_with_tags_still_has_access_level_filter() -> None:
+    """ADR-0003 ortho-guard: tags filter не заменяет/обходит access_level."""
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC, AccessLevel.STAFF}),
+        tags=["foo"],
+    )
+    sql = str(compiled)
+    assert "access_level IN" in sql
+    assert "@>" in sql
+    assert "status" in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.security
+async def test_list_filtered_tags_values_use_bind_params_not_literal() -> None:
+    """Anti-SQL-injection: tags содержимое в bind param, не SQL literal."""
+    malicious = ["'; DROP TABLE articles; --", "x"]
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        tags=malicious,
+    )
+    sql = str(compiled)
+    assert "DROP TABLE" not in sql
+    found = any(v == malicious for v in compiled.params.values() if isinstance(v, list))
+    assert found, "Tags не попали в bind params"
+
+
+@pytest.mark.asyncio
+async def test_list_filtered_combines_tags_with_category() -> None:
+    compiled = await _capture_list_filtered_compiled(
+        access_levels=frozenset({AccessLevel.PUBLIC}),
+        category="guide",
+        tags=["foo"],
+    )
+    sql = str(compiled)
+    assert "category" in sql
+    assert "@>" in sql
+    assert "access_level IN" in sql

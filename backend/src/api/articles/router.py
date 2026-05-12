@@ -36,6 +36,48 @@ from src.api.auth.scope import AccessLevel
 # (хотя ORM параметризует — это defence-in-depth).
 SLUG_PATTERN = r"^[a-z0-9-]+$"
 
+# Tags filter constraints (см. Issue #34):
+# - max 10 тегов на запрос (anti-DoS на JSONB поиск)
+# - max 50 символов на тег (sensible upper bound, OpenAPI пример
+#   `сервисный-платёж` — 16 chars)
+# Случай повторных запятых / пробелов — нормализуется (strip + filter empty).
+# Case-sensitive: `Договор != договор`; нормализация — backlog.
+# Tag с запятой внутри не поддерживается (CSV-конфликт).
+TAGS_MAX_COUNT = 10
+TAGS_MAX_LENGTH = 50
+
+
+def _parse_tags(raw: str | None) -> list[str] | None:
+    """CSV → list[str] с dedupe + strip + drop empty.
+
+    None / пустая строка / только-пробелы → None (фильтр не применяется).
+    >10 элементов или >50 символов → HTTPException 422 (без эха user-input).
+    """
+    if not raw or not raw.strip():
+        return None
+    items = [t.strip() for t in raw.split(",")]
+    deduped: list[str] = []
+    for t in items:
+        if t and t not in deduped:
+            deduped.append(t)
+    if not deduped:
+        return None
+    if len(deduped) > TAGS_MAX_COUNT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many tags (max {TAGS_MAX_COUNT})",
+        )
+    for t in deduped:
+        if len(t) > TAGS_MAX_LENGTH:
+            # Не echo'им user-input в detail (длина инкорпорируется через
+            # message, но не сам tag content).
+            raise HTTPException(
+                status_code=422,
+                detail=f"Tag exceeds max length ({TAGS_MAX_LENGTH} chars)",
+            )
+    return deduped
+
+
 router = APIRouter(prefix="/articles", tags=["Articles"])
 
 
@@ -52,6 +94,14 @@ async def list_articles(
     category: str | None = Query(default=None, max_length=100),
     audience: str | None = Query(default=None, max_length=16),
     language: str | None = Query(default=None, max_length=8),
+    tags: str | None = Query(
+        default=None,
+        max_length=600,
+        description=(
+            "Список тегов через запятую (AND-semantics). Пробелы strip'аются,"
+            " дубликаты удаляются. Max 10 тегов, max 50 символов на тег."
+        ),
+    ),
     cursor: str | None = Query(
         default=None,
         description="Opaque pagination cursor; не парсится клиентом.",
@@ -70,12 +120,14 @@ async def list_articles(
         raise UnauthorizedError(detail="No access levels resolved")
 
     decoded_cursor = decode_cursor(cursor) if cursor else None
+    parsed_tags = _parse_tags(tags)
 
     rows, has_more = await repo.list_filtered(
         access_levels,
         category=category,
         audience=audience,
         language=language,
+        tags=parsed_tags,
         cursor=decoded_cursor,
         limit=limit,
     )
