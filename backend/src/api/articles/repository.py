@@ -515,6 +515,65 @@ class ArticleRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def search(
+        self,
+        q: str,
+        access_levels: frozenset[AccessLevel],
+        *,
+        cursor: tuple[float, UUID] | None = None,
+        limit: int = 10,
+    ) -> tuple[list[tuple[UUID, str, str, float]], bool]:
+        """Postgres FTS search через `search_vector @@ websearch_to_tsquery`.
+
+        Возвращает `[(id, title, snippet, score), ...]` + `has_more`.
+
+        Авторизация (ADR-0003 inherit):
+        - `status='PUBLISHED'` — read-mask (DRAFT/ARCHIVED скрыты).
+        - `access_level IN (current_levels)` — storage-level фильтр.
+
+        Ranking: `ts_rank` от 0 (типично 0..1 на коротких запросах).
+        Tie-breaker: `id` DESC (стабильность при одинаковом score).
+
+        Snippet: `ts_headline('russian', body_markdown, q,
+        'MaxFragments=1, MaxWords=20')` — фрагмент с `<b>match</b>`.
+        **WARNING**: `ts_headline` НЕ escape'нет HTML в body_markdown —
+        frontend ОБЯЗАН sanitize перед рендерингом (DOMPurify).
+
+        Cursor: keyset на `(rank, id)` через `tuple_(...)` (E2.2 паттерн).
+        Cursor валиден только для стабильного `q` (rank query-dependent).
+
+        Anti-SQL-injection: `q` идёт через `websearch_to_tsquery` bind
+        param (Postgres парсит как text query, не SQL). `to_tsquery` —
+        unsafe для user input; не используем.
+        """
+        tsq = func.websearch_to_tsquery("russian", q)
+        rank_expr = func.ts_rank(Article.search_vector, tsq).label("score")
+        headline = func.ts_headline(
+            "russian",
+            Article.body_markdown,
+            tsq,
+            "MaxFragments=1,MaxWords=20",
+        ).label("snippet")
+
+        allowed_strings = [level.value for level in access_levels]
+        stmt = select(Article.id, Article.title, headline, rank_expr).where(
+            Article.status == "PUBLISHED",
+            Article.access_level.in_(allowed_strings),
+            Article.search_vector.op("@@")(tsq),
+        )
+        if cursor is not None:
+            cur_score, cur_id = cursor
+            # Row-value comparison `(rank, id) < (:s, :i)` (E2.2 паттерн).
+            stmt = stmt.where(
+                tuple_(rank_expr, Article.id) < tuple_(literal(cur_score), literal(cur_id))
+            )
+        stmt = stmt.order_by(rank_expr.desc(), Article.id.desc()).limit(limit + 1)
+
+        result = await self._session.execute(stmt)
+        rows = [(row[0], row[1], row[2], float(row[3])) for row in result.all()]
+        has_more = len(rows) > limit
+        return rows[:limit], has_more
+
 
 def get_article_repository(
     session: AsyncSession = Depends(get_session),

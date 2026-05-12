@@ -81,3 +81,48 @@ def decode_cursor(raw: str) -> tuple[datetime, UUID]:
         raise InvalidCursorError(detail="Cursor 'i' is not valid UUID") from exc
 
     return updated_at, article_id
+
+
+def encode_score_cursor(score: float, article_id: UUID) -> str:
+    """Кодирует пару `(score, article_id)` для search-pagination (E2.5a #46).
+
+    Score — float от `ts_rank`. ID — UUID статьи (tiebreaker для стабильной
+    сортировки при одинаковом score).
+
+    NB: cursor валиден только для **стабильного `q`**. Если client меняет
+    query — должен делать fresh search (rank-distribution меняется).
+    """
+    payload = json.dumps({"s": score, "i": str(article_id)})
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def decode_score_cursor(raw: str) -> tuple[float, UUID]:
+    """Декодирует opaque score-cursor → `(score, article_id)`.
+
+    400 на битый base64/JSON/missing fields/wrong types.
+    """
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        data = base64.urlsafe_b64decode(padded.encode("ascii"))
+    except (binascii.Error, UnicodeEncodeError, ValueError) as exc:
+        raise InvalidCursorError(detail="Cursor is not valid base64") from exc
+
+    try:
+        parsed = json.loads(data.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise InvalidCursorError(detail="Cursor is not valid JSON") from exc
+
+    if not isinstance(parsed, dict):
+        raise InvalidCursorError(detail="Cursor payload must be an object")
+
+    raw_s = parsed.get("s")
+    raw_i = parsed.get("i")
+    if not isinstance(raw_s, int | float) or not isinstance(raw_i, str):
+        raise InvalidCursorError(detail="Cursor missing required fields")
+
+    try:
+        article_id = UUID(raw_i)
+    except ValueError as exc:
+        raise InvalidCursorError(detail="Cursor 'i' is not valid UUID") from exc
+
+    return float(raw_s), article_id
