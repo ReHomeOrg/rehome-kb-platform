@@ -173,9 +173,9 @@ jobs:
           cache: 'pip'
           cache-dependency-path: backend/requirements-dev.txt
 
-      - name: Start Keycloak + Postgres
+      - name: Start Keycloak + Postgres-keycloak + Postgres-kb
         working-directory: infra
-        run: docker compose up -d keycloak postgres-keycloak
+        run: docker compose up -d keycloak postgres-keycloak postgres-kb
 
       - name: Wait for Keycloak ready (smoke-test)
         working-directory: infra
@@ -189,6 +189,12 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Run DB migrations (alembic upgrade head)
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://kb:kb@localhost:5432/rehome_kb
+        run: alembic upgrade head
+
       - name: Start backend uvicorn (background)
         working-directory: backend
         env:
@@ -196,6 +202,7 @@ jobs:
           KC_REALM: rehome
           KC_AUDIENCE: rehome-platform-m2m
           KC_VERIFY_AUD: "true"
+          DATABASE_URL: postgresql+asyncpg://kb:kb@localhost:5432/rehome_kb
         run: |
           nohup uvicorn src.api.main:app --host 127.0.0.1 --port 8000 \
             > /tmp/uvicorn.log 2>&1 &
@@ -213,6 +220,7 @@ jobs:
           KC_REALM: rehome
           KC_M2M_CLIENT_SECRET: rehome-platform-m2m-local-dev-secret
           KB_API_URL: http://127.0.0.1:8000
+          DATABASE_URL: postgresql+asyncpg://kb:kb@localhost:5432/rehome_kb
         run: pytest tests/integration -m integration -v
 
       - name: Show uvicorn log on failure
@@ -245,6 +253,17 @@ jobs:
              --include='*.py' --include='*.sql' \
              | grep -v "WHERE.*access_level"; then
             echo "❌ Найдены SELECT без access_level фильтра"
+            exit 1
+          fi
+
+      - name: No raw text() SQL against access_level-protected tables
+        run: |
+          # ADR-0003: запросы к articles/documents/premises_cards/chunks
+          # должны идти через ORM-репозиторий, не через text(). Это блокирует
+          # обход storage-level фильтра через сырой SQL.
+          if grep -rEn 'text\(["'\''].*(SELECT|UPDATE|DELETE|INSERT).*(articles|documents|premises_cards|chunks)' \
+             --include='*.py' backend/; then
+            echo "❌ Найден raw text() SQL для access_level-protected таблицы — используй Repository"
             exit 1
           fi
 

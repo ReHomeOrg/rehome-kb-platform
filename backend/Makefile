@@ -1,7 +1,17 @@
-.PHONY: install lint format typecheck test test-cov run clean
+.PHONY: install lint format typecheck test test-cov run clean migrate migrate-create migrate-downgrade
 
 install:
 	pip install -r requirements-dev.txt
+
+migrate:
+	alembic upgrade head
+
+# Использование: make migrate-create m="add foo column"
+migrate-create:
+	alembic revision --autogenerate -m "$(m)"
+
+migrate-downgrade:
+	alembic downgrade -1
 
 lint:
 	ruff check src tests

@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     keycloak_audience: str = Field(default="rehome-platform-m2m", alias="KC_AUDIENCE")
     verify_aud: bool = Field(default=True, alias="KC_VERIFY_AUD")
 
+    # PostgreSQL для articles/documents/... (ADR-0008). Отдельная БД от
+    # Keycloak'овской (postgres-keycloak). asyncpg-драйвер обязателен для
+    # async SQLAlchemy.
+    database_url: str = Field(
+        default="postgresql+asyncpg://kb:kb@localhost:5432/rehome_kb",
+        alias="DATABASE_URL",
+    )
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
