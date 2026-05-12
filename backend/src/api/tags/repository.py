@@ -9,7 +9,7 @@ AsyncSession напрямую.
 """
 
 from fastapi import Depends
-from sqlalchemy import ColumnElement, func, literal, select, true
+from sqlalchemy import ColumnElement, func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
@@ -64,13 +64,15 @@ class TagRepository:
             return []
 
         # jsonb_array_elements_text(articles.tags) — Postgres setof text
-        # unnest JSONB-массива. Поскольку функция ссылается на колонку
-        # articles.tags, требуется LATERAL join — иначе Postgres парсит
-        # FROM left-to-right и `articles` ещё не в scope.
-        # `table_valued("tag")` + `.lateral()` рендерится как
-        # `FROM articles, LATERAL jsonb_array_elements_text(articles.tags) AS tag(tag)`.
-        tag_tbl = func.jsonb_array_elements_text(Article.tags).table_valued("tag").lateral()
-        tag_col = tag_tbl.c.tag
+        # unnest JSONB-массива. `column_valued("tag")` рендерит функцию
+        # как `FROM-item` с alias `tag`; для одноколоночных set-returning
+        # функций Postgres трактует alias как имя единственной колонки,
+        # т.е. `SELECT tag FROM jsonb_array_elements_text(...) AS tag`.
+        # `select_from(Article)` ставит `articles` ПЕРВЫМ в FROM-списке,
+        # чтобы Postgres-парсер увидел его до function-call (left-to-right;
+        # для table-functions в FROM с references к outer columns
+        # применяется implicit LATERAL).
+        tag_col = func.jsonb_array_elements_text(Article.tags).column_valued("tag")
 
         count_expr = func.count(literal(1)).label("article_count")
 
@@ -85,7 +87,6 @@ class TagRepository:
         stmt = (
             select(tag_col.label("name"), count_expr)
             .select_from(Article)
-            .join(tag_tbl, true())
             .where(*where_clauses)
             .group_by(tag_col)
             .order_by(count_expr.desc(), tag_col.asc())
