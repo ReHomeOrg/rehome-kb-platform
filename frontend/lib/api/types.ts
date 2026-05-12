@@ -24,11 +24,34 @@ export interface PaginationInfo {
 // ============================================================================
 // Articles
 
+/**
+ * Article в list-endpoint response. Соответствует backend
+ * `ArticleSummary` (articles/schemas.py:53-66) — минимальный набор полей,
+ * без body_markdown / summary / language / published_at.
+ */
 export interface ArticleSummary {
   id: string;
   slug: string;
   title: string;
+  category: string;
+  audience: string;
+  access_level: string;
+  tags: string[];
+  status: string;
+  updated_at: string;
+}
+
+/**
+ * Article в detail-endpoint (`GET /articles/{slug}`) — расширенный
+ * набор с content. Backend `ArticleResponse` включает все поля Article
+ * model, кроме internal.
+ */
+export interface Article {
+  id: string;
+  slug: string;
+  title: string;
   summary: string | null;
+  body_markdown: string;
   category: string;
   audience: string;
   language: string;
@@ -36,12 +59,8 @@ export interface ArticleSummary {
   access_level: string;
   status: string;
   published_at: string | null;
-  updated_at: string;
-}
-
-export interface Article extends ArticleSummary {
-  body_markdown: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ArticlesListResponse {
@@ -49,15 +68,16 @@ export interface ArticlesListResponse {
   pagination: PaginationInfo;
 }
 
+/**
+ * История изменений статьи. Соответствует backend
+ * `ArticleVersionResponse` (articles/schemas.py:112-130) —
+ * router маппит `author_sub → author` для OpenAPI compat.
+ */
 export interface ArticleVersion {
   version: number;
-  event: string;
-  author_sub: string;
+  author: string;
   changed_at: string;
-  old_status: string | null;
-  new_status: string;
-  old_access_level: string | null;
-  new_access_level: string;
+  event: string;
   changes_summary: string | null;
 }
 
@@ -65,10 +85,17 @@ export interface ArticleHistoryResponse {
   data: ArticleVersion[];
 }
 
+/**
+ * Search hit. Соответствует backend `SearchHit` (articles/schemas.py).
+ * `type` — для E2.5a всегда 'article' (document/premises_card/regulation
+ * — другие домены, появятся в kb-search эпике).
+ * `snippet` может быть `null` если ts_headline не нашёл подходящий фрагмент.
+ */
 export interface SearchHit {
+  type: string;
   id: string;
   title: string;
-  snippet: string;
+  snippet: string | null;
   score: number;
 }
 
