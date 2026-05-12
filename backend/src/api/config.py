@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="mock", alias="LLM_PROVIDER")
     llm_max_tokens: int = Field(default=1024, alias="LLM_MAX_TOKENS")
 
+    # vLLM adapter settings (E3.7 #73). Используются только когда
+    # llm_provider='vllm'. Default URL — `localhost:8000` для dev;
+    # production должен переопределить через env.
+    llm_vllm_url: str = Field(default="http://localhost:8000", alias="LLM_VLLM_URL")
+    llm_vllm_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", alias="LLM_VLLM_MODEL")
+    llm_vllm_timeout_seconds: int = Field(default=60, alias="LLM_VLLM_TIMEOUT_SECONDS")
+    llm_vllm_api_key: str | None = Field(default=None, alias="LLM_VLLM_API_KEY")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,

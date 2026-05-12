@@ -27,10 +27,8 @@ def test_factory_case_insensitive() -> None:
     assert isinstance(provider, MockProvider)
 
 
-def test_factory_vllm_raises_not_implemented() -> None:
-    with pytest.raises(NotImplementedError) as excinfo:
-        get_llm_provider(settings=_settings("vllm"))
-    assert "E3.7" in str(excinfo.value)
+# NB: было `vllm_raises_not_implemented` до E3.7. Теперь vllm работает —
+# тесты VLLMProvider в test_llm_vllm.py покрывают factory dispatch.
 
 
 def test_factory_unknown_raises_value_error() -> None:
