@@ -7,7 +7,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.api.auth.scope import AccessLevel
 
 
 class ArticleResponse(BaseModel):
@@ -78,3 +80,30 @@ class ArticlesListResponse(BaseModel):
 
     data: list[ArticleSummary]
     pagination: PaginationInfo
+
+
+class ArticleInput(BaseModel):
+    """Payload для `POST /api/v1/articles`.
+
+    Соответствует OpenAPI `ArticleInput` со следующими deviation'ами от спеки:
+    - `access_level` — обязательное (OpenAPI: optional). Approved by
+      Architect в Issue #27 (issuecomment 4428692249). Backlog для спеки — #28.
+    - `extra='forbid'` — неизвестные поля отвергаются (защита от мусора в
+      payload и потенциальных side-channel'ов).
+    - `audience` — `str` без enum-валидации Pydantic'ом (drift OpenAPI как
+      в read-API; CHECK constraint в БД защищает; E4.x — единый enum-rollout).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str = Field(min_length=1, max_length=200, pattern=r"^[a-z0-9-]+$")
+    title: str = Field(min_length=1, max_length=200)
+    body_markdown: str = Field(min_length=1)
+    category: str = Field(min_length=1, max_length=100)
+    audience: str = Field(min_length=1, max_length=16)
+    # Pydantic v2 + StrEnum → автоматическая 422 если значение не в enum.
+    # Это покрывает N2 из ревью плана: ValueError не уходит в 500.
+    access_level: AccessLevel
+    status: str = Field(default="DRAFT", min_length=1, max_length=16)
+    language: str = Field(default="ru", min_length=1, max_length=8)
+    tags: list[str] = Field(default_factory=list)
