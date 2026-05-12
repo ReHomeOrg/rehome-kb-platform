@@ -23,9 +23,7 @@ class Settings(BaseSettings):
     # Реальный `aud` для m2m токенов обеспечивается audience mapper в
     # realm-export.json (см. infra/keycloak/realm-export.json clients[0]).
     # Issue #21 (E1.3.4) добавил mapper и включил verify_aud по умолчанию.
-    keycloak_audience: str = Field(
-        default="rehome-platform-m2m", alias="KC_AUDIENCE"
-    )
+    keycloak_audience: str = Field(default="rehome-platform-m2m", alias="KC_AUDIENCE")
     verify_aud: bool = Field(default=True, alias="KC_VERIFY_AUD")
 
     model_config = SettingsConfigDict(

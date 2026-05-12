@@ -16,10 +16,7 @@ def test_discovery_endpoint_responds() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["issuer"] == f"{KC_URL}/realms/{KC_REALM}"
-    assert (
-        data["jwks_uri"]
-        == f"{KC_URL}/realms/{KC_REALM}/protocol/openid-connect/certs"
-    )
+    assert data["jwks_uri"] == f"{KC_URL}/realms/{KC_REALM}/protocol/openid-connect/certs"
     assert "RS256" in data["id_token_signing_alg_values_supported"]
 
 
