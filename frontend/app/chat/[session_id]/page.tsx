@@ -8,8 +8,6 @@
 
 import { use, useEffect, useState } from "react";
 
-import Nav from "@/app/_components/nav";
-
 import MessageThread from "../_components/message-thread";
 import { getSessionToken } from "@/lib/chat-storage";
 
@@ -29,23 +27,20 @@ export default function ChatThreadPage({ params }: PageProps): JSX.Element {
   }, [session_id]);
 
   return (
-    <>
-      <Nav />
-      <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Сессия {session_id.slice(0, 8)}…
-          </h1>
-          <p className="mt-1 text-xs text-gray-500">
-            {token ? "Анонимный чат" : "Без токена — может не открыться"}
-          </p>
-        </header>
-        {hydrated ? (
-          <MessageThread sessionId={session_id} sessionToken={token} />
-        ) : (
-          <p className="text-sm text-gray-500">Инициализация…</p>
-        )}
-      </main>
-    </>
+    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Сессия {session_id.slice(0, 8)}…
+        </h1>
+        <p className="mt-1 text-xs text-gray-500">
+          {token ? "Анонимный чат" : "Без токена — может не открыться"}
+        </p>
+      </header>
+      {hydrated ? (
+        <MessageThread sessionId={session_id} sessionToken={token} />
+      ) : (
+        <p className="text-sm text-gray-500">Инициализация…</p>
+      )}
+    </main>
   );
 }
