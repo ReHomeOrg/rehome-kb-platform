@@ -14,6 +14,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Response, status
 
+from src.api.audit import (
+    ACTION_WEBHOOKS_CREATED,
+    ACTION_WEBHOOKS_DELETED,
+    ACTION_WEBHOOKS_TESTED,
+    RESOURCE_WEBHOOK,
+    AuditRepository,
+    get_audit_repository,
+)
 from src.api.auth.dependency import require_authenticated
 from src.api.webhooks.delivery_repository import (
     WebhookDeliveryRepository,
@@ -49,6 +57,7 @@ async def create_webhook(
     payload: WebhookInput = Body(...),
     claims: dict[str, Any] = Depends(require_authenticated),
     repo: WebhookRepository = Depends(get_webhook_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> WebhookResponse:
     """POST /webhooks — register subscription.
 
@@ -68,6 +77,13 @@ async def create_webhook(
         events=payload.events,
         secret=payload.secret,
         description=payload.description,
+    )
+    await audit_repo.record(
+        actor_sub=client_id,
+        action=ACTION_WEBHOOKS_CREATED,
+        resource_type=RESOURCE_WEBHOOK,
+        resource_id=str(webhook.id),
+        metadata={"url": url_str, "events": list(payload.events)},
     )
     return WebhookResponse.from_model(webhook)
 
@@ -96,11 +112,18 @@ async def delete_webhook(
     webhook_id: UUID = Path(...),
     claims: dict[str, Any] = Depends(require_authenticated),
     repo: WebhookRepository = Depends(get_webhook_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> Response:
     client_id = _client_id_from_claims(claims)
     deleted = await repo.soft_delete(webhook_id, client_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Webhook not found")
+    await audit_repo.record(
+        actor_sub=client_id,
+        action=ACTION_WEBHOOKS_DELETED,
+        resource_type=RESOURCE_WEBHOOK,
+        resource_id=str(webhook_id),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -114,6 +137,7 @@ async def test_webhook(
     claims: dict[str, Any] = Depends(require_authenticated),
     repo: WebhookRepository = Depends(get_webhook_repository),
     delivery_repo: WebhookDeliveryRepository = Depends(get_delivery_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> dict[str, Any]:
     """POST /webhooks/{id}/test — enqueue тестовое событие.
 
@@ -130,6 +154,12 @@ async def test_webhook(
         webhook_id=webhook.id,
         event_type="webhook.test",
         payload={"timestamp": datetime.now(UTC).isoformat()},
+    )
+    await audit_repo.record(
+        actor_sub=client_id,
+        action=ACTION_WEBHOOKS_TESTED,
+        resource_type=RESOURCE_WEBHOOK,
+        resource_id=str(webhook_id),
     )
     return {
         "delivery_id": str(delivery.id),

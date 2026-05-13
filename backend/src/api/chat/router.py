@@ -18,6 +18,13 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
 from fastapi.responses import StreamingResponse
 
+from src.api.audit import (
+    ACTION_CHAT_ESCALATED,
+    ANON_ACTOR_TOKEN_PREFIX_LEN,
+    RESOURCE_CHAT_SESSION,
+    AuditRepository,
+    get_audit_repository,
+)
 from src.api.auth.dependency import get_current_scope
 from src.api.auth.scope import Scope
 from src.api.chat.llm import LLMMessage, LLMProvider, get_llm_provider
@@ -346,6 +353,7 @@ async def post_escalate(
     owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
     repo: ChatRepository = Depends(get_chat_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> EscalateResponse:
     """`POST /chat/sessions/{id}/escalate` — создать ticket эскалации.
 
@@ -370,6 +378,25 @@ async def post_escalate(
     )
     if escalation is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # E4.x #104: audit trail. Actor:
+    #   - JWT sub (UUID) для authenticated пользователей.
+    #   - "anon:<session_token-prefix>" для anon-flow (нет PII в audit).
+    actor_sub = (
+        str(user_id)
+        if user_id is not None
+        else f"anon:{str(session_token)[:ANON_ACTOR_TOKEN_PREFIX_LEN]}"
+    )
+    await audit_repo.record(
+        actor_sub=actor_sub,
+        action=ACTION_CHAT_ESCALATED,
+        resource_type=RESOURCE_CHAT_SESSION,
+        resource_id=str(session_id),
+        metadata={
+            "ticket_id": str(escalation.id),
+            "priority": escalation.priority,
+        },
+    )
 
     # E5.3 #91: fire chat.escalated webhook.
     await webhook_dispatcher.dispatch(
