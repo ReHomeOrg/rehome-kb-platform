@@ -178,18 +178,27 @@ encryption — отдельный ADR.
 - Documentation: README раздел «Local-dev setup» — пошагово как
   настроить age key + `sops decrypt`.
 
-## Открытые вопросы (требуют Architect-решения отдельно)
+## Открытые вопросы — RESOLVED 2026-05-13 (issue #118)
 
-1. **Где живут age private keys?**
-   Вариант A: на ноутбуках operators + LastPass / 1Password backup.
-   Вариант B: separate age private keys per CI-job / k8s-cluster через
-   secret managers облака (тот же Yandex Lockbox для одного-единственного
-   age key — приемлемо, поскольку это single bootstrap secret).
-2. **Кто имеет prod age key** — на старте 1 человек (Architect), позже
-   расширяется через age recipients (можно перешифровать без потерь).
-3. **Rotation cadence** — рекомендуется ежеквартально для DB / Keycloak
-   admin, immediately on personnel change.
-4. **Backup-and-restore process** — отдельный runbook документ.
+1. **Где живут age private keys**:
+   - **Dev**: developer laptops + `reHome / Dev secrets` 1Password vault
+     (shared доступ всем developers'ам).
+   - **Staging**: DevOps + Architect laptops + `reHome / Staging secrets`
+     1Password vault.
+   - **CI**: GitHub Actions repository secrets (encrypted at-rest by
+     GitHub, decrypt'ятся только в job runtime).
+   - **Prod**: Architect's laptop + 1Password vault + sealed envelope
+     (printed key) в физическом сейфе для DR backup.
+2. **Кто имеет prod age key на старте**: только Architect (1 recipient).
+   Expansion до 2+ recipients когда нанимается DevOps:
+   `age-keygen` → add public part в `.sops.yaml` → `make rotate` →
+   update 1Password / sealed envelope.
+3. **Rotation cadence**:
+   - Dev/staging: при personnel change (leave / role change).
+   - Prod: quarterly (Q1/Q2/Q3/Q4) + immediate на suspected leak.
+4. **Backup-and-restore runbook**:
+   [`docs/runbooks/secrets-disaster-recovery.md`](../runbooks/secrets-disaster-recovery.md).
+   Покрывает loss of one / all recipients, compromised key, annual DR test.
 
 ## Ссылки
 
