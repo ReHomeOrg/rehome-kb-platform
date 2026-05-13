@@ -89,6 +89,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # #123: Dockerfile smoke build. Ловит регрессии layer ordering,
+      # missing files, non-root user. Не push'аем.
+      - name: Build Docker image (smoke)
+        run: docker build -t kb-frontend:ci .
+
   # ============================================================
   # OpenAPI: валидация и контрактные тесты
   # ============================================================
