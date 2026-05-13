@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # эндпоинт gate'ится.
     metrics_enabled: bool = Field(default=False, alias="METRICS_ENABLED")
 
+    # Log format (#110): `"text"` (default) — uvicorn-style для dev;
+    # `"json"` — JSON-line per record для prod log aggregator'ов (Loki/ELK).
+    log_format: str = Field(default="text", alias="LOG_FORMAT")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
