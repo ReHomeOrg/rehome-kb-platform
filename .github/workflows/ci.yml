@@ -184,6 +184,15 @@ jobs:
 
       - name: Start Keycloak + Postgres-keycloak + Postgres-kb
         working-directory: infra
+        env:
+          # ADR-0009: compose теперь требует `${VAR:?required}` для secrets.
+          # CI integration job — isolated environment, использует hardcoded
+          # dev-only credentials (см. ADR §"Технические следствия"). Никаких
+          # реальных secrets через GitHub Actions secrets — этот job
+          # принципиально не нуждается в prod-credentials'ах.
+          POSTGRES_KEYCLOAK_PASSWORD: keycloak
+          POSTGRES_KB_PASSWORD: kb
+          KEYCLOAK_ADMIN_PASSWORD: admin
         run: docker compose up -d keycloak postgres-keycloak postgres-kb
 
       - name: Wait for Keycloak ready (smoke-test)
