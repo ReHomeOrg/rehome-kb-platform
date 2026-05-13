@@ -1,0 +1,29 @@
+# SOPS configuration (ADR-0009).
+#
+# Каждое environment имеет свой age key. Public recipient'ы НИЖЕ — placeholder'ы;
+# operator должен заменить на real значения, сгенерированные `age-keygen -o <env>.age.key`
+# (private key хранится ВНЕ репо — 1Password / disk-encrypted laptop / k8s secret).
+#
+# После genкейов:
+#   1. Operator пушит updated `.sops.yaml` в репо.
+#   2. Создаёт `deploy/secrets/<env>.enc.yaml` через `sops encrypt --age <pubkey> <plain.yaml> > <env>.enc.yaml`.
+#   3. Сохраняет private key — без него `decrypt` невозможен.
+#
+# Rotation:
+#   - `sops rotate -i deploy/secrets/<env>.enc.yaml` после `age-keygen` нового key.
+#   - Multiple recipients разрешены (`age: key1,key2`) для team setup.
+#
+# Open question (см. ADR-0009 §"Открытые вопросы"): где живут age private keys?
+
+creation_rules:
+  # Dev environment — shared developer secrets (mock LLM, local Postgres).
+  - path_regex: ^deploy/secrets/dev\.enc\.yaml$
+    age: REPLACE_ME_DEV_AGE_PUBLIC_KEY
+
+  # Staging environment — pre-prod environment (real Keycloak, vLLM staging).
+  - path_regex: ^deploy/secrets/staging\.enc\.yaml$
+    age: REPLACE_ME_STAGING_AGE_PUBLIC_KEY
+
+  # Production — наиболее ограниченный круг recipient'ов (Architect + on-call).
+  - path_regex: ^deploy/secrets/prod\.enc\.yaml$
+    age: REPLACE_ME_PROD_AGE_PUBLIC_KEY
