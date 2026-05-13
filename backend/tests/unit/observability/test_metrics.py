@@ -10,32 +10,33 @@ from prometheus_client import CONTENT_TYPE_LATEST
 
 from src.api.main import app
 from src.api.observability.metrics import (
-    REQUESTS_TOTAL,
     MetricsMiddleware,
     render_metrics,
 )
 
-# Sample value extraction: prometheus_client Counter/Histogram объекты
-# не дают прямого .value доступа — читаем через _value/_buckets internals
-# из конкретной label-комбинации.
+# Sample extraction через stable `generate_latest()` text format — НЕ через
+# `_value.get()` internals (private API; CLAUDE.md §"Костыли" запрещает
+# импорт `_private` без явного обоснования).
+
+
+def _read_sample(needle_prefix: str) -> float:
+    """Find line starting with `needle_prefix` (full sample name + labels)
+    в Prometheus text snapshot, parse trailing value."""
+    snapshot = render_metrics()[0].decode("utf-8")
+    for line in snapshot.splitlines():
+        if line.startswith(needle_prefix):
+            return float(line.rsplit(" ", 1)[1])
+    return 0.0
 
 
 def _counter_value(method: str, route: str, status: str) -> float:
-    """Read sample value для Counter с заданными labels."""
-    metric = REQUESTS_TOTAL.labels(method=method, route=route, status=status)
-    return float(metric._value.get())
+    needle = f'http_requests_total{{method="{method}",route="{route}",status="{status}"}}'
+    return _read_sample(needle)
 
 
 def _histogram_sample_count(method: str, route: str) -> int:
-    """Total observations recorded в Histogram. Парсим snapshot через
-    `generate_latest()` — child-level `.collect()` неудобен потому что
-    он включает данные по всем label-комбинациям parent'а."""
-    snapshot = render_metrics()[0].decode("utf-8")
     needle = f'http_request_duration_seconds_count{{method="{method}",route="{route}"}}'
-    for line in snapshot.splitlines():
-        if line.startswith(needle):
-            return int(float(line.rsplit(" ", 1)[1]))
-    return 0
+    return int(_read_sample(needle))
 
 
 # ---------------------------------------------------------------------------
@@ -63,13 +64,26 @@ def client_with_app() -> TestClient:
     return TestClient(app)
 
 
-def test_metrics_endpoint_returns_200_and_prom_text(
-    client_with_app: TestClient,
+def test_metrics_endpoint_returns_200_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resp = client_with_app.get("/metrics")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/plain")
-    assert "http_requests_total" in resp.text
+    """`METRICS_ENABLED=true` → serve Prometheus snapshot."""
+    monkeypatch.setenv("METRICS_ENABLED", "true")
+    with TestClient(app) as c:
+        resp = c.get("/metrics")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/plain")
+        assert "http_requests_total" in resp.text
+
+
+def test_metrics_endpoint_returns_404_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safe-by-default: без явного `METRICS_ENABLED=true` → 404."""
+    monkeypatch.delenv("METRICS_ENABLED", raising=False)
+    with TestClient(app) as c:
+        resp = c.get("/metrics")
+        assert resp.status_code == 404
 
 
 def test_metrics_endpoint_excluded_from_openapi(
