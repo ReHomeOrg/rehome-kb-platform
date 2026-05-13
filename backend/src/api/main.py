@@ -12,12 +12,17 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.api.config import get_settings
 from src.api.db import get_engine
-from src.api.observability import RequestIdMiddleware, install_request_id_filter
+from src.api.observability import (
+    MetricsMiddleware,
+    RequestIdMiddleware,
+    install_request_id_filter,
+    render_metrics,
+)
 from src.api.v1.router import router as v1_router
 from src.api.webhooks.worker import WebhookDeliveryWorker
 
@@ -61,10 +66,22 @@ app = FastAPI(
 )
 
 # #106: X-Request-Id propagation + structured logging context.
-# `app.add_middleware` LIFO: последний add'ed middleware — outermost. Эта
-# регистрация ДОЛЖНА оставаться последней (или единственной) — иначе
-# RequestId будет inner и не установит contextvar для middleware'ов выше.
+# `app.add_middleware` LIFO: последний add'ed middleware — outermost.
+# Порядок (внутрь → наружу): MetricsMiddleware (#108) → RequestIdMiddleware (#106).
+# RequestId должен оставаться OUTERMOST — все логи (incl. metrics middleware'а)
+# наследуют request_id.
 install_request_id_filter()
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
+
+
+# #108: Prometheus pull endpoint. Намеренно НЕ под /api/v1 (это infra,
+# не публичный API) и БЕЗ auth — scrape policy enforce'ится reverse-proxy /
+# network egress (см. observability/metrics.py docstring).
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint() -> Response:
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
+
 
 app.include_router(v1_router)
