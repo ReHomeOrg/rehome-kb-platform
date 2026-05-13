@@ -2,14 +2,24 @@
 
 ## Статус
 
-- [ ] **Предложено**
-- [ ] Принято
+- [x] **Принято**
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
 - **Дата:** 2026-05-13
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Согласовано Архитектором:** нет (требуется review)
+- **Согласовано Архитектором:** да, 2026-05-13 (PR #122)
+
+### Решения по open questions (Архитектор, 2026-05-13)
+
+1. **Embedding worker hosting**: отдельный k8s Deployment (CPU-bound,
+   scale'ится независимо от gateway). НЕ sidecar.
+2. **Re-embedding на model bump**: blue-green с `embedding_model_id`
+   column. Dual-write в transition window, atomic switch при 100% coverage.
+3. **Hardware**: CPU-only на старте. GPU когда (a) p95 query embedding
+   >200ms или (b) initial reindex >2h.
+4. **Launch corpus**: только articles. Documents (kb-files эпик не landed)
+   и chat history (privacy review нужен) — отдельные ADR'ы.
 
 ## Контекст
 
