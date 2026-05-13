@@ -29,8 +29,11 @@ def _parse_ts_events() -> set[str]:
         flags=re.DOTALL,
     )
     assert match is not None, "WEBHOOK_EVENTS literal not found in types.ts"
-    # Extract quoted strings inside the array.
-    return set(re.findall(r'"([^"]+)"', match.group(1)))
+    # Extract quoted strings inside the array; tolerate either quote style
+    # (Prettier may flip codebases between single/double quotes).
+    parsed = set(re.findall(r"""["']([^"']+)["']""", match.group(1)))
+    assert parsed, "Failed to parse any event strings — TS quoting changed?"
+    return parsed
 
 
 def test_frontend_webhook_events_match_backend_enum() -> None:
