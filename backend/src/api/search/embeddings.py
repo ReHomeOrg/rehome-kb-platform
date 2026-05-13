@@ -13,9 +13,14 @@ weights download.
 
 import hashlib
 import struct
-from typing import Protocol
+from typing import Final, Protocol
 
 from src.api.search.models import EMBEDDING_DIM_STAGE1
+
+# Signed int32 range (`<i` unpack) — normalize в [-1.0, 1.0).
+_INT32_MAX_PLUS_1: Final = 2**31
+
+_DEFAULT_MOCK_MODEL_ID: Final = "mock-v1"
 
 
 class EmbeddingProvider(Protocol):
@@ -51,7 +56,11 @@ class MockEmbeddingProvider:
     Different texts → different vectors (collision-resistant per SHA-256).
     """
 
-    def __init__(self, model_id: str = "mock-v1", dim: int = EMBEDDING_DIM_STAGE1) -> None:
+    def __init__(
+        self,
+        model_id: str = _DEFAULT_MOCK_MODEL_ID,
+        dim: int = EMBEDDING_DIM_STAGE1,
+    ) -> None:
         self._model_id = model_id
         self._dim = dim
 
@@ -77,6 +86,6 @@ class MockEmbeddingProvider:
                     break
                 (n,) = struct.unpack("<i", digest[i : i + 4])
                 # Normalize signed int32 → [-1.0, 1.0).
-                result.append(n / 2_147_483_648.0)
+                result.append(n / _INT32_MAX_PLUS_1)
             counter += 1
         return result[: self._dim]

@@ -9,9 +9,12 @@ from src.api.search.chunker import Chunk
 from src.api.search.repository import EmbeddingRepository
 
 
-def _session() -> MagicMock:
+def _session(rowcount: int = 7) -> MagicMock:
+    """Mock session. `rowcount` намеренно не равен test'овским chunk count'ам —
+    `upsert` возвращает len(values), не rowcount, и test'ы должны это
+    различать."""
     s = MagicMock()
-    exec_result = MagicMock(rowcount=3)
+    exec_result = MagicMock(rowcount=rowcount)
     s.execute = AsyncMock(return_value=exec_result)
     s.flush = AsyncMock()
     return s
@@ -43,7 +46,7 @@ async def test_upsert_length_mismatch_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_upsert_executes_insert_and_returns_count() -> None:
-    session = _session()
+    session = _session(rowcount=7)  # rowcount != chunk count — dissociates.
     repo = EmbeddingRepository(session)
     chunks = [Chunk(text=f"c{i}", char_start=i * 10, char_end=(i + 1) * 10) for i in range(3)]
     embeddings = [[0.1] * 4 for _ in range(3)]
@@ -53,6 +56,7 @@ async def test_upsert_executes_insert_and_returns_count() -> None:
         embeddings=embeddings,
         model_id="mock-v1",
     )
+    # upsert returns len(values) (== chunks), не rowcount.
     assert n == 3
     session.execute.assert_awaited_once()
     session.flush.assert_awaited_once()
@@ -60,21 +64,21 @@ async def test_upsert_executes_insert_and_returns_count() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_by_article() -> None:
-    session = _session()
+    session = _session(rowcount=5)
     repo = EmbeddingRepository(session)
     n = await repo.delete_by_article(uuid4())
-    # rowcount=3 из _session mock
-    assert n == 3
+    # delete returns rowcount.
+    assert n == 5
     session.execute.assert_awaited_once()
     session.flush.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_delete_by_model() -> None:
-    session = _session()
+    session = _session(rowcount=12)
     repo = EmbeddingRepository(session)
     n = await repo.delete_by_model("old-model-id")
-    assert n == 3
+    assert n == 12
     session.execute.assert_awaited_once()
     session.flush.assert_awaited_once()
 

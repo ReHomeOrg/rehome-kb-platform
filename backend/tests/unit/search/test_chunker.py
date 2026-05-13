@@ -53,14 +53,15 @@ def test_target_size_respected() -> None:
         assert len(c.text) <= MAX_CHUNK_CHARS
 
 
-def test_code_block_not_split() -> None:
-    """``` ... ``` блоки остаются atomic chunk'ом, даже если > target."""
-    huge_code = "\n".join(f"line_{i} = " + ("x" * 50) for i in range(200))
-    text = f"intro paragraph\n\n```python\n{huge_code}\n```\n\noutro paragraph"
+def test_code_block_not_split_when_within_max() -> None:
+    """Code block в пределах MAX_CHUNK_CHARS остаётся atomic."""
+    # 80 lines × 50 chars ≈ 4000 chars < MAX_CHUNK_CHARS (8192).
+    code = "\n".join(f"line_{i} = " + ("x" * 50) for i in range(80))
+    text = f"intro paragraph\n\n```python\n{code}\n```\n\noutro paragraph"
     chunks = chunk_text(text)
     # Один chunk должен содержать code block целиком.
-    code_chunks = [c for c in chunks if "line_0" in c.text and "line_199" in c.text]
-    assert len(code_chunks) == 1, "code block split across chunks"
+    code_chunks = [c for c in chunks if "line_0" in c.text and "line_79" in c.text]
+    assert len(code_chunks) == 1, "code block within MAX split across chunks"
 
 
 def test_chunks_cover_full_source() -> None:
@@ -77,6 +78,40 @@ def test_chunks_cover_full_source() -> None:
 def test_overlap_chars_constant_sane() -> None:
     """Sanity check на constants — они в правильном порядке."""
     assert 0 < OVERLAP_CHARS < TARGET_CHUNK_CHARS < MAX_CHUNK_CHARS
+
+
+def test_huge_single_paragraph_is_hard_split() -> None:
+    """Runaway paragraph без blank lines > MAX — hard-split на character
+    boundaries. Reviewer round 1 blocker: silent data loss защита."""
+    text = "z" * 9000  # > MAX_CHUNK_CHARS (8192)
+    chunks = chunk_text(text)
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert len(c.text) <= MAX_CHUNK_CHARS
+    # Recovery: concat all chunks should equal source.
+    assert "".join(c.text for c in chunks) == text
+
+
+def test_huge_code_block_is_hard_split() -> None:
+    """Code block > MAX тоже split'ится (anti-data-loss > atomic-syntax)."""
+    huge_code = "x" * (MAX_CHUNK_CHARS + 1000)
+    text = f"```\n{huge_code}\n```"
+    chunks = chunk_text(text)
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert len(c.text) <= MAX_CHUNK_CHARS
+
+
+def test_crlf_line_endings() -> None:
+    """Windows-style \\r\\n line endings обрабатываются correctly."""
+    text = "Para A.\r\n\r\nPara B.\r\n\r\nPara C."
+    chunks = chunk_text(text)
+    assert len(chunks) >= 1
+    # All paragraphs should appear in some chunk.
+    full = "".join(c.text for c in chunks)
+    assert "Para A" in full
+    assert "Para B" in full
+    assert "Para C" in full
 
 
 def test_chunk_dataclass_frozen() -> None:
