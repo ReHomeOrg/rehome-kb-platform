@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # → ValidationError на startup, а не silent fallback).
     log_format: Literal["text", "json"] = Field(default="text", alias="LOG_FORMAT")
 
+    # Readiness probe (#112): max time to wait for DB ping before declaring
+    # not-ready. 2s — conservative для default; k8s probe timeout обычно 3-5s.
+    readiness_db_timeout_seconds: float = Field(default=2.0, alias="READINESS_DB_TIMEOUT_SECONDS")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
