@@ -376,11 +376,13 @@ async def test_concurrent_claim_pending_no_overlap(
     wh = await _register_webhook_direct(receiver.url, events=["article.published"])
     cleanup["webhook_ids"].append(UUID(wh["id"]))
 
-    # Enqueue 5 pending deliveries напрямую (без trigger'а — быстрее).
+    # Enqueue 6 rows, ограничиваем claim до 3 — чтобы каждая корутина
+    # обязательно забирала только часть и SKIP_LOCKED был exercised.
+    # Иначе одна корутина claim'ит все 6, и SKIP_LOCKED не проверен.
     conn = await asyncpg.connect(RAW_DSN)
     enqueued_ids: list[UUID] = []
     try:
-        for _ in range(5):
+        for _ in range(6):
             row = await conn.fetchrow(
                 "INSERT INTO webhook_deliveries (webhook_id, event_type, payload) "
                 "VALUES ($1, $2, $3::jsonb) RETURNING id",
@@ -401,8 +403,10 @@ async def test_concurrent_claim_pending_no_overlap(
     async def _claim() -> set[UUID]:
         async with session_factory() as session:
             repo = WebhookDeliveryRepository(session)
-            rows = await repo.claim_pending(limit=10)
-            # Hold the lock for a short window so the parallel claim sees SKIP_LOCKED.
+            # limit=3 (< total/2): обе корутины забирают по 3, SKIP_LOCKED
+            # перенаправляет вторую на свободные rows.
+            rows = await repo.claim_pending(limit=3)
+            # Hold the lock briefly so параллельный claim видит SKIP_LOCKED.
             await asyncio.sleep(0.3)
             return {r.id for r in rows}
 
@@ -411,13 +415,10 @@ async def test_concurrent_claim_pending_no_overlap(
     finally:
         await engine.dispose()
 
-    # Обе корутины должны были захватить хотя бы по одной row — иначе
-    # SKIP_LOCKED safety не проверен (одна сторона серилизовалась). Это
-    # ловит flake-mode где GC pause не дал второй stay-up к моменту первой
-    # SELECT и она забрала бы все 5 без contention.
-    assert claim_a
-    assert claim_b
-    # Зеркальное условие: union покрывает все enqueued; intersection пуста.
+    # Обе корутины обязаны захватить ровно по 3 rows (limit=3, 6 total,
+    # SKIP_LOCKED обеспечивает disjoint partition).
+    assert len(claim_a) == 3
+    assert len(claim_b) == 3
     assert claim_a.isdisjoint(claim_b)
     assert claim_a | claim_b == set(enqueued_ids)
 
