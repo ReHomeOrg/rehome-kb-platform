@@ -25,18 +25,36 @@ Retrieval PR (отдельный) обязан JOIN'ить с `articles` по
 гарантия. См. ADR-0003 + `articles/repository.py` как reference pattern.
 """
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
+from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
 from src.api.search.chunker import Chunk
 from src.api.search.models import ArticleEmbedding
+
+
+@dataclass(frozen=True)
+class RetrievalHit:
+    """Single retrieved chunk с denormalized article fields для citations."""
+
+    article_id: UUID
+    slug: str
+    chunk_index: int
+    text: str
+    char_start: int
+    char_end: int
+    # Score depends на источник: cosine distance для vector search
+    # (lower = closer), RRF fused score для hybrid (higher = better). Caller
+    # знает context.
+    score: float
 
 
 class EmbeddingRepository:
@@ -103,6 +121,83 @@ class EmbeddingRepository:
         result = await self._session.execute(stmt)
         await self._session.flush()
         return int(result.rowcount or 0)
+
+    async def search(
+        self,
+        *,
+        query_vector: list[float],
+        access_levels: frozenset[AccessLevel],
+        model_id: str,
+        top_k: int = 30,
+    ) -> list[RetrievalHit]:
+        """Vector retrieval по cosine distance с ADR-0003 access filter.
+
+        Cosine distance — `embedding <=> query` (pgvector operator, lower
+        = closer). Uses HNSW index `ix_article_embeddings_hnsw` (created
+        в migration 0014).
+
+        JOIN с articles обязателен для:
+        - `status='PUBLISHED'` (соответствует chat read-mask).
+        - `access_level IN (caller's scope)` — storage-level enforcement
+          ADR-0003. Без JOIN'а кто-то мог бы retrieve chunks от чужого
+          access tier.
+        - Chunk text — reconstruct'ится via `SUBSTRING(body_markdown FROM
+          char_start+1 FOR length)`. Postgres 1-indexed, `char_start`
+          0-indexed (Python convention) → +1.
+        - `slug` для citations.
+
+        `model_id` фильтр — retrieval только для current production model
+        (blue-green: новый model_id ingest'ится параллельно, search
+        переключится после coverage 100%).
+
+        Returns top_k results, ordered by ascending distance.
+        """
+        allowed = [level.value for level in access_levels]
+        if not allowed:
+            return []
+
+        # Postgres SUBSTRING(string FROM start FOR length); offsets 1-indexed.
+        # `+1` конвертирует Python 0-indexed char_start → SQL.
+        text_expr = func.substring(
+            Article.body_markdown,
+            ArticleEmbedding.char_start + 1,
+            ArticleEmbedding.char_end - ArticleEmbedding.char_start,
+        ).label("text")
+        # `embedding <=> :query` — pgvector cosine distance.
+        distance_expr = ArticleEmbedding.embedding.op("<=>")(query_vector).label("distance")
+
+        stmt = (
+            select(
+                ArticleEmbedding.article_id,
+                Article.slug,
+                ArticleEmbedding.chunk_index,
+                text_expr,
+                ArticleEmbedding.char_start,
+                ArticleEmbedding.char_end,
+                distance_expr,
+            )
+            .join(Article, Article.id == ArticleEmbedding.article_id)
+            .where(
+                Article.status == "PUBLISHED",
+                Article.access_level.in_(allowed),
+                ArticleEmbedding.embedding_model_id == model_id,
+            )
+            .order_by(distance_expr.asc())
+            .limit(top_k)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            RetrievalHit(
+                article_id=row.article_id,
+                slug=row.slug,
+                chunk_index=row.chunk_index,
+                text=row.text,
+                char_start=row.char_start,
+                char_end=row.char_end,
+                score=float(row.distance),
+            )
+            for row in result
+        ]
 
     async def delete_by_article_slug(self, slug: str) -> int:
         """Same as `delete_by_article` но resolve'ит article_id по slug.

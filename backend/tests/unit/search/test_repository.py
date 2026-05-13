@@ -84,6 +84,48 @@ async def test_delete_by_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_empty_access_levels_returns_empty() -> None:
+    """ADR-0003 defensive: пустой access_levels → empty list (no DB call)."""
+    session = _session()
+    repo = EmbeddingRepository(session)
+    hits = await repo.search(
+        query_vector=[0.1] * 4,
+        access_levels=frozenset(),
+        model_id="m",
+        top_k=10,
+    )
+    assert hits == []
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_search_executes_query_with_access_filter() -> None:
+    """Verify search SQL включает access_level filter (ADR-0003).
+
+    Inspect compiled SQL — нет real DB, но проверяем что filter
+    действительно попадает в WHERE clause.
+    """
+    from src.api.auth.scope import AccessLevel
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(__iter__=lambda _self: iter([])))
+    repo = EmbeddingRepository(session)
+    hits = await repo.search(
+        query_vector=[0.1] * 4,
+        access_levels=frozenset([AccessLevel.PUBLIC, AccessLevel.LOGGED]),
+        model_id="m",
+        top_k=10,
+    )
+    assert hits == []
+    session.execute.assert_awaited_once()
+    stmt = session.execute.call_args.args[0]
+    sql_text = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+    assert "access_level" in sql_text
+    assert "status" in sql_text
+    assert "embedding_model_id" in sql_text
+
+
+@pytest.mark.asyncio
 async def test_delete_handles_none_rowcount() -> None:
     """SQLAlchemy в некоторых case'ах возвращает rowcount=None."""
     session = MagicMock()
