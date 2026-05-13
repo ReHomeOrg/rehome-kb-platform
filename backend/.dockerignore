@@ -1,0 +1,39 @@
+# Build context optimization (#114) — exclude всё, что не нужно в image.
+# Меньше context → быстрее `docker build`, меньше size finalized image.
+
+# Python artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+coverage.xml
+
+# Local virtualenv — builder создаёт свой fresh в image
+.venv
+venv
+env
+
+# Tests НЕ нужны в production image — миграции остаются (alembic/)
+tests/
+
+# Local config / secrets — fail-fast если случайно попадут
+.env
+.env.*
+*.local
+
+# OS / editor noise
+.DS_Store
+*.swp
+.idea
+.vscode
+
+# Build context — Dockerfile сам в нём, но не нужен внутри
+Dockerfile
+.dockerignore
