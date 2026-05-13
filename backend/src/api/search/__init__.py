@@ -11,6 +11,18 @@ Stage 1: pgvector в существующем Postgres-kb. Этот PR landed fo
 - Chat module integration.
 """
 
-from src.api.search.models import ArticleEmbedding
+from src.api.search.chunker import Chunk, chunk_text
+from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
+from src.api.search.models import EMBEDDING_DIM_STAGE1, ArticleEmbedding
+from src.api.search.repository import EmbeddingRepository, get_embedding_repository
 
-__all__ = ["ArticleEmbedding"]
+__all__ = [
+    "ArticleEmbedding",
+    "Chunk",
+    "EMBEDDING_DIM_STAGE1",
+    "EmbeddingProvider",
+    "EmbeddingRepository",
+    "MockEmbeddingProvider",
+    "chunk_text",
+    "get_embedding_repository",
+]
