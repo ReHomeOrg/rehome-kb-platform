@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     webhook_max_attempts: int = Field(default=5, alias="WEBHOOK_MAX_ATTEMPTS")
     webhook_backoff_base_seconds: float = Field(default=30.0, alias="WEBHOOK_BACKOFF_BASE_SECONDS")
 
+    # Observability (#108). `/metrics` endpoint включается явно — safe-by-default
+    # для случая, когда reverse-proxy ещё не настроен фильтровать его наружу.
+    # MetricsMiddleware всегда работает (counter/histogram дешёвые); только
+    # эндпоинт gate'ится.
+    metrics_enabled: bool = Field(default=False, alias="METRICS_ENABLED")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
