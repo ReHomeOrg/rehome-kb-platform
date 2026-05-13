@@ -34,8 +34,8 @@ def install_request_id_filter() -> None:
     - Дублирование filter'а не ломает, но дёргает getter дважды per record.
     """
     root = logging.getLogger()
-    for f in root.filters:
-        if getattr(f, "name", None) == _FILTER_NAME:
+    for existing in root.filters:
+        if isinstance(existing, RequestIdLogFilter):
             return
     f = RequestIdLogFilter()
     f.name = _FILTER_NAME

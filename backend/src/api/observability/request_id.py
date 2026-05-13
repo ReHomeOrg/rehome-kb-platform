@@ -9,7 +9,6 @@ Pure-ASGI middleware (без BaseHTTPMiddleware — оно ломает Streamin
 4. Эхо'ит в response header `X-Request-Id`.
 """
 
-from typing import Any
 from uuid import UUID, uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -55,17 +54,19 @@ class RequestIdMiddleware:
 
         token = REQUEST_ID_CONTEXT.set(request_id)
 
+        header_bytes = REQUEST_ID_HEADER.encode("latin-1")
+
         async def _send_with_header(message: Message) -> None:
             if message["type"] == "http.response.start":
-                headers: list[tuple[bytes, bytes]] = list(message.get("headers", []))
-                headers.append((REQUEST_ID_HEADER.encode("latin-1"), request_id.encode("latin-1")))
-                # Cast satisfies starlette's TypedDict; ASGI spec accepts
-                # mutable list here.
-                new_message: dict[str, Any] = dict(message)
-                new_message["headers"] = headers
-                await send(new_message)
-            else:
-                await send(message)
+                # Strip any existing X-Request-Id из downstream handler'а —
+                # иначе response может содержать duplicate header (RFC 7230 §3.2.2
+                # разрешает только для list-headers; HTTP-клиенты часто берут
+                # только первый). Гарантируем single, authoritative value.
+                existing = message.get("headers", [])
+                deduped = [(k, v) for (k, v) in existing if k.lower() != header_bytes.lower()]
+                deduped.append((header_bytes, request_id.encode("latin-1")))
+                message["headers"] = deduped  # ASGI Message is MutableMapping.
+            await send(message)
 
         try:
             await self._app(scope, receive, _send_with_header)
