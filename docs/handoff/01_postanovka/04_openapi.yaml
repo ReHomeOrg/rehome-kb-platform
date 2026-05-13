@@ -712,12 +712,20 @@ paths:
           - html
       responses:
         '302':
-          description: Redirect на signed URL
+          description: |
+            Redirect на signed URL. **НЕ реализовано в текущем backend**:
+            kb-files эпик пока не landed (см. описание endpoint'а). Backend
+            сейчас возвращает 501; этот response остаётся в spec'е как
+            целевое поведение после kb-files.
           headers:
             Location:
               schema:
                 type: string
                 format: uri
+        '501':
+          description: |
+            Not Implemented — kb-files epic не landed. Текущее состояние
+            backend'а до завершения epic'а (Issue #56 / #59).
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/premises-cards/{premises_id}:
@@ -1132,7 +1140,7 @@ paths:
                     data:
                       type: array
                       items:
-                        $ref: '#/components/schemas/Webhook'
+                        $ref: '#/components/schemas/WebhookSummary'
     post:
       tags:
       - Webhooks
@@ -3557,24 +3565,53 @@ components:
           description: Если не передан — генерируется
         description:
           type: string
+    WebhookSummary:
+      type: object
+      description: |
+        Webhook в list/detail-response. Без `secret` — он возвращается
+        ТОЛЬКО при создании (POST 201, см. `Webhook`). См. Issue #97.
+      required:
+      - id
+      - client_id
+      - url
+      - events
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        description:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        last_delivery_at:
+          type: [string, 'null']
+          format: date-time
+        last_delivery_status:
+          type: [integer, 'null']
     Webhook:
+      description: |
+        Webhook на creation-response (POST 201). Расширяет `WebhookSummary`
+        полем `secret` — это единственное место, где backend его возвращает.
       allOf:
-      - $ref: '#/components/schemas/WebhookInput'
+      - $ref: '#/components/schemas/WebhookSummary'
       - type: object
+        required:
+        - secret
         properties:
-          id:
+          secret:
             type: string
-            format: uuid
-          client_id:
-            type: string
-          created_at:
-            type: string
-            format: date-time
-          last_delivery_at:
-            type: [string, 'null']
-            format: date-time
-          last_delivery_status:
-            type: [integer, 'null']
+            description: HMAC-секрет для подписи доставок (X-Rehome-Signature).
     WebhookEvent:
       type: string
       enum:
