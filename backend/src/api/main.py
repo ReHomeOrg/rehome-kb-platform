@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.api.config import get_settings
 from src.api.db import get_engine
+from src.api.observability import RequestIdMiddleware, install_request_id_filter
 from src.api.v1.router import router as v1_router
 from src.api.webhooks.worker import WebhookDeliveryWorker
 
@@ -58,5 +59,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# #106: X-Request-Id propagation + structured logging context.
+# Middleware ставим первым (outermost) — id должен быть установлен ДО любых
+# другого middleware'а и handler'ов чтобы их логи получили request_id.
+install_request_id_filter()
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(v1_router)
