@@ -36,7 +36,15 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+
+# Explicit COPY (не `COPY . .`) — defence-in-depth для ФЗ-152: даже если
+# `.dockerignore` regress'ит, stray `.env.production` в repo root не
+# попадёт в layer. Список — это всё что `next build` realistically
+# нуждается. Vitest config / tests НЕ копируем — prod build их игнорирует.
+COPY package.json package-lock.json next.config.mjs next-env.d.ts \
+     tsconfig.json tailwind.config.ts postcss.config.mjs ./
+COPY app ./app
+COPY lib ./lib
 
 # Next.js telemetry — отключаем (privacy + slight perf).
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -47,8 +55,6 @@ RUN npm run build
 # Stage 3: runtime — minimal image
 # ============================================================================
 FROM ${NODE_IMAGE} AS runtime
-# Re-declare ARG в stage'е (Docker spec — ARG не наследуется).
-ARG NODE_IMAGE
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
@@ -56,8 +62,11 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 
 # `node:bookworm-slim` ships with user `node` (uid 1000) ready-to-use —
-# не создаём дубликат. uid/gid 1000 — match с k8s
-# securityContext.runAsUser, same convention что и backend Dockerfile (#114).
+# не создаём дубликат. uid 1000 совпадает с k8s securityContext.runAsUser:1000.
+# NB asymmetry с backend Dockerfile (#114): backend создаёт `app` user
+# (uid 1000) явно — там slim base ships БЕЗ pre-built non-root user. В
+# обоих случаях `id -u` в контейнере = 1000, deploy manifests могут не
+# различать.
 
 WORKDIR /app
 
