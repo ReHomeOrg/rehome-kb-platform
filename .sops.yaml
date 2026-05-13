@@ -13,7 +13,8 @@
 #   - `sops rotate -i deploy/secrets/<env>.enc.yaml` после `age-keygen` нового key.
 #   - Multiple recipients разрешены (`age: key1,key2`) для team setup.
 #
-# Open question (см. ADR-0009 §"Открытые вопросы"): где живут age private keys?
+# Open questions tracked в issue #118 (age key custody, DR runbook).
+# До их разрешения encrypt fails loudly (placeholder'ы — invalid bech32).
 
 creation_rules:
   # Dev environment — shared developer secrets (mock LLM, local Postgres).
