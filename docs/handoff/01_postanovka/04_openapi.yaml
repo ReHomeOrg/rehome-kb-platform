@@ -85,26 +85,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    enum:
-                    - ready
-                  dependencies:
-                    type: object
-                    additionalProperties:
-                      type: string
-                      enum:
-                      - ok
-                      - degraded
-                      - down
+                $ref: '#/components/schemas/ReadinessResponse'
         '503':
-          description: Зависимости недоступны
+          description: |
+            Хотя бы одна зависимость недоступна. Тот же envelope shape, что
+            и 200, — клиенту (k8s probe) важен status code; `dependencies`
+            map содержит per-service status'ы для ops debugging.
           content:
-            application/problem+json:
+            application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ReadinessResponse'
   /api/v1/version:
     get:
       tags:
@@ -2767,6 +2757,31 @@ components:
         default: ru
       description: Язык ответа
   schemas:
+    ReadinessResponse:
+      type: object
+      description: |
+        Унифицированный shape для `/ready` ответа (200 и 503). 200 →
+        `status='ready'`, все deps `ok`. 503 → `status='not_ready'`,
+        как минимум один dep не `ok`. k8s probe смотрит на HTTP status code;
+        body даёт ops-debugging detail без раскрытия exception messages
+        (ФЗ-152, см. issue #112).
+      required:
+      - status
+      - dependencies
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - not_ready
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+            enum:
+            - ok
+            - degraded
+            - down
     Meta:
       type: object
       required:

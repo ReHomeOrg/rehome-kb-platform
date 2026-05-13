@@ -1,7 +1,15 @@
 """Tests for /api/v1/health and /api/v1/version."""
 
+import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
+
+from src.api.db import get_session
+from src.api.main import app
 
 
 def test_health_returns_ok(client: TestClient) -> None:
@@ -61,13 +69,7 @@ def test_version_default_values_when_no_env(
 
 
 def test_ready_returns_200_when_db_ping_succeeds(client: TestClient) -> None:
-    """DB available → 200 `{status: ok}`."""
-    from collections.abc import AsyncIterator
-    from typing import Any
-    from unittest.mock import AsyncMock, MagicMock
-
-    from src.api.db import get_session
-    from src.api.main import app
+    """DB available → 200, body matches OpenAPI ReadinessResponse."""
 
     async def _ok_session() -> AsyncIterator[Any]:
         session = MagicMock()
@@ -86,13 +88,7 @@ def test_ready_returns_200_when_db_ping_succeeds(client: TestClient) -> None:
 
 
 def test_ready_returns_503_when_db_raises(client: TestClient) -> None:
-    """DB error → 503 `{status: not_ready, check: db}`. Без exception details."""
-    from collections.abc import AsyncIterator
-    from typing import Any
-    from unittest.mock import AsyncMock, MagicMock
-
-    from src.api.db import get_session
-    from src.api.main import app
+    """DB error → 503; ФЗ-152: exception text НЕ в response body."""
 
     async def _broken_session() -> AsyncIterator[Any]:
         session = MagicMock()
@@ -117,14 +113,6 @@ def test_ready_returns_503_on_db_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DB slow > timeout → 503."""
-    import asyncio
-    from collections.abc import AsyncIterator
-    from typing import Any
-    from unittest.mock import AsyncMock, MagicMock
-
-    from src.api.db import get_session
-    from src.api.main import app
-
     monkeypatch.setenv("READINESS_DB_TIMEOUT_SECONDS", "0.05")
 
     async def _slow_query(*args: Any, **kwargs: Any) -> None:

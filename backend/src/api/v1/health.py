@@ -9,6 +9,7 @@ probe с DB ping: 200 если app может обслуживать запро�
 
 import asyncio
 import logging
+from typing import Final
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
@@ -20,6 +21,15 @@ from src.api.observability.context import get_request_id
 
 router = APIRouter(tags=["Health"])
 logger = logging.getLogger(__name__)
+
+# Constants matching OpenAPI 04 `ReadinessResponse` enum values. Held в одном
+# месте — добавление новых deps (keycloak/minio/qdrant) подхватит готовые
+# `DEP_OK`/`DEP_DOWN` константы.
+READY_STATUS_READY: Final = "ready"
+READY_STATUS_NOT_READY: Final = "not_ready"
+DEP_OK: Final = "ok"
+DEP_DOWN: Final = "down"
+DEP_DB: Final = "db"
 
 
 @router.get("/health", summary="Liveness probe")
@@ -68,7 +78,7 @@ async def ready(
     settings = get_settings()
     try:
         await _ping_db(session, settings.readiness_db_timeout_seconds)
-        return {"status": "ready", "dependencies": {"db": "ok"}}
+        return {"status": READY_STATUS_READY, "dependencies": {DEP_DB: DEP_OK}}
     except Exception as exc:
         logger.warning(
             "ready.db_check_failed",
@@ -78,4 +88,7 @@ async def ready(
             },
         )
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {"status": "not_ready", "dependencies": {"db": "down"}}
+        return {
+            "status": READY_STATUS_NOT_READY,
+            "dependencies": {DEP_DB: DEP_DOWN},
+        }
