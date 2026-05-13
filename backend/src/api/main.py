@@ -61,8 +61,9 @@ app = FastAPI(
 )
 
 # #106: X-Request-Id propagation + structured logging context.
-# Middleware ставим первым (outermost) — id должен быть установлен ДО любых
-# другого middleware'а и handler'ов чтобы их логи получили request_id.
+# `app.add_middleware` LIFO: последний add'ed middleware — outermost. Эта
+# регистрация ДОЛЖНА оставаться последней (или единственной) — иначе
+# RequestId будет inner и не установит contextvar для middleware'ов выше.
 install_request_id_filter()
 app.add_middleware(RequestIdMiddleware)
 
