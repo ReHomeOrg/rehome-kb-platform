@@ -8,12 +8,17 @@ Endpoints:
 POST /test (выполнить test delivery) — E5.2 (нужен delivery worker).
 """
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Response, status
 
 from src.api.auth.dependency import require_authenticated
+from src.api.webhooks.delivery_repository import (
+    WebhookDeliveryRepository,
+    get_delivery_repository,
+)
 from src.api.webhooks.repository import WebhookRepository, get_webhook_repository
 from src.api.webhooks.schemas import WebhookInput, WebhookResponse, WebhooksListResponse
 from src.api.webhooks.ssrf import SSRFValidationError, validate_webhook_url
@@ -91,3 +96,36 @@ async def delete_webhook(
     if not deleted:
         raise HTTPException(status_code=404, detail="Webhook not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{webhook_id}/test",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Тестовая отправка события",
+)
+async def test_webhook(
+    webhook_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: WebhookRepository = Depends(get_webhook_repository),
+    delivery_repo: WebhookDeliveryRepository = Depends(get_delivery_repository),
+) -> dict[str, Any]:
+    """POST /webhooks/{id}/test — enqueue тестовое событие.
+
+    Возвращает 202 Accepted с delivery_id. Реальный POST делает
+    delivery worker async — sync wait на результат не делаем (требует
+    polling enhancement, backlog).
+    """
+    client_id = _client_id_from_claims(claims)
+    webhook = await repo.get_by_id_and_owner(webhook_id, client_id)
+    if webhook is None:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    delivery = await delivery_repo.enqueue(
+        webhook_id=webhook.id,
+        event_type="webhook.test",
+        payload={"timestamp": datetime.now(UTC).isoformat()},
+    )
+    return {
+        "delivery_id": str(delivery.id),
+        "status": "enqueued",
+    }

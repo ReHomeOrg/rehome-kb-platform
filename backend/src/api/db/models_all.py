@@ -10,7 +10,7 @@ from src.api.categories.models import Category
 from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
 from src.api.documents.models import Document
 from src.api.idempotency.models import IdempotencyKey
-from src.api.webhooks.models import Webhook
+from src.api.webhooks.models import Webhook, WebhookDelivery
 
 __all__ = [
     "Article",
@@ -22,4 +22,5 @@ __all__ = [
     "Document",
     "IdempotencyKey",
     "Webhook",
+    "WebhookDelivery",
 ]

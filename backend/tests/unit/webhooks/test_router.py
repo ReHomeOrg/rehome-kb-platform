@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -240,3 +240,76 @@ def test_delete_invalid_uuid_returns_422(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /test (E5.2 #89)
+
+
+def test_post_test_enqueues_test_delivery(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+) -> None:
+    from src.api.webhooks.delivery_repository import (
+        WebhookDeliveryRepository,
+        get_delivery_repository,
+    )
+    from src.api.webhooks.repository import (
+        WebhookRepository,
+        get_webhook_repository,
+    )
+
+    webhook = _make_webhook(client_id="alice")
+    wh_repo = WebhookRepository.__new__(WebhookRepository)
+    wh_repo.get_by_id_and_owner = AsyncMock(return_value=webhook)  # type: ignore[method-assign]
+    app.dependency_overrides[get_webhook_repository] = lambda: wh_repo
+
+    enqueue_result = MagicMock()
+    enqueue_result.id = uuid4()
+    deliv_repo = WebhookDeliveryRepository.__new__(WebhookDeliveryRepository)
+    deliv_repo.enqueue = AsyncMock(return_value=enqueue_result)  # type: ignore[method-assign]
+    app.dependency_overrides[get_delivery_repository] = lambda: deliv_repo
+
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="alice")
+        resp = client.post(
+            f"/api/v1/webhooks/{webhook.id}/test",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "enqueued"
+        assert "delivery_id" in body
+        assert deliv_repo.enqueue.call_args.kwargs["event_type"] == "webhook.test"
+    finally:
+        app.dependency_overrides.pop(get_webhook_repository, None)
+        app.dependency_overrides.pop(get_delivery_repository, None)
+
+
+def test_post_test_nonexistent_webhook_returns_404(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+) -> None:
+    from src.api.webhooks.repository import (
+        WebhookRepository,
+        get_webhook_repository,
+    )
+
+    wh_repo = WebhookRepository.__new__(WebhookRepository)
+    wh_repo.get_by_id_and_owner = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    app.dependency_overrides[get_webhook_repository] = lambda: wh_repo
+
+    try:
+        token = make_jwt(roles=["staff_admin"], sub="alice")
+        resp = client.post(
+            f"/api/v1/webhooks/{uuid4()}/test",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_webhook_repository, None)
+
+
+def test_post_test_without_jwt_returns_401(client: TestClient) -> None:
+    resp = client.post(f"/api/v1/webhooks/{uuid4()}/test")
+    assert resp.status_code == 401

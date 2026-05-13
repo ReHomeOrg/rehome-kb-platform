@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     llm_vllm_timeout_seconds: int = Field(default=60, alias="LLM_VLLM_TIMEOUT_SECONDS")
     llm_vllm_api_key: str | None = Field(default=None, alias="LLM_VLLM_API_KEY")
 
+    # Webhook delivery worker (E5.2 #89). Worker запускается в FastAPI
+    # lifespan если enabled=True. В test environment (pytest) — flag
+    # должен быть False (default), чтобы asyncio loops не мешали.
+    webhook_worker_enabled: bool = Field(default=False, alias="WEBHOOK_WORKER_ENABLED")
+    webhook_worker_poll_interval_seconds: float = Field(
+        default=5.0, alias="WEBHOOK_WORKER_POLL_INTERVAL_SECONDS"
+    )
+    webhook_delivery_timeout_seconds: float = Field(
+        default=10.0, alias="WEBHOOK_DELIVERY_TIMEOUT_SECONDS"
+    )
+    webhook_max_attempts: int = Field(default=5, alias="WEBHOOK_MAX_ATTEMPTS")
+    webhook_backoff_base_seconds: float = Field(default=30.0, alias="WEBHOOK_BACKOFF_BASE_SECONDS")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
