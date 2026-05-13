@@ -112,6 +112,11 @@ class EmbeddingRepository:
         article и не имеет id напрямую). Single round-trip subquery —
         не extra DB call.
 
+        ADR-0003: subquery НЕ применяет `access_level` filter — это
+        downstream от `articles.repository.archive()` где writer-side
+        auth уже выполнен (writer не вызовет archive если не имеет access
+        к статье). Этот delete — clean-up уже-authorized операции.
+
         Caller отвечает за commit.
         """
         subquery = select(Article.id).where(Article.slug == slug)

@@ -75,7 +75,7 @@ class IndexerService:
         try:
             embeddings = await self._provider.embed(texts)
         except Exception:
-            # Provider failure — log + bail. Каll-site fire-and-forget
+            # Provider failure — log + bail. Call-site fire-and-forget
             # уже игнорирует exception, но мы хотим structured log.
             logger.exception(
                 "indexer.embed_failed",
