@@ -12,10 +12,10 @@ import { useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
 import { deleteWebhook, testWebhook } from "@/lib/api/webhooks";
-import type { Webhook } from "@/lib/api/types";
+import type { WebhookSummary } from "@/lib/api/types";
 
 interface WebhooksTableProps {
-  webhooks: Webhook[];
+  webhooks: WebhookSummary[];
 }
 
 export default function WebhooksTable({
@@ -51,7 +51,7 @@ export default function WebhooksTable({
   );
 }
 
-function WebhookRow({ webhook }: { webhook: Webhook }): JSX.Element {
+function WebhookRow({ webhook }: { webhook: WebhookSummary }): JSX.Element {
   const router = useRouter();
   const [testing, setTesting] = useState(false);
   const [deleting, setDeleting] = useState(false);

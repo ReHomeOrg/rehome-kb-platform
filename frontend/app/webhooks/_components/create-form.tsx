@@ -4,12 +4,9 @@
  * Webhook create form (UI.7 #95).
  *
  * URL + events (multi-checkbox) + optional description → POST. После
- * success — показывает secret + рекомендует сохранить его сейчас,
- * затем `router.refresh()` обновляет список.
- *
- * Текущий backend возвращает secret и при последующих GET (см.
- * `WebhookResponse.from_model`), но UX best practice — сохранять секрет
- * в момент создания, чтобы не светить его в дополнительных запросах.
+ * success — показывает secret один раз (POST 201 — единственное место,
+ * где backend возвращает secret после #97; GET его не отдаёт), затем
+ * `router.refresh()` обновляет список.
  */
 
 import { useRouter } from "next/navigation";
