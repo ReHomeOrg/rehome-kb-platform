@@ -1,0 +1,30 @@
+# Build context optimization (#123).
+
+# Node artefacts — будут заново установлены в builder stage.
+node_modules
+.npm
+.yarn-integrity
+
+# Next.js build cache / output — local-dev artefacts, builder создаёт fresh.
+.next
+out
+*.tsbuildinfo
+
+# Test / coverage
+coverage
+.vitest
+
+# Local config / secrets — fail-fast если случайно попадут.
+.env
+.env.*
+*.local
+
+# Don't include the Dockerfile itself in image
+Dockerfile
+.dockerignore
+
+# OS / editor noise
+.DS_Store
+*.swp
+.idea
+.vscode
