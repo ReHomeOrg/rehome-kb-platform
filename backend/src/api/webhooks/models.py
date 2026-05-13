@@ -1,23 +1,17 @@
-"""Webhook ORM model (E5.1 #87).
+"""Webhook ORM models (E5.1 #87, E5.2 #89).
 
-Storage: `webhooks` table.
-- `client_id` — Keycloak `sub` claim (UUID или service-account ID).
-  Owner identifier — caller видит только свои webhooks.
-- `events` — Postgres TEXT[] array. Backend trigger'ит подписчиков
-  где event ∈ events.
-- `secret` — HMAC key для signing (Stripe-like). Генерируется backend'ом
-  если client не передал.
-- `last_delivery_at` / `last_delivery_status` — обновляются delivery
-  worker'ом (E5.2). Status — HTTP code (200 OK, 502 timeout, etc.) или
-  NULL если не было delivery ещё.
+`Webhook` — subscription с url + events + secret. Owner = JWT sub.
+`WebhookDelivery` — outbox row для каждого fire'нутого event'а.
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -25,7 +19,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,3 +78,90 @@ class Webhook(Base):
 
     def __repr__(self) -> str:  # pragma: no cover (debug only)
         return f"<Webhook id={self.id!r} client_id={self.client_id!r}>"
+
+
+class WebhookDelivery(Base):
+    """Outbox row для одной delivery попытки (E5.2 #89).
+
+    Pipeline:
+    1. INSERT pending row (через repository.enqueue) — обычно в той же
+       транзакции что и триггер-event (article publish, etc.).
+    2. Worker poll'ит каждые 5s: SELECT ... FOR UPDATE SKIP LOCKED
+       WHERE status='pending' AND next_attempt_at <= now() LIMIT 10.
+    3. HMAC sign + httpx POST. On 2xx → mark_delivered. On error →
+       attempt_count++, next_attempt_at = now() + 30s * 2^attempt.
+    4. После attempt_count >= MAX → status='dead_letter'.
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    webhook_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("webhooks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'delivered', 'failed', 'dead_letter')",
+            name="ck_webhook_deliveries_status",
+        ),
+        # Worker queue lookup: только pending + due. Partial index для
+        # минимизации size (большинство rows в БД будут delivered).
+        Index(
+            "ix_webhook_deliveries_queue",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        # Per-webhook admin listing (E6.x).
+        Index(
+            "ix_webhook_deliveries_webhook_created",
+            "webhook_id",
+            "created_at",
+        ),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover (debug only)
+        return (
+            f"<WebhookDelivery id={self.id!r} status={self.status!r} "
+            f"attempt={self.attempt_count}>"
+        )
+
+    @staticmethod
+    def allowed_statuses() -> tuple[str, ...]:
+        return ("pending", "delivered", "failed", "dead_letter")
