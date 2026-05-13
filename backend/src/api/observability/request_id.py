@@ -54,7 +54,10 @@ class RequestIdMiddleware:
 
         token = REQUEST_ID_CONTEXT.set(request_id)
 
-        header_bytes = REQUEST_ID_HEADER.encode("latin-1")
+        header_canonical = REQUEST_ID_HEADER.encode("latin-1")
+        request_id_bytes = request_id.encode("latin-1")
+        # `header_name` (lowercase, already computed above) reused для
+        # ASGI header-key comparison — keys приходят lower-case'd.
 
         async def _send_with_header(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -63,8 +66,8 @@ class RequestIdMiddleware:
                 # разрешает только для list-headers; HTTP-клиенты часто берут
                 # только первый). Гарантируем single, authoritative value.
                 existing = message.get("headers", [])
-                deduped = [(k, v) for (k, v) in existing if k.lower() != header_bytes.lower()]
-                deduped.append((header_bytes, request_id.encode("latin-1")))
+                deduped = [(k, v) for (k, v) in existing if k.lower() != header_name]
+                deduped.append((header_canonical, request_id_bytes))
                 message["headers"] = deduped  # ASGI Message is MutableMapping.
             await send(message)
 
