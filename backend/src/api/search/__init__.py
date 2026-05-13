@@ -13,6 +13,7 @@ Stage 1: pgvector в существующем Postgres-kb. Этот PR landed fo
 
 from src.api.search.chunker import Chunk, chunk_text
 from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
+from src.api.search.indexer import IndexerService, get_indexer_service
 from src.api.search.models import EMBEDDING_DIM_STAGE1, ArticleEmbedding
 from src.api.search.repository import EmbeddingRepository, get_embedding_repository
 
@@ -22,7 +23,9 @@ __all__ = [
     "EMBEDDING_DIM_STAGE1",
     "EmbeddingProvider",
     "EmbeddingRepository",
+    "IndexerService",
     "MockEmbeddingProvider",
     "chunk_text",
     "get_embedding_repository",
+    "get_indexer_service",
 ]
