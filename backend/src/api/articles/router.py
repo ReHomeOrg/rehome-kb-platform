@@ -175,6 +175,18 @@ async def _maybe_index_article(
         await indexer.remove_article(article.id)
 
 
+async def _maybe_remove_article_by_slug(
+    indexer: IndexerService,
+    slug: str,
+) -> None:
+    """RAG indexer slug-based remove (DELETE handler — id не доступен).
+    Same gating semantics что и `_maybe_index_article`.
+    """
+    if not get_settings().rag_enabled:
+        return
+    await indexer.remove_article_by_slug(slug)
+
+
 router = APIRouter(prefix="/articles", tags=["Articles"])
 
 
@@ -565,8 +577,7 @@ async def archive_article(
     )
     # ADR-0010 #130: RAG indexer — archive means article больше не
     # retrieve'ится. Slug-based variant (id не доступен в archive handler'е).
-    if get_settings().rag_enabled:
-        await indexer.remove_article_by_slug(slug)
+    await _maybe_remove_article_by_slug(indexer, slug)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
