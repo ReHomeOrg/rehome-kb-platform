@@ -15,7 +15,12 @@ from src.api.search.chunker import Chunk, chunk_text
 from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
 from src.api.search.indexer import IndexerService, get_indexer_service
 from src.api.search.models import EMBEDDING_DIM_STAGE1, ArticleEmbedding
-from src.api.search.repository import EmbeddingRepository, get_embedding_repository
+from src.api.search.repository import (
+    EmbeddingRepository,
+    RetrievalHit,
+    get_embedding_repository,
+)
+from src.api.search.retrieval import RetrievalService, get_retrieval_service
 
 __all__ = [
     "ArticleEmbedding",
@@ -25,7 +30,10 @@ __all__ = [
     "EmbeddingRepository",
     "IndexerService",
     "MockEmbeddingProvider",
+    "RetrievalHit",
+    "RetrievalService",
     "chunk_text",
     "get_embedding_repository",
     "get_indexer_service",
+    "get_retrieval_service",
 ]
