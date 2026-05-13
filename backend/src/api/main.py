@@ -75,11 +75,14 @@ app.add_middleware(MetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 
-# #108: Prometheus pull endpoint. Намеренно НЕ под /api/v1 (это infra,
-# не публичный API) и БЕЗ auth — scrape policy enforce'ится reverse-proxy /
-# network egress (см. observability/metrics.py docstring).
+# #108: Prometheus pull endpoint. Намеренно НЕ под /api/v1 (infra, не
+# публичный API) и БЕЗ auth. Gate'им через `METRICS_ENABLED` env-flag —
+# safe-by-default (404 если не выставлен, чтобы scrape policy на
+# reverse-proxy не была единственной защитой).
 @app.get("/metrics", include_in_schema=False)
 async def metrics_endpoint() -> Response:
+    if not get_settings().metrics_enabled:
+        return Response(status_code=404)
     body, content_type = render_metrics()
     return Response(content=body, media_type=content_type)
 

@@ -86,10 +86,14 @@ class MetricsMiddleware:
             # на этот момент `scope['route']` populated.
             route_path = _resolve_route_path(scope)
             duration = time.perf_counter() - start_time
+            # status=0 → client disconnected до http.response.start. По
+            # nginx-конвенции это `499 Client Closed Request` — даёт
+            # осмысленную label для алертинга вместо meaningless `"0"`.
+            status_label = "499" if status_code == 0 else str(status_code)
             REQUESTS_TOTAL.labels(
                 method=method,
                 route=route_path,
-                status=str(status_code),
+                status=status_label,
             ).inc()
             REQUEST_DURATION_SECONDS.labels(method=method, route=route_path).observe(duration)
 
