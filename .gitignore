@@ -54,16 +54,22 @@ Thumbs.db
 *.log
 logs/
 
-# Secrets / local config
+# Secrets / local config (ADR-0009)
+# Plain-text env files — НИКОГДА не commit'ятся. Сами secrets живут
+# encrypted в `deploy/secrets/*.enc.yaml` (SOPS + age).
 .env
-.env.local
-.env.*.local
+.env.*
 infra/.env
 *.pem
 *.key
 *.crt
 .git-credentials
 .rehome_bootstrap_token
+
+# Age private keys — НЕ должны быть в репо. Operators хранят их вне
+# git (1Password / disk-encrypted laptop / k8s secret для CI).
+*.age.key
+age-*.key
 
 # Local databases
 *.sqlite3
