@@ -169,3 +169,54 @@ def test_install_is_idempotent_does_not_duplicate_handlers() -> None:
         root.handlers.clear()
         for h in saved_handlers:
             root.addHandler(h)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: RequestIdLogFilter + JsonLogFormatter chain — raison d'être #111.
+
+
+def test_filter_and_formatter_chain_surfaces_request_id_e2e() -> None:
+    """`install_request_id_filter()` + `install_json_log_formatter()` + real
+    `logger.info()` → JSON output должен содержать current request_id
+    из contextvar (#106 → #110 chain). Это central goal этой PR'а."""
+    from src.api.observability import (
+        REQUEST_ID_CONTEXT,
+        install_request_id_filter,
+    )
+
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_filters = list(root.filters)
+    saved_level = root.level
+    try:
+        root.handlers.clear()
+        root.filters.clear()
+        # Direct stream capture (вместо stderr → нужны test-time isolation).
+        capture = StringIO()
+        handler = logging.StreamHandler(capture)
+        handler.setFormatter(JsonLogFormatter())
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+
+        install_request_id_filter()
+
+        token = REQUEST_ID_CONTEXT.set("e2e-request-id-xyz")
+        try:
+            logging.getLogger("test.chain").info("chain works", extra={"event": "test.chain"})
+        finally:
+            REQUEST_ID_CONTEXT.reset(token)
+
+        line = capture.getvalue().strip()
+        parsed = json.loads(line)
+        assert parsed["request_id"] == "e2e-request-id-xyz"
+        assert parsed["message"] == "chain works"
+        assert parsed["event"] == "test.chain"
+        assert parsed["level"] == "INFO"
+    finally:
+        root.handlers.clear()
+        root.filters.clear()
+        for h in saved_handlers:
+            root.addHandler(h)
+        for f in saved_filters:
+            root.addFilter(f)
+        root.setLevel(saved_level)

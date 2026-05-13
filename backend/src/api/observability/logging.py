@@ -27,16 +27,31 @@ class RequestIdLogFilter(logging.Filter):
 
 
 def install_request_id_filter() -> None:
-    """Attach filter к root logger. Idempotent (повторный вызов no-op).
+    """Attach filter к ВСЕМ existing root handler'ам.
 
-    Идиомпотентность важна потому что:
-    - `pytest` пересоздаёт app per-test иногда → install мог бы дублироваться.
-    - Дублирование filter'а не ломает, но дёргает getter дважды per record.
+    Python logging spec: `Logger.filter()` НЕ применяется к records от
+    child loggers, propagate'ящих в root — только `Handler.filter()`. Поэтому
+    filter обязан быть на handler'ах, не на самом root logger'е. Bug
+    обнаружен в #111 e2e test'е (chain filter+formatter).
+
+    Idempotent: пропускает handler'ы где filter уже стоит. Если root не
+    имеет handler'ов (test isolation) — мы ничего не делаем; в этом случае
+    filter добавляется на root logger как fallback (filter'нет records,
+    emit'ящиеся напрямую через root.info/error/etc).
     """
     root = logging.getLogger()
-    for existing in root.filters:
-        if isinstance(existing, RequestIdLogFilter):
-            return
-    f = RequestIdLogFilter()
-    f.name = _FILTER_NAME
-    root.addFilter(f)
+    if not root.handlers:
+        for existing_logger_filter in root.filters:
+            if isinstance(existing_logger_filter, RequestIdLogFilter):
+                return
+        f = RequestIdLogFilter()
+        f.name = _FILTER_NAME
+        root.addFilter(f)
+        return
+
+    for handler in root.handlers:
+        if any(isinstance(hf, RequestIdLogFilter) for hf in handler.filters):
+            continue
+        f = RequestIdLogFilter()
+        f.name = _FILTER_NAME
+        handler.addFilter(f)

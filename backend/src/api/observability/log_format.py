@@ -15,7 +15,11 @@ stack_info, lineno, funcName, processName, thread, threadName, process,
 args, msg, message, levelname, name) — оставляем только value-add fields.
 
 ФЗ-152: НЕ место для PII фильтрации. Caller (audit/logger sites) уже
-compliance'ят payload.
+compliance'ят payload. WARNING для caller'ов: `default=str` ловит
+non-serializable объекты через `__str__`, поэтому если в `extra={...}`
+попадает domain-объект с PII в `__str__()` — оно ВЫТЕЧЕТ в JSON. Анти-паттерн
+"Логирование тела запроса/ответа целиком" (CLAUDE-REVIEWER.md) применяется:
+кладите в `extra` только metadata (slug, action, ids), не объекты целиком.
 """
 
 import json
@@ -91,8 +95,14 @@ def install_json_log_formatter() -> None:
     """Заменить formatter на root logger's handlers; если handler'ов нет —
     добавить StreamHandler(stderr) с JSON formatter'ом.
 
-    Idempotent: повторный вызов перепринимает formatter (no-op effective)
-    но не создаёт duplicate handler'ов.
+    Convergent (не strict-idempotent): повторный вызов re-set'ит formatter
+    на тех же handler'ах. Стабильное end-state, но не early-return как у
+    `install_request_id_filter`. Дубликат handler'ов не создаётся.
+
+    NB: uvicorn конфигурирует свои handler'ы для `uvicorn.error` /
+    `uvicorn.access` ДО app startup и они НЕ propagate'ятся в root —
+    эти логи останутся uvicorn-format'ом. Полное JSON-покрытие uvicorn —
+    backlog (требует `--log-config` или прямого instrumentation'а).
     """
     root = logging.getLogger()
     formatter = JsonLogFormatter()
