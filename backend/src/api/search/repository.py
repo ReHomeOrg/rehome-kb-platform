@@ -12,6 +12,17 @@ Write operations для `article_embeddings` table:
   switch (ADR-0010 §"Re-embedding на model bump").
 
 Read side (`search()` / `query()`) — отдельный PR с retrieval logic.
+
+### ADR-0003 invariant — split responsibility
+
+Write-side НЕ enforce'ит `access_level` фильтр: chunks inherit от parent
+article через CASCADE FK (`models.py:31-34`). Если article создаётся /
+обновляется — текущий access_level применяется до chunks transitively на
+retrieval-стороне.
+
+Retrieval PR (отдельный) обязан JOIN'ить с `articles` по
+`access_level IN (...)` в каждой query — это unavoidable storage-level
+гарантия. См. ADR-0003 + `articles/repository.py` как reference pattern.
 """
 
 from typing import Any
@@ -83,7 +94,10 @@ class EmbeddingRepository:
         return len(values)
 
     async def delete_by_article(self, article_id: UUID) -> int:
-        """Удалить все embeddings одной статьи (любой model_id)."""
+        """Удалить все embeddings одной статьи (любой model_id).
+
+        Caller отвечает за commit (consistent с другими репозиториями).
+        """
         stmt = delete(ArticleEmbedding).where(ArticleEmbedding.article_id == article_id)
         result = await self._session.execute(stmt)
         await self._session.flush()
@@ -95,6 +109,8 @@ class EmbeddingRepository:
         Используется после blue-green switch: после того как new model
         достигла 100% coverage и production retrieval переключился, можно
         cleanup'ить старые vectors (free disk space).
+
+        Caller отвечает за commit (consistent с другими репозиториями).
         """
         stmt = delete(ArticleEmbedding).where(ArticleEmbedding.embedding_model_id == model_id)
         result = await self._session.execute(stmt)

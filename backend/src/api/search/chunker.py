@@ -1,18 +1,22 @@
-"""Markdown-aware paragraph chunker (kb-search Stage 1, #128).
+"""Paragraph chunker (kb-search Stage 1, #128).
 
 Стратегия (ADR-0010 §"Chunking"):
 - Target chunk size: ~512 tokens (≈2000 chars для русского / mixed).
 - Overlap: ~64 tokens (~250 chars) — 12% sliding window, стандартная heuristic.
-- Markdown headings (`#`, `##`, ...) preserve'ятся как boundary hints —
-  chunk кончается там где есть heading, если это в разумных размерах.
 - Code blocks (тройные backtick) НЕ разбиваются — лучше один большой
-  chunk чем syntactically broken fragments.
+  chunk чем syntactically broken fragments (если в пределах MAX).
+- Code blocks > MAX_CHUNK_CHARS И обычные параграфы > MAX_CHUNK_CHARS
+  разбиваются на character boundaries без overlap'а — anti-data-loss
+  safety для embedding model'и (e5-large input limit ~512 токенов).
 
 Token-counting через chars/4 heuristic (consistent с
 chat/router.py:_CHARS_PER_TOKEN). Не добавляем tiktoken / transformers
 tokenizer для chunker'а — он preserve'ит ~500 token target с разумной
-точностью, а real input-truncation enforcement — на стороне embedding
-model.
+точностью, real truncation enforcement — на стороне embedding model.
+
+NB: markdown heading-aware splitting (`#`, `##`) — backlog (ADR-0010
+mentions это как possible refinement, не Stage 1 must-have). Сейчас
+headings обрабатываются как regular text.
 """
 
 from dataclasses import dataclass
@@ -47,11 +51,18 @@ def chunk_text(source: str) -> list[Chunk]:
 
     Returns пустой list для пустого / whitespace-only input.
 
-    Invariants:
-    - `chunks[i].char_start == chunks[i-1].char_end - OVERLAP_CHARS` (или
-      ≥ если paragraph boundary дал natural split).
-    - `chunks[-1].char_end == len(source)` если source non-empty.
-    - text каждого chunk = `source[char_start:char_end]`.
+    Char offset semantics:
+    - `char_start`/`char_end` указывают на source span соответствующий
+      chunk'у (полезно для citation rendering + highlight).
+    - `chunk.text` — это actual indexed content. Может быть СОКРАЩЕНО
+      относительно `source[char_start:char_end]` потому что
+      inter-paragraph whitespace gaps НЕ попадают в text (они "съедены"
+      paragraph splitter'ом). Slice source — для highlight rendering;
+      использовать chunk.text для display'ev / embeddings.
+    - Overlap regions duplicate'ятся между соседними chunks (это by
+      design — context preservation).
+    - Никакая chunk.text НЕ превышает MAX_CHUNK_CHARS — even single
+      huge paragraph hard-split'ится на character boundaries.
     """
     if not source.strip():
         return []
@@ -61,53 +72,75 @@ def chunk_text(source: str) -> list[Chunk]:
         return []
 
     chunks: list[Chunk] = []
+    # Accumulator state: span — последний paragraph_end, который попал в
+    # cur_text_parts. char_end правильный для slice'а из source даже при
+    # gaps между paragraphs.
     cur_start: int = paragraphs[0][0]
+    cur_end: int = paragraphs[0][0]
     cur_text_parts: list[str] = []
 
     def _flush() -> None:
-        nonlocal cur_start, cur_text_parts
+        """Emit chunk + setup overlap context для следующего."""
+        nonlocal cur_start, cur_end, cur_text_parts
         if not cur_text_parts:
             return
         text = "".join(cur_text_parts)
-        # `cur_start + len(text)` отличается от `end_pos` на whitespace
-        # между paragraph'ами; используем cur_start + length для точности.
-        chunks.append(Chunk(text=text, char_start=cur_start, char_end=cur_start + len(text)))
-        # Setup для next chunk: overlap из tail предыдущего.
+        chunks.append(Chunk(text=text, char_start=cur_start, char_end=cur_end))
         if len(text) > OVERLAP_CHARS:
             overlap_text = text[-OVERLAP_CHARS:]
-            cur_start = cur_start + len(text) - OVERLAP_CHARS
+            # Next chunk's "start" — последние OVERLAP_CHARS bytes этого
+            # chunk'а. cur_end остаётся прежним (overlap не consume'ит
+            # source — он duplicate'ит).
+            cur_start = cur_end - OVERLAP_CHARS
             cur_text_parts = [overlap_text]
         else:
-            cur_start = cur_start + len(text)
+            cur_start = cur_end
             cur_text_parts = []
 
     for para_start, para_end, para_text in paragraphs:
-        accumulated = "".join(cur_text_parts) + para_text
-        if len(accumulated) > MAX_CHUNK_CHARS:
-            # Paragraph сам по себе огромный (code block) — emit as-is
-            # без overlap'а (single-block integrity > overlap).
+        # Special case 1: huge single paragraph (e.g., runaway pasted text
+        # без blank lines или code block > MAX). Hard-split на character
+        # boundaries без overlap. Anti-data-loss: иначе embedding model
+        # silently truncate'нет.
+        if len(para_text) > MAX_CHUNK_CHARS:
             if cur_text_parts:
                 _flush()
-            chunks.append(Chunk(text=para_text, char_start=para_start, char_end=para_end))
+            for sub_start_off in range(0, len(para_text), MAX_CHUNK_CHARS):
+                sub_text = para_text[sub_start_off : sub_start_off + MAX_CHUNK_CHARS]
+                abs_start = para_start + sub_start_off
+                chunks.append(
+                    Chunk(
+                        text=sub_text,
+                        char_start=abs_start,
+                        char_end=abs_start + len(sub_text),
+                    )
+                )
             cur_start = para_end
+            cur_end = para_end
             cur_text_parts = []
             continue
 
-        if accumulated and len(accumulated) >= TARGET_CHUNK_CHARS:
-            # Дозреем до target — flush с overlap.
-            cur_text_parts.append(para_text)
-            _flush()
-            continue
+        accumulated_len = sum(len(p) for p in cur_text_parts) + len(para_text)
 
-        # Накапливаем дальше.
+        # Special case 2: добавление paragraph'а превысит MAX — flush
+        # текущее (с overlap), оставить paragraph для следующего.
+        if accumulated_len > MAX_CHUNK_CHARS and cur_text_parts:
+            _flush()
+
+        # Init start если cur_text_parts только что cleared'ились.
         if not cur_text_parts:
             cur_start = para_start
         cur_text_parts.append(para_text)
+        cur_end = para_end
+
+        # Достигли target — flush с overlap.
+        if sum(len(p) for p in cur_text_parts) >= TARGET_CHUNK_CHARS:
+            _flush()
 
     # Tail.
     if cur_text_parts:
         text = "".join(cur_text_parts)
-        chunks.append(Chunk(text=text, char_start=cur_start, char_end=cur_start + len(text)))
+        chunks.append(Chunk(text=text, char_start=cur_start, char_end=cur_end))
 
     return chunks
 
