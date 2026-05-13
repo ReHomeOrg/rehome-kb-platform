@@ -37,6 +37,10 @@ from src.api.chat.schemas import (
 from src.api.chat.sse import format_sse_event
 from src.api.chat.system_prompt import SYSTEM_PROMPT
 from src.api.config import Settings, get_settings
+from src.api.webhooks.dispatcher import (
+    WebhookEventDispatcher,
+    get_webhook_event_dispatcher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +345,7 @@ async def post_escalate(
     payload: EscalateInput | None = Body(default=None),
     owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
     repo: ChatRepository = Depends(get_chat_repository),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> EscalateResponse:
     """`POST /chat/sessions/{id}/escalate` — создать ticket эскалации.
 
@@ -365,6 +370,17 @@ async def post_escalate(
     )
     if escalation is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # E5.3 #91: fire chat.escalated webhook.
+    await webhook_dispatcher.dispatch(
+        event_type="chat.escalated",
+        payload={
+            "ticket_id": str(escalation.id),
+            "session_id": str(session_id),
+            "priority": escalation.priority,
+            "requested_at": escalation.requested_at.isoformat(),
+        },
+    )
 
     return EscalateResponse(
         ticket_id=escalation.id,

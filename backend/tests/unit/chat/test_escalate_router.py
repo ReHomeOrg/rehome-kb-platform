@@ -242,3 +242,75 @@ def test_escalate_invalid_uuid_path_returns_422(
 ) -> None:
     resp = client.post("/api/v1/chat/sessions/not-a-uuid/escalate")
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Webhook dispatch (E5.3 #91)
+
+
+def test_escalate_success_fires_chat_escalated_webhook(
+    client: TestClient,
+    override_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """POST /escalate (success) → dispatcher.dispatch(chat.escalated) called."""
+    from unittest.mock import MagicMock
+
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    session = _make_session()
+    esc = _make_escalation(session.id, priority="high")
+    override_repo.return_value = esc
+
+    dispatch = AsyncMock(return_value=1)
+    fake = MagicMock(spec=WebhookEventDispatcher)
+    fake.dispatch = dispatch
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: fake
+    try:
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/chat/sessions/{session.id}/escalate",
+            json={"priority": "high"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 201
+        dispatch.assert_awaited_once()
+        kwargs = dispatch.call_args.kwargs
+        assert kwargs["event_type"] == "chat.escalated"
+        assert kwargs["payload"]["ticket_id"] == str(esc.id)
+        assert kwargs["payload"]["priority"] == "high"
+        assert kwargs["payload"]["session_id"] == str(session.id)
+    finally:
+        app.dependency_overrides.pop(get_webhook_event_dispatcher, None)
+
+
+def test_escalate_404_does_not_fire_webhook(
+    client: TestClient,
+    override_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    from unittest.mock import MagicMock
+
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    override_repo.return_value = None
+    dispatch = AsyncMock(return_value=0)
+    fake = MagicMock(spec=WebhookEventDispatcher)
+    fake.dispatch = dispatch
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: fake
+    try:
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/chat/sessions/{uuid4()}/escalate",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 404
+        dispatch.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_webhook_event_dispatcher, None)

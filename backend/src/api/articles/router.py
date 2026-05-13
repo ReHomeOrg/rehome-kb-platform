@@ -47,6 +47,10 @@ from src.api.auth.dependency import (
 from src.api.auth.exceptions import UnauthorizedError
 from src.api.auth.scope import AccessLevel
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
+from src.api.webhooks.dispatcher import (
+    WebhookEventDispatcher,
+    get_webhook_event_dispatcher,
+)
 
 # Slug pattern из OpenAPI / ADR-0006: lowercase ASCII, цифры, дефисы.
 # 1..200 символов, не пустой. Защищает от path-injection и SQL-сюрпризов
@@ -93,6 +97,44 @@ def _parse_tags(raw: str | None) -> list[str] | None:
                 detail=f"Tag exceeds max length ({TAGS_MAX_LENGTH} chars)",
             )
     return deduped
+
+
+async def _maybe_dispatch_article_status_event(
+    dispatcher: WebhookEventDispatcher,
+    article: Any,
+    old_status: str | None,
+) -> None:
+    """Fire matching webhook event на основе status-перехода (E5.3 #91).
+
+    - `old_status is None` означает create (POST /articles): fire
+      `article.published` если status='PUBLISHED'.
+    - `old_status != article.status`: fire transition event если новое
+      состояние — PUBLISHED или ARCHIVED.
+
+    `article.updated` не fire'им (out of scope — backlog).
+    """
+    new_status = article.status
+    if old_status == new_status:
+        return
+    if new_status == "PUBLISHED":
+        await dispatcher.dispatch(
+            event_type="article.published",
+            payload={
+                "slug": article.slug,
+                "title": article.title,
+                "access_level": article.access_level,
+                "published_at": (article.published_at or article.updated_at).isoformat(),
+            },
+        )
+    elif new_status == "ARCHIVED":
+        await dispatcher.dispatch(
+            event_type="article.archived",
+            payload={
+                "slug": article.slug,
+                "title": article.title,
+                "archived_at": article.updated_at.isoformat(),
+            },
+        )
 
 
 router = APIRouter(prefix="/articles", tags=["Articles"])
@@ -243,6 +285,7 @@ async def create_article(
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
     idempotency: IdempotencyResult = Depends(process_idempotency_key),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> Any:
     """Создаёт статью.
 
@@ -287,6 +330,9 @@ async def create_article(
         access_level=article.access_level,
     )
 
+    # E5.3 #91: fire webhook event если создаём сразу PUBLISHED.
+    await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=None)
+
     location = f"/api/v1/articles/{article.slug}"
     response.headers["Location"] = location
 
@@ -330,6 +376,7 @@ async def replace_article(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> ArticleResponse:
     """Полностью заменяет статью.
 
@@ -383,6 +430,8 @@ async def replace_article(
         old_status=old_status,
         new_status=article.status,
     )
+    # E5.3 #91: fire matching webhook event на status-перехода.
+    await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
     return ArticleResponse.model_validate(article)
 
 
@@ -534,6 +583,7 @@ async def patch_article(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> ArticleResponse:
     """Partial-update: меняет только переданные поля.
 
@@ -564,6 +614,8 @@ async def patch_article(
         old_status=old_status,
         new_status=article.status,
     )
+    # E5.3 #91: fire matching webhook event на status-перехода.
+    await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
     return ArticleResponse.model_validate(article)
 
 

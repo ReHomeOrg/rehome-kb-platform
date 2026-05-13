@@ -133,6 +133,29 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
     return get_settings()
 
 
+@pytest.fixture(autouse=True)
+def _no_op_webhook_dispatcher() -> Iterator[None]:
+    """E5.3 #91: глобальный no-op WebhookEventDispatcher для unit-тестов.
+
+    Article/chat endpoints depend на dispatcher (через webhook+delivery
+    repos → DB session). В unit-тестах DB нет, поэтому подменяем
+    dispatcher на no-op (`dispatch` → 0). Тесты, проверяющие сам
+    dispatch'ер, используют свой override.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    noop = MagicMock(spec=WebhookEventDispatcher)
+    noop.dispatch = AsyncMock(return_value=0)
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_webhook_event_dispatcher, None)
+
+
 @pytest.fixture
 def client(test_settings: Settings) -> Iterator[TestClient]:
     """TestClient c тестовыми KC settings и пропатченным JWKS."""
