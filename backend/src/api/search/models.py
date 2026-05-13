@@ -12,14 +12,23 @@ parent article'а через FK. Retrieval filter JOIN'ит articles по
 """
 
 from datetime import datetime
+from typing import Final
 from uuid import UUID
 
+# pgvector 0.4.0 ships без `py.typed` marker — `# type: ignore[import-untyped]`
+# обоснован отсутствием stubs, не misuse'ом API.
 from pgvector.sqlalchemy import Vector  # type: ignore[import-untyped]
 from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.api.db.base import Base
+
+# Stage 1 vector dimension matches `intfloat/multilingual-e5-large` output.
+# Same value duplicate'ится в migration 0014 (frozen historical record) и
+# Settings.embedding_dim. Изменение требует new migration (column type
+# change) — inherent ограничение pgvector.
+EMBEDDING_DIM_STAGE1: Final = 1024
 
 
 class ArticleEmbedding(Base):
@@ -46,7 +55,7 @@ class ArticleEmbedding(Base):
     # Vector dimension matches Settings.embedding_dim. Изменение dim требует
     # migration (column type) — это inherent ограничение pgvector.
     embedding: Mapped[list[float]] = mapped_column(
-        Vector(1024),
+        Vector(EMBEDDING_DIM_STAGE1),
         nullable=False,
     )
     char_start: Mapped[int] = mapped_column(Integer, nullable=False)

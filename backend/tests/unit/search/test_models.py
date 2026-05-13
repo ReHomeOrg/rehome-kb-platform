@@ -37,3 +37,14 @@ def test_article_embedding_table_args() -> None:
 
     table = Base.metadata.tables["article_embeddings"]
     assert "ADR-0010" in (table.comment or "")
+
+
+def test_article_embedding_pk_composite() -> None:
+    """ADR-0010 §"Re-embedding на model bump" invariant — PK includes
+    embedding_model_id, иначе blue-green re-embedding ломается (старый
+    и новый model overwrite'ят друг друга)."""
+    from src.api.db.base import Base
+
+    table = Base.metadata.tables["article_embeddings"]
+    pk_cols = list(table.primary_key.columns.keys())
+    assert pk_cols == ["article_id", "chunk_index", "embedding_model_id"]
