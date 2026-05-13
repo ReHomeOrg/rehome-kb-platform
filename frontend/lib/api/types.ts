@@ -215,3 +215,53 @@ export interface EscalateResponse {
   ticket_id: string;
   estimated_response_time_minutes: number;
 }
+
+// ============================================================================
+// Webhooks (UI.7 #95)
+
+/**
+ * Allowed webhook events. Mirror backend `WebhookEvent` StrEnum
+ * (webhooks/events.py) — source of truth.
+ */
+export const WEBHOOK_EVENTS = [
+  "article.published",
+  "article.updated",
+  "article.archived",
+  "document.created",
+  "document.signed",
+  "chat.escalated",
+  "chat.no_answer",
+  "search.popular_query",
+  "premises_card.updated",
+  "audit.security_event",
+  "collaborator.created",
+] as const;
+
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface Webhook {
+  id: string;
+  client_id: string;
+  url: string;
+  events: string[];
+  secret: string;
+  description: string | null;
+  created_at: string;
+  last_delivery_at: string | null;
+  last_delivery_status: number | null;
+}
+
+export interface WebhooksListResponse {
+  data: Webhook[];
+}
+
+export interface WebhookInput {
+  url: string;
+  events: string[];
+  description?: string | null;
+}
+
+export interface WebhookTestResponse {
+  delivery_id: string;
+  status: "enqueued";
+}
