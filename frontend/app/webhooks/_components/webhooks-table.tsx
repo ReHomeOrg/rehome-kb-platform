@@ -77,7 +77,7 @@ function WebhookRow({ webhook }: { webhook: Webhook }): JSX.Element {
 
   async function onDelete(): Promise<void> {
     if (deleting) return;
-    if (!window.confirm("Удалить webhook? Это soft-delete.")) return;
+    if (!window.confirm("Удалить подписку?")) return;
     setDeleting(true);
     setMessage(null);
     try {
@@ -150,9 +150,7 @@ function WebhookRow({ webhook }: { webhook: Webhook }): JSX.Element {
 
 function formatDate(iso: string): string {
   // Simple readable format; локализация — out of scope MVP.
-  try {
-    return new Date(iso).toISOString().slice(0, 16).replace("T", " ");
-  } catch {
-    return iso;
-  }
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toISOString().slice(0, 16).replace("T", " ");
 }

@@ -4,8 +4,12 @@
  * Webhook create form (UI.7 #95).
  *
  * URL + events (multi-checkbox) + optional description → POST. После
- * success — показывает secret один раз (его нельзя достать позже),
+ * success — показывает secret + рекомендует сохранить его сейчас,
  * затем `router.refresh()` обновляет список.
+ *
+ * Текущий backend возвращает secret и при последующих GET (см.
+ * `WebhookResponse.from_model`), но UX best practice — сохранять секрет
+ * в момент создания, чтобы не светить его в дополнительных запросах.
  */
 
 import { useRouter } from "next/navigation";
@@ -148,8 +152,8 @@ function SecretBanner({
   return (
     <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm">
       <p className="font-medium text-amber-900">
-        Webhook создан. Сохраните secret — после закрытия его нельзя будет
-        восстановить.
+        Webhook создан. Сохраните secret в безопасное место — он понадобится
+        для верификации HMAC-подписи доставок.
       </p>
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-900">
         <dt className="font-medium">ID</dt>
