@@ -20,6 +20,7 @@ from src.api.db import get_engine
 from src.api.observability import (
     MetricsMiddleware,
     RequestIdMiddleware,
+    install_json_log_formatter,
     install_request_id_filter,
     render_metrics,
 )
@@ -71,6 +72,10 @@ app = FastAPI(
 # RequestId должен оставаться OUTERMOST — все логи (incl. metrics middleware'а)
 # наследуют request_id.
 install_request_id_filter()
+# #110: JSON log formatter — install'им если `LOG_FORMAT=json` (prod
+# log aggregators ожидают structured output). Default `text` для dev.
+if get_settings().log_format == "json":
+    install_json_log_formatter()
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
