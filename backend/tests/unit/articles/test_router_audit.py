@@ -50,6 +50,22 @@ def _override_patch(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
     _override_session()
 
 
+def _override_update(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
+    async def _fake(
+        self: Any,
+        slug: str,
+        payload: Any,
+        levels: Any,
+        *,
+        actor_sub: str,
+        if_match: Any = None,
+    ) -> Any:
+        return result
+
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.update", _fake)
+    _override_session()
+
+
 def _override_archive(monkeypatch: pytest.MonkeyPatch, result: tuple[str, str] | None) -> None:
     async def _fake(self: Any, slug: str, levels: Any, *, actor_sub: str) -> Any:
         return result
@@ -119,6 +135,38 @@ def test_post_does_not_leak_content_in_audit_metadata(
     assert "body_markdown" not in metadata
     assert "title" not in metadata
     assert "summary" not in metadata
+
+
+# ---------------------------------------------------------------------------
+# PUT
+
+
+def test_put_writes_articles_updated_with_via_put_marker(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+    fake_article: Article,
+    audit_mock: AsyncMock,
+) -> None:
+    fake_article.status = "PUBLISHED"
+    fake_article.access_level = "PUBLIC"
+    _override_update(monkeypatch, (fake_article, "PUBLIC", "DRAFT"))
+    token = make_jwt(roles=["staff_admin"], sub="alice-sub")
+    body = _post_body()
+    body["slug"] = fake_article.slug
+    body["status"] = "PUBLISHED"
+    resp = client.put(
+        f"/api/v1/articles/{fake_article.slug}",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "articles.updated"
+    assert kwargs["metadata"]["via"] == "PUT"
+    assert kwargs["metadata"]["old_status"] == "DRAFT"
+    assert kwargs["metadata"]["new_status"] == "PUBLISHED"
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,14 @@ from src.api.articles.schemas import (
     SearchHit,
     SearchInput,
 )
-from src.api.audit.repository import AuditRepository, get_audit_repository
+from src.api.audit import (
+    ACTION_ARTICLES_ARCHIVED,
+    ACTION_ARTICLES_CREATED,
+    ACTION_ARTICLES_UPDATED,
+    RESOURCE_ARTICLE,
+    AuditRepository,
+    get_audit_repository,
+)
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_access_level,
@@ -334,8 +341,8 @@ async def create_article(
     )
     await audit_repo.record(
         actor_sub=claims["sub"],
-        action="articles.created",
-        resource_type="article",
+        action=ACTION_ARTICLES_CREATED,
+        resource_type=RESOURCE_ARTICLE,
         resource_id=article.slug,
         metadata={"access_level": article.access_level},
     )
@@ -443,8 +450,8 @@ async def replace_article(
     )
     await audit_repo.record(
         actor_sub=claims["sub"],
-        action="articles.updated",
-        resource_type="article",
+        action=ACTION_ARTICLES_UPDATED,
+        resource_type=RESOURCE_ARTICLE,
         resource_id=article.slug,
         metadata={
             "old_access_level": old_access_level,
@@ -511,8 +518,8 @@ async def archive_article(
     )
     await audit_repo.record(
         actor_sub=claims["sub"],
-        action="articles.archived",
-        resource_type="article",
+        action=ACTION_ARTICLES_ARCHIVED,
+        resource_type=RESOURCE_ARTICLE,
         resource_id=slug,
         metadata={
             "was_status": was_status,
@@ -652,8 +659,8 @@ async def patch_article(
     )
     await audit_repo.record(
         actor_sub=claims["sub"],
-        action="articles.updated",
-        resource_type="article",
+        action=ACTION_ARTICLES_UPDATED,
+        resource_type=RESOURCE_ARTICLE,
         resource_id=article.slug,
         metadata={
             "old_access_level": old_access_level,

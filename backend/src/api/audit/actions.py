@@ -1,0 +1,16 @@
+"""Audit action constants (E4.x #102).
+
+Чтобы action-strings и resource_types жили в одном месте, не разбегаясь
+по router'ам как magic literals. Webhook + chat actions добавляются сюда
+по мере landing'а соответствующих audit-вызовов.
+"""
+
+from typing import Final
+
+# Resource types.
+RESOURCE_ARTICLE: Final = "article"
+
+# Article actions.
+ACTION_ARTICLES_CREATED: Final = "articles.created"
+ACTION_ARTICLES_UPDATED: Final = "articles.updated"
+ACTION_ARTICLES_ARCHIVED: Final = "articles.archived"
