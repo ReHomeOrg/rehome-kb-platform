@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     # not-ready. 2s — conservative для default; k8s probe timeout обычно 3-5s.
     readiness_db_timeout_seconds: float = Field(default=2.0, alias="READINESS_DB_TIMEOUT_SECONDS")
 
+    # kb-search / RAG (ADR-0010 Stage 1, #126). Default `RAG_ENABLED=False` —
+    # foundation landed в off-state, явный flip когда indexer + endpoint
+    # готовы. Эмбеддинги через self-hosted model (ФЗ-152: no external API).
+    rag_enabled: bool = Field(default=False, alias="RAG_ENABLED")
+    embedding_model: str = Field(
+        default="intfloat/multilingual-e5-large",
+        alias="EMBEDDING_MODEL",
+    )
+    # Dim строго matches model output. Изменение требует pgvector column
+    # migration — менять одновременно с model bump.
+    embedding_dim: int = Field(default=1024, alias="EMBEDDING_DIM")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,

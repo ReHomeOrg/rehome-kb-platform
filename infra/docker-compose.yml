@@ -76,7 +76,11 @@ services:
       start_period: 30s
 
   postgres-kb:
-    image: postgres:16
+    # ADR-0010 Stage 1 / #126: pgvector extension preinstalled. Image
+    # tracks upstream postgres:16 — same Postgres version, just с
+    # `CREATE EXTENSION vector` available. `postgres:16` без pgvector
+    # больше не support'ится (миграция 0014 fail'нется loudly).
+    image: pgvector/pgvector:pg16
     container_name: rehome-kb-postgres
     environment:
       POSTGRES_DB: ${POSTGRES_KB_DB:-rehome_kb}
