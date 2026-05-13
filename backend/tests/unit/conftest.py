@@ -134,6 +134,28 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 @pytest.fixture(autouse=True)
+def _no_op_indexer_service() -> Iterator[None]:
+    """ADR-0010 #130: глобальный no-op IndexerService для unit-тестов.
+
+    Article router endpoints depend на indexer (через embedding repo →
+    DB session). В unit-тестах DB нет. `RAG_ENABLED=False` default уже
+    skip'нет call, но dependency Depends всё равно resolve'ится — ему
+    нужен mock.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.search.indexer import IndexerService, get_indexer_service
+
+    noop = MagicMock(spec=IndexerService)
+    noop.index_article = AsyncMock(return_value=0)
+    noop.remove_article = AsyncMock(return_value=0)
+    noop.remove_article_by_slug = AsyncMock(return_value=0)
+    app.dependency_overrides[get_indexer_service] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_indexer_service, None)
+
+
+@pytest.fixture(autouse=True)
 def _no_op_audit_repository() -> Iterator[None]:
     """E4.x #102: глобальный no-op AuditRepository для unit-тестов.
 
