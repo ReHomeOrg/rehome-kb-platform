@@ -31,23 +31,41 @@ class WebhookInput(BaseModel):
         return v
 
 
-class WebhookResponse(BaseModel):
-    """Webhook в response. Включает все поля Webhook (id, client_id,
-    created_at, last_delivery_*). Secret exposes ТОЛЬКО при создании
-    (POST 201), при последующих GET — секрет можно либо вырезать
-    (зависит от security policy), либо оставить, поскольку owner —
-    тот же client.
+class WebhookSummary(BaseModel):
+    """Webhook в list-response (#97). Без `secret` — secret available
+    только при creation (POST 201). Owner всё равно может сохранить его
+    в момент создания; GET намеренно не раскрывает дополнительно
+    (минимизация поверхности утечки secret'а).
     """
 
     id: UUID
     client_id: str
     url: str
     events: list[str]
-    secret: str
     description: str | None
     created_at: datetime
     last_delivery_at: datetime | None
     last_delivery_status: int | None
+
+    @classmethod
+    def from_model(cls, webhook: Any) -> "WebhookSummary":
+        return cls(
+            id=webhook.id,
+            client_id=webhook.client_id,
+            url=webhook.url,
+            events=webhook.events,
+            description=webhook.description,
+            created_at=webhook.created_at,
+            last_delivery_at=webhook.last_delivery_at,
+            last_delivery_status=webhook.last_delivery_status,
+        )
+
+
+class WebhookResponse(WebhookSummary):
+    """Webhook в creation-response (POST 201). Расширяет Summary полем
+    `secret` — exposed только при creation."""
+
+    secret: str
 
     @classmethod
     def from_model(cls, webhook: Any) -> "WebhookResponse":
@@ -67,4 +85,4 @@ class WebhookResponse(BaseModel):
 class WebhooksListResponse(BaseModel):
     """Ответ для GET /webhooks."""
 
-    data: list[WebhookResponse]
+    data: list[WebhookSummary]

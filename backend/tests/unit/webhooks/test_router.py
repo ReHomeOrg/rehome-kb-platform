@@ -183,6 +183,23 @@ def test_get_returns_owned_webhooks(
     assert list_mock.call_args.args[0] == "alice"
 
 
+def test_get_response_does_not_expose_secret(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """#97: GET /webhooks НЕ возвращает secret (exposed only on POST 201)."""
+    _, list_mock, _ = override_repo
+    webhook = _make_webhook(client_id="alice")
+    webhook.secret = "should-not-leak-via-get"
+    list_mock.return_value = [webhook]
+    token = make_jwt(roles=["staff_admin"], sub="alice")
+    resp = client.get("/api/v1/webhooks", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "secret" not in body["data"][0]
+
+
 def test_get_empty_list(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
