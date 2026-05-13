@@ -9,4 +9,8 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
 prometheus-client==0.21.1
+# pgvector Python lib — SQLAlchemy types `Vector(N)` + asyncpg adapter.
+# Server-side требует `pgvector/pgvector:pg16` Docker image (см. infra/
+# docker-compose.yml). ADR-0010 #126.
+pgvector==0.4.0
 
