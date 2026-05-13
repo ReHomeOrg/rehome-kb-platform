@@ -239,20 +239,30 @@ export const WEBHOOK_EVENTS = [
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
-export interface Webhook {
+/**
+ * Webhook summary в list-response. БЕЗ `secret` — secret returned ТОЛЬКО
+ * на POST 201 (creation), при последующих GET намеренно скрыт (#97).
+ */
+export interface WebhookSummary {
   id: string;
   client_id: string;
   url: string;
   events: string[];
-  secret: string;
   description: string | null;
   created_at: string;
   last_delivery_at: string | null;
   last_delivery_status: number | null;
 }
 
+/**
+ * Webhook на creation-response (POST 201). Расширяет Summary полем `secret`.
+ */
+export interface Webhook extends WebhookSummary {
+  secret: string;
+}
+
 export interface WebhooksListResponse {
-  data: Webhook[];
+  data: WebhookSummary[];
 }
 
 export interface WebhookInput {

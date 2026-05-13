@@ -20,7 +20,12 @@ from src.api.webhooks.delivery_repository import (
     get_delivery_repository,
 )
 from src.api.webhooks.repository import WebhookRepository, get_webhook_repository
-from src.api.webhooks.schemas import WebhookInput, WebhookResponse, WebhooksListResponse
+from src.api.webhooks.schemas import (
+    WebhookInput,
+    WebhookResponse,
+    WebhooksListResponse,
+    WebhookSummary,
+)
 from src.api.webhooks.ssrf import SSRFValidationError, validate_webhook_url
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
@@ -78,7 +83,8 @@ async def list_webhooks(
 ) -> WebhooksListResponse:
     client_id = _client_id_from_claims(claims)
     webhooks = await repo.list_by_owner(client_id)
-    return WebhooksListResponse(data=[WebhookResponse.from_model(w) for w in webhooks])
+    # #97: GET намеренно не возвращает secret — exposed only on POST 201.
+    return WebhooksListResponse(data=[WebhookSummary.from_model(w) for w in webhooks])
 
 
 @router.delete(

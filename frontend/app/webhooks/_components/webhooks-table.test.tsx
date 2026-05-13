@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import WebhooksTable from "./webhooks-table";
-import type { Webhook } from "@/lib/api/types";
+import type { WebhookSummary } from "@/lib/api/types";
 
 const refreshMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -13,13 +13,15 @@ const fetchMock = vi.fn();
 const confirmMock = vi.fn();
 const originalWindow = (globalThis as { window?: unknown }).window;
 
-function _make(id: string, overrides: Partial<Webhook> = {}): Webhook {
+function _make(
+  id: string,
+  overrides: Partial<WebhookSummary> = {},
+): WebhookSummary {
   return {
     id,
     client_id: "alice",
     url: "https://example.com/h",
     events: ["article.published"],
-    secret: "shh",
     description: null,
     created_at: "2026-05-13T00:00:00Z",
     last_delivery_at: null,
