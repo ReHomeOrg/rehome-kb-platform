@@ -17,7 +17,6 @@ import os
 import secrets
 import threading
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 from uuid import UUID, uuid4
@@ -412,6 +411,12 @@ async def test_concurrent_claim_pending_no_overlap(
     finally:
         await engine.dispose()
 
+    # Обе корутины должны были захватить хотя бы по одной row — иначе
+    # SKIP_LOCKED safety не проверен (одна сторона серилизовалась). Это
+    # ловит flake-mode где GC pause не дал второй stay-up к моменту первой
+    # SELECT и она забрала бы все 5 без contention.
+    assert claim_a
+    assert claim_b
     # Зеркальное условие: union покрывает все enqueued; intersection пуста.
     assert claim_a.isdisjoint(claim_b)
     assert claim_a | claim_b == set(enqueued_ids)
@@ -495,6 +500,3 @@ async def test_run_once_idempotent_after_delivery(
     second = await worker_instance._run_once()
     assert second == 0
     assert len(receiver.received) == 1  # NOT re-delivered.
-
-    # Quiet usage of datetime so import isn't unused on type-checker pass.
-    assert isinstance(datetime.now(UTC), datetime)
