@@ -23,9 +23,7 @@ compose обновлён в этой же PR'е.
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "0014_article_embeddings"
 down_revision: str | None = "0013_audit_log"
@@ -39,41 +37,31 @@ def upgrade() -> None:
     # loudly с "could not open extension control file".
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    op.create_table(
-        "article_embeddings",
-        sa.Column(
-            "article_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("articles.id", ondelete="CASCADE"),
-            primary_key=True,
-        ),
-        sa.Column("chunk_index", sa.Integer(), primary_key=True),
-        sa.Column(
-            "embedding_model_id",
-            sa.String(length=128),
-            primary_key=True,
-        ),
-        # Type `vector(1024)` — указываем raw SQL through `sa.text` чтобы
-        # alembic не пытался представить как pgvector Python type
-        # (alembic не знает про pgvector type registry).
-        sa.Column("embedding", sa.dialects.postgresql.BYTEA(), nullable=False),
-        sa.Column("char_start", sa.Integer(), nullable=False),
-        sa.Column("char_end", sa.Integer(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
+    # Raw SQL CREATE TABLE — alembic / SQLAlchemy не знают pgvector
+    # `vector(N)` type из коробки, и ALTER TABLE ... TYPE vector
+    # требует USING clause которое неудобно generate'ить. Raw SQL
+    # яснее и точнее: column type, FK action, PK structure explicit.
+    op.execute(
+        """
+        CREATE TABLE article_embeddings (
+            article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+            chunk_index INTEGER NOT NULL,
+            embedding_model_id VARCHAR(128) NOT NULL,
+            embedding vector(1024) NOT NULL,
+            char_start INTEGER NOT NULL,
+            char_end INTEGER NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (article_id, chunk_index, embedding_model_id)
+        )
+        """
     )
-    # Заменяем placeholder BYTEA column на real vector(1024) — SQLAlchemy
-    # column reflection через alembic не знает про pgvector type, поэтому
-    # raw SQL.
-    op.execute("ALTER TABLE article_embeddings ALTER COLUMN embedding TYPE vector(1024)")
+    op.execute(
+        "COMMENT ON TABLE article_embeddings IS 'article chunk embeddings (ADR-0010, #126)'"
+    )
 
-    # HNSW index — основной retrieval путь. CONCURRENTLY не используем
-    # в migration (alembic open's transaction; CONCURRENTLY требует
-    # autocommit). Initial scale low, online rebuild — будущая optimization.
+    # HNSW index — основной retrieval путь. CONCURRENTLY не используем в
+    # migration (alembic open's transaction; CONCURRENTLY требует
+    # autocommit). Initial scale low — online rebuild будущая optimization.
     op.execute(
         "CREATE INDEX ix_article_embeddings_hnsw "
         "ON article_embeddings USING hnsw (embedding vector_cosine_ops) "
@@ -81,7 +69,7 @@ def upgrade() -> None:
     )
 
     # Index для model bump scans ("какие articles ещё не embedded под
-    # new model?").
+    # new model?"). B-tree default.
     op.create_index(
         "ix_article_embeddings_article_model",
         "article_embeddings",
