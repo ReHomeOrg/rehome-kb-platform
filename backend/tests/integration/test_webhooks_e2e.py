@@ -433,22 +433,28 @@ async def test_chat_escalated_delivers_webhook(
     cleanup["webhook_ids"].append(UUID(wh["id"]))
     secret = wh["secret"]
 
-    # m2m JWT.sub — это service-account имя (НЕ UUID), поэтому
-    # `extract_chat_owner` отдаёт anon flow: server возвращает
-    # `X-Chat-Session-Token`, который мы должны слать обратно при escalate.
+    # `extract_chat_owner` парсит JWT.sub в UUID. Если m2m sub — UUID
+    # (зависит от Keycloak realm), session создаётся как owned-by-user
+    # и `X-Chat-Session-Token` НЕ возвращается. Если sub — non-UUID
+    # (service-account-...), это anon flow и токен возвращается.
+    # Поддерживаем оба сценария.
     sess_resp = kb_client.post(
         "/api/v1/chat/sessions",
         headers={"Authorization": f"Bearer {m2m_token}"},
     )
     assert sess_resp.status_code == 201, sess_resp.text
     session_id = sess_resp.json()["id"]
-    session_token = sess_resp.headers["X-Chat-Session-Token"]
     cleanup["chat_session_ids"].append(UUID(session_id))
+
+    esc_headers = {"Authorization": f"Bearer {m2m_token}"}
+    session_token = sess_resp.headers.get("X-Chat-Session-Token")
+    if session_token:
+        esc_headers["X-Chat-Session-Token"] = session_token
 
     esc_resp = kb_client.post(
         f"/api/v1/chat/sessions/{session_id}/escalate",
         json={"priority": "high"},
-        headers={"X-Chat-Session-Token": session_token},
+        headers=esc_headers,
     )
     assert esc_resp.status_code == 201, esc_resp.text
 
