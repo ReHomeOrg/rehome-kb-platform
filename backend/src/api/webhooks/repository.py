@@ -65,6 +65,20 @@ class WebhookRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_subscribers(self, event_type: str) -> list[Webhook]:
+        """Active webhooks подписанные на `event_type` (любого owner'а).
+
+        Используется dispatcher'ом при срабатывании trigger'а — события
+        системные, не привязаны к актёру (Stripe/GitHub pattern).
+        """
+        # `events @> ARRAY[event_type]` — array contains element (PG operator).
+        stmt = select(Webhook).where(
+            Webhook.deleted_at.is_(None),
+            Webhook.events.contains([event_type]),
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_id_and_owner(self, webhook_id: UUID, client_id: str) -> Webhook | None:
         """404 mask — owner mismatch ИЛИ deleted → None."""
         stmt = (
