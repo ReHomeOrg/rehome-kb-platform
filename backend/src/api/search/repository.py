@@ -29,10 +29,11 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.articles.models import Article
 from src.api.db import get_session
 from src.api.search.chunker import Chunk
 from src.api.search.models import ArticleEmbedding
@@ -99,6 +100,27 @@ class EmbeddingRepository:
         Caller отвечает за commit (consistent с другими репозиториями).
         """
         stmt = delete(ArticleEmbedding).where(ArticleEmbedding.article_id == article_id)
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)
+
+    async def delete_by_article_slug(self, slug: str) -> int:
+        """Same as `delete_by_article` но resolve'ит article_id по slug.
+
+        Используется когда вызывающий код имеет только slug (e.g.,
+        `DELETE /articles/{slug}` archive handler — он soft-delete'ит
+        article и не имеет id напрямую). Single round-trip subquery —
+        не extra DB call.
+
+        ADR-0003: subquery НЕ применяет `access_level` filter — это
+        downstream от `articles.repository.archive()` где writer-side
+        auth уже выполнен (writer не вызовет archive если не имеет access
+        к статье). Этот delete — clean-up уже-authorized операции.
+
+        Caller отвечает за commit.
+        """
+        subquery = select(Article.id).where(Article.slug == slug)
+        stmt = delete(ArticleEmbedding).where(ArticleEmbedding.article_id.in_(subquery))
         result = await self._session.execute(stmt)
         await self._session.flush()
         return int(result.rowcount or 0)

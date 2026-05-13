@@ -54,7 +54,9 @@ from src.api.auth.dependency import (
 )
 from src.api.auth.exceptions import UnauthorizedError
 from src.api.auth.scope import AccessLevel
+from src.api.config import get_settings
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
+from src.api.search.indexer import IndexerService, get_indexer_service
 from src.api.webhooks.dispatcher import (
     WebhookEventDispatcher,
     get_webhook_event_dispatcher,
@@ -143,6 +145,46 @@ async def _maybe_dispatch_article_status_event(
                 "archived_at": article.updated_at.isoformat(),
             },
         )
+
+
+async def _maybe_index_article(
+    indexer: IndexerService,
+    article: Any,
+) -> None:
+    """RAG indexer trigger (#130). Gated на `RAG_ENABLED` env flag.
+
+    Decision matrix:
+    - `status == 'PUBLISHED'` → index (upsert chunks).
+    - `status != 'PUBLISHED'` (DRAFT / ARCHIVED) → remove existing
+      embeddings, если были. Это важно: статья переход'нулась в DRAFT —
+      её нельзя retrieve'ить через RAG → cleanup.
+
+    `RAG_ENABLED=False` (default) → no-op.
+
+    Errors swallowed внутри IndexerService (article transaction уже
+    commit'нулась, RAG side-effect не должен fail'ить request).
+    """
+    if not get_settings().rag_enabled:
+        return
+    if article.status == "PUBLISHED":
+        await indexer.index_article(
+            article_id=article.id,
+            body_markdown=article.body_markdown,
+        )
+    else:
+        await indexer.remove_article(article.id)
+
+
+async def _maybe_remove_article_by_slug(
+    indexer: IndexerService,
+    slug: str,
+) -> None:
+    """RAG indexer slug-based remove (DELETE handler — id не доступен).
+    Same gating semantics что и `_maybe_index_article`.
+    """
+    if not get_settings().rag_enabled:
+        return
+    await indexer.remove_article_by_slug(slug)
 
 
 router = APIRouter(prefix="/articles", tags=["Articles"])
@@ -295,6 +337,7 @@ async def create_article(
     idempotency: IdempotencyResult = Depends(process_idempotency_key),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    indexer: IndexerService = Depends(get_indexer_service),
 ) -> Any:
     """Создаёт статью.
 
@@ -349,6 +392,8 @@ async def create_article(
 
     # E5.3 #91: fire webhook event если создаём сразу PUBLISHED.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=None)
+    # ADR-0010 #130: RAG indexer (gated на RAG_ENABLED).
+    await _maybe_index_article(indexer, article)
 
     location = f"/api/v1/articles/{article.slug}"
     response.headers["Location"] = location
@@ -395,6 +440,7 @@ async def replace_article(
     repo: ArticleRepository = Depends(get_article_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    indexer: IndexerService = Depends(get_indexer_service),
 ) -> ArticleResponse:
     """Полностью заменяет статью.
 
@@ -463,6 +509,8 @@ async def replace_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    # ADR-0010 #130: RAG indexer.
+    await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
 
 
@@ -489,6 +537,7 @@ async def archive_article(
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    indexer: IndexerService = Depends(get_indexer_service),
 ) -> Response:
     """Soft-delete: переводит статью в `status='ARCHIVED'` (не удаляет из БД).
 
@@ -526,6 +575,9 @@ async def archive_article(
             "was_access_level": was_access_level,
         },
     )
+    # ADR-0010 #130: RAG indexer — archive means article больше не
+    # retrieve'ится. Slug-based variant (id не доступен в archive handler'е).
+    await _maybe_remove_article_by_slug(indexer, slug)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -627,6 +679,7 @@ async def patch_article(
     repo: ArticleRepository = Depends(get_article_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    indexer: IndexerService = Depends(get_indexer_service),
 ) -> ArticleResponse:
     """Partial-update: меняет только переданные поля.
 
@@ -672,6 +725,7 @@ async def patch_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
 
 
