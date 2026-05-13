@@ -5,6 +5,8 @@
 для smoke-теста после `make run`).
 """
 
+from typing import Literal
+
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -66,6 +68,12 @@ class Settings(BaseSettings):
     # MetricsMiddleware всегда работает (counter/histogram дешёвые); только
     # эндпоинт gate'ится.
     metrics_enabled: bool = Field(default=False, alias="METRICS_ENABLED")
+
+    # Log format (#110): `"text"` (default) — uvicorn-style для dev;
+    # `"json"` — JSON-line per record для prod log aggregator'ов (Loki/ELK).
+    # Literal'ом, чтобы pydantic-settings fail-fast на typo (LOG_FORMAT=jsno
+    # → ValidationError на startup, а не silent fallback).
+    log_format: Literal["text", "json"] = Field(default="text", alias="LOG_FORMAT")
 
     model_config = SettingsConfigDict(
         env_file=None,
