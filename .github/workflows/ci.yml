@@ -50,6 +50,11 @@ jobs:
           file: backend/coverage.xml
           fail_ci_if_error: false
 
+      # #114: Dockerfile smoke build — ловит регрессии layer caching,
+      # missing files, non-root user. Не push'аем — это integration job.
+      - name: Build Docker image (smoke)
+        run: docker build -t kb-api:ci .
+
   # ============================================================
   # Frontend: TypeScript / Next.js
   # ============================================================
