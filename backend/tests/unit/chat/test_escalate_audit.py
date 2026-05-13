@@ -135,7 +135,7 @@ def test_escalate_does_not_leak_reason_in_audit(
     override_repo.return_value = _make_escalation(session.id)
 
     token = make_jwt(roles=["tenant"], sub=str(uuid4()))
-    client.post(
+    resp = client.post(
         f"/api/v1/chat/sessions/{session.id}/escalate",
         json={
             "reason": "Содержит ПДн: телефон +7-916-123-45-67",
@@ -143,6 +143,8 @@ def test_escalate_does_not_leak_reason_in_audit(
         },
         headers={"Authorization": f"Bearer {token}"},
     )
+    assert resp.status_code == 201
+    audit_mock.assert_awaited_once()
     metadata = audit_mock.call_args.kwargs["metadata"]
     assert "reason" not in metadata
     assert "+7-916" not in str(metadata)

@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from src.api.audit import (
     ACTION_CHAT_ESCALATED,
+    ANON_ACTOR_TOKEN_PREFIX_LEN,
     RESOURCE_CHAT_SESSION,
     AuditRepository,
     get_audit_repository,
@@ -381,7 +382,11 @@ async def post_escalate(
     # E4.x #104: audit trail. Actor:
     #   - JWT sub (UUID) для authenticated пользователей.
     #   - "anon:<session_token-prefix>" для anon-flow (нет PII в audit).
-    actor_sub = str(user_id) if user_id is not None else f"anon:{str(session_token)[:8]}"
+    actor_sub = (
+        str(user_id)
+        if user_id is not None
+        else f"anon:{str(session_token)[:ANON_ACTOR_TOKEN_PREFIX_LEN]}"
+    )
     await audit_repo.record(
         actor_sub=actor_sub,
         action=ACTION_CHAT_ESCALATED,
