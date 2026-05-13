@@ -24,3 +24,7 @@ ACTION_WEBHOOKS_TESTED: Final = "webhooks.tested"
 
 # Chat actions.
 ACTION_CHAT_ESCALATED: Final = "chat.escalated"
+
+# Anon chat actor format: `"anon:" + session_token[:N]`. 8 hex chars = 32 bits
+# of entropy — достаточно для audit uniqueness, минимально раскрывает токен.
+ANON_ACTOR_TOKEN_PREFIX_LEN: Final = 8

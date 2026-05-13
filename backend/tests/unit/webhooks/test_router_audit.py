@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -10,6 +10,10 @@ from fastapi.testclient import TestClient
 
 from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.main import app
+from src.api.webhooks.delivery_repository import (
+    WebhookDeliveryRepository,
+    get_delivery_repository,
+)
 from src.api.webhooks.models import Webhook
 from src.api.webhooks.repository import WebhookRepository, get_webhook_repository
 
@@ -44,7 +48,6 @@ def override_create() -> Iterator[AsyncMock]:
     create = AsyncMock(return_value=_make_webhook())
     repo = WebhookRepository.__new__(WebhookRepository)
     repo.create = create  # type: ignore[method-assign]
-    repo.soft_delete = AsyncMock(return_value=False)  # type: ignore[method-assign]
     app.dependency_overrides[get_webhook_repository] = lambda: repo
     yield create
     app.dependency_overrides.pop(get_webhook_repository, None)
@@ -60,8 +63,6 @@ def test_post_writes_webhooks_created_audit(
     audit_mock: AsyncMock,
     override_create: AsyncMock,
 ) -> None:
-    from unittest.mock import patch
-
     token = make_jwt(roles=["staff_admin"], sub="alice-sub")
     with patch("src.api.webhooks.router.validate_webhook_url", return_value=None):
         resp = client.post(
@@ -89,11 +90,9 @@ def test_post_does_not_leak_secret_in_audit(
     override_create: AsyncMock,
 ) -> None:
     """ФЗ-152: secret НЕ должен попадать в audit metadata."""
-    from unittest.mock import patch
-
     token = make_jwt(roles=["staff_admin"], sub="alice-sub")
     with patch("src.api.webhooks.router.validate_webhook_url", return_value=None):
-        client.post(
+        resp = client.post(
             "/api/v1/webhooks",
             json={
                 "url": "https://example.com/hook",
@@ -102,6 +101,8 @@ def test_post_does_not_leak_secret_in_audit(
             },
             headers={"Authorization": f"Bearer {token}"},
         )
+    assert resp.status_code == 201
+    audit_mock.assert_awaited_once()
     metadata = audit_mock.call_args.kwargs["metadata"]
     assert "secret" not in metadata
     assert "super-secret-token-xxx" not in str(metadata)
@@ -183,11 +184,6 @@ def test_test_writes_webhooks_tested_audit(
     make_jwt: Callable[..., str],
     audit_mock: AsyncMock,
 ) -> None:
-    from src.api.webhooks.delivery_repository import (
-        WebhookDeliveryRepository,
-        get_delivery_repository,
-    )
-
     webhook = _make_webhook()
     wh_repo = WebhookRepository.__new__(WebhookRepository)
     wh_repo.get_by_id_and_owner = AsyncMock(return_value=webhook)  # type: ignore[method-assign]
