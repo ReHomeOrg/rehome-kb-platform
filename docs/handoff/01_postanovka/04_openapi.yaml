@@ -712,11 +712,7 @@ paths:
           - html
       responses:
         '302':
-          description: |
-            Redirect на signed URL. **НЕ реализовано в текущем backend**:
-            kb-files эпик пока не landed (см. описание endpoint'а). Backend
-            сейчас возвращает 501; этот response остаётся в spec'е как
-            целевое поведение после kb-files.
+          description: Redirect на signed URL (target-поведение после kb-files).
           headers:
             Location:
               schema:
@@ -725,7 +721,8 @@ paths:
         '501':
           description: |
             Not Implemented — kb-files epic не landed. Текущее состояние
-            backend'а до завершения epic'а (Issue #56 / #59).
+            backend'а до завершения epic'а (Issue #56 / #59). Полное
+            обоснование — в `description` operation'а выше.
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/premises-cards/{premises_id}:
