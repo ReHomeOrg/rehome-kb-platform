@@ -1,5 +1,7 @@
 """Unit tests for paragraph chunker (#128)."""
 
+import pytest
+
 from src.api.search.chunker import (
     MAX_CHUNK_CHARS,
     OVERLAP_CHARS,
@@ -80,9 +82,8 @@ def test_overlap_chars_constant_sane() -> None:
 def test_chunk_dataclass_frozen() -> None:
     """`Chunk` immutable — caller не сможет случайно mutate."""
     c = Chunk(text="x", char_start=0, char_end=1)
-    try:
+    # `pytest.raises` вместо try/except/pass — последний поймал бы
+    # anti-crutches CI check (CLAUDE.md §5: "except: pass — кардинальный
+    # костыль"). Здесь exception expected, но pytest.raises clearer.
+    with pytest.raises((AttributeError, TypeError)):
         c.text = "y"  # type: ignore[misc]
-    except (AttributeError, TypeError):
-        pass
-    else:
-        raise AssertionError("Chunk должен быть frozen")
