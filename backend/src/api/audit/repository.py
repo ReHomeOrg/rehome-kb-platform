@@ -41,6 +41,8 @@ class AuditRepository:
         content / PII (body_markdown, title, password, паспорт и т.п.) —
         только action-level state (slug, access_level, status deltas).
         """
+        # `audit_metadata` Python attribute → `metadata` DB column. Rename
+        # обходит clash с `Base.metadata` (SQLAlchemy declarative reserves it).
         row = AuditLog(
             actor_sub=actor_sub,
             action=action,
