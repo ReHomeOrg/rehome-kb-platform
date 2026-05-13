@@ -39,6 +39,14 @@ from src.api.articles.schemas import (
     SearchHit,
     SearchInput,
 )
+from src.api.audit import (
+    ACTION_ARTICLES_ARCHIVED,
+    ACTION_ARTICLES_CREATED,
+    ACTION_ARTICLES_UPDATED,
+    RESOURCE_ARTICLE,
+    AuditRepository,
+    get_audit_repository,
+)
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_access_level,
@@ -286,6 +294,7 @@ async def create_article(
     repo: ArticleRepository = Depends(get_article_repository),
     idempotency: IdempotencyResult = Depends(process_idempotency_key),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> Any:
     """Создаёт статью.
 
@@ -321,13 +330,21 @@ async def create_article(
 
     article = await repo.create(payload, actor_sub=claims["sub"])
 
-    # NB: audit log вне транзакции — best-effort на E4.1. Risk
-    # документирован в Issue #27 / Plan; mitigation для compliance —
-    # E4.x DB-таблица audit_log.
+    # NB: audit log пишется в отдельную транзакцию ПОСЛЕ commit'а article'а
+    # (article repo commit'ит внутри). Crash window между commit'ами ещё
+    # существует — strict outbox требует repo refactor (отдельный backlog).
+    # Legacy stdout logger.info оставляем для дебага/grep'а.
     log_article_created(
         actor_sub=claims["sub"],
         slug=article.slug,
         access_level=article.access_level,
+    )
+    await audit_repo.record(
+        actor_sub=claims["sub"],
+        action=ACTION_ARTICLES_CREATED,
+        resource_type=RESOURCE_ARTICLE,
+        resource_id=article.slug,
+        metadata={"access_level": article.access_level},
     )
 
     # E5.3 #91: fire webhook event если создаём сразу PUBLISHED.
@@ -377,6 +394,7 @@ async def replace_article(
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> ArticleResponse:
     """Полностью заменяет статью.
 
@@ -430,6 +448,19 @@ async def replace_article(
         old_status=old_status,
         new_status=article.status,
     )
+    await audit_repo.record(
+        actor_sub=claims["sub"],
+        action=ACTION_ARTICLES_UPDATED,
+        resource_type=RESOURCE_ARTICLE,
+        resource_id=article.slug,
+        metadata={
+            "old_access_level": old_access_level,
+            "new_access_level": article.access_level,
+            "old_status": old_status,
+            "new_status": article.status,
+            "via": "PUT",
+        },
+    )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
     return ArticleResponse.model_validate(article)
@@ -457,6 +488,7 @@ async def archive_article(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> Response:
     """Soft-delete: переводит статью в `status='ARCHIVED'` (не удаляет из БД).
 
@@ -483,6 +515,16 @@ async def archive_article(
         slug=slug,
         was_status=was_status,
         was_access_level=was_access_level,
+    )
+    await audit_repo.record(
+        actor_sub=claims["sub"],
+        action=ACTION_ARTICLES_ARCHIVED,
+        resource_type=RESOURCE_ARTICLE,
+        resource_id=slug,
+        metadata={
+            "was_status": was_status,
+            "was_access_level": was_access_level,
+        },
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -584,6 +626,7 @@ async def patch_article(
     _staff_required: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: ArticleRepository = Depends(get_article_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ) -> ArticleResponse:
     """Partial-update: меняет только переданные поля.
 
@@ -613,6 +656,19 @@ async def patch_article(
         new_access_level=article.access_level,
         old_status=old_status,
         new_status=article.status,
+    )
+    await audit_repo.record(
+        actor_sub=claims["sub"],
+        action=ACTION_ARTICLES_UPDATED,
+        resource_type=RESOURCE_ARTICLE,
+        resource_id=article.slug,
+        metadata={
+            "old_access_level": old_access_level,
+            "new_access_level": article.access_level,
+            "old_status": old_status,
+            "new_status": article.status,
+            "via": "PATCH",
+        },
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)

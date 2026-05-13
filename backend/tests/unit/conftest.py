@@ -134,6 +134,25 @@ def test_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 @pytest.fixture(autouse=True)
+def _no_op_audit_repository() -> Iterator[None]:
+    """E4.x #102: глобальный no-op AuditRepository для unit-тестов.
+
+    Article router endpoints depend на audit_repo (через DB session).
+    В unit-тестах DB нет, поэтому подменяем на no-op. Тесты, проверяющие
+    audit-вызовы явно, делают свой override.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.audit.repository import AuditRepository, get_audit_repository
+
+    noop = MagicMock(spec=AuditRepository)
+    noop.record = AsyncMock(return_value=None)
+    app.dependency_overrides[get_audit_repository] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_audit_repository, None)
+
+
+@pytest.fixture(autouse=True)
 def _no_op_webhook_dispatcher() -> Iterator[None]:
     """E5.3 #91: глобальный no-op WebhookEventDispatcher для unit-тестов.
 
