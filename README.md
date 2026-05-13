@@ -62,22 +62,99 @@ Qdrant, MinIO) разворачиваются через `infra/docker-compose.y
 доступны только Keycloak + Postgres backend для Keycloak (E1.3.1, остальное
 по мере прохождения эпиков):
 
+### Требования
+
+- `docker` + `docker compose` v2.
+- `sops` ≥ 3.9 + `age` (см. ADR-0009 secrets management) — для расшифровки secrets.
+- `python` 3.12 / `node` 20 — для backend / frontend.
+- `make` (обёртки для daily-dev commands).
+
+### Установка sops + age
+
 ```bash
-# 1. Запустить Keycloak
-cd infra && docker compose up -d keycloak postgres-keycloak
-# (подробности и smoke-test: infra/keycloak/README.md)
+# macOS:
+brew install sops age
 
-# 2. Запустить backend (FastAPI)
-cd backend && make install && make run
-# Endpoint: http://localhost:8000/api/v1/health
-
-# 3. Запустить frontend (Next.js)
-cd frontend && make install && make dev
-# UI: http://localhost:3000
+# Ubuntu/Debian:
+sudo apt-get install age
+sudo curl -L https://github.com/getsops/sops/releases/latest/download/sops-v3.9.1.linux.amd64 -o /usr/local/bin/sops
+sudo chmod +x /usr/local/bin/sops
 ```
 
-Полная локальная разработка (с миграциями, mock-сервером OpenAPI, тестами)
-— по мере добавления соответствующих модулей.
+### Onboarding (первый запуск)
+
+1. **Получите dev age private key** у Architect'а (DM / 1Password /
+   физический exchange — НЕ через публичные каналы). Положите в
+   `~/.config/sops/age/keys.txt` (стандартный путь, sops читает без
+   дополнительной конфигурации).
+
+2. **Decrypt dev secrets → `.env.local`** (в repo root, gitignored, mode 600):
+
+   ```bash
+   make -C infra decrypt-dev
+   ```
+
+   Helper-target проверяет sops+age + age key reachable; fail'ится loudly
+   на любую проблему вместо silent fallback.
+
+3. **Запустите infra stack:**
+
+   ```bash
+   make -C infra up
+   # Сервисы:
+   #   Keycloak  → http://localhost:8080
+   #   Postgres  → localhost:5432
+   ```
+
+4. **Backend:**
+
+   ```bash
+   cd backend
+   make install
+   make migrate    # alembic upgrade head
+   make run        # uvicorn → http://localhost:8000/api/v1/health
+   ```
+
+5. **Frontend:**
+
+   ```bash
+   cd frontend
+   make install
+   make dev        # next dev → http://localhost:3000
+   ```
+
+### Daily-dev cheat sheet
+
+```bash
+make -C infra up                       # старт compose stack
+make -C infra down                     # стоп
+make -C infra logs SERVICE=keycloak    # tail логов
+make -C infra edit-dev                 # in-place sops edit dev secrets
+make -C infra encrypt-dev FILE=...     # добавить новые secrets из plain yaml
+```
+
+### Secrets management
+
+См. [ADR-0009](docs/adr/0009-secrets-management.md) и
+[deploy/secrets/README.md](deploy/secrets/README.md). Кратко:
+
+- Plain-text `.env*` — **никогда** в git (`.gitignore` enforce'ит).
+- Все environment secrets живут encrypted в `deploy/secrets/<env>.enc.yaml` (SOPS + age).
+- Compose `${VAR:?required}` для secrets — startup fail'ится fast если
+  variable не выставлена (no silent fallback на embedded passwords).
+- Age private key custody, rotation policy — issue
+  [#118](https://github.com/rehome-one/rehome-kb-platform/issues/118).
+
+### Без docker-compose
+
+Backend unit-тесты не требуют compose:
+
+```bash
+cd backend && make install && make test
+```
+
+Integration tests требуют compose + uvicorn (см. CI `Integration (Keycloak)`
+job в `.github/workflows/ci.yml`).
 
 ## Тестирование
 
