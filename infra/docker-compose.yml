@@ -5,10 +5,20 @@
 #   - keycloak          — SSO (порты 8080, 9000)
 #   - postgres-kb       — БД для kb-API (articles/...) на порту 5432
 #
-# Запуск: cd infra && docker compose up -d
-# Запуск только нужных: docker compose up -d postgres-kb
+# Запуск (ADR-0009 secrets management): через `infra/Makefile`:
+#     make -C infra decrypt-dev   # deploy/secrets/dev.enc.yaml → .env.local
+#     make -C infra up            # docker compose --env-file .env.local up -d
+#
+# Direct compose также работает если env vars выставлены (CI / advanced):
+#     docker compose --env-file ../.env.local up -d
+#
 # Документация: infra/keycloak/README.md
-# ADR: docs/adr/0007-keycloak-realm-structure.md, docs/adr/0008-orm-sqlalchemy-in-gateway.md
+# ADR: 0007 (Keycloak), 0008 (ORM), 0009 (secrets).
+#
+# ADR-0009: secrets используют `${VAR:?required}` syntax — compose FAILS
+# fast если variable не выставлена (никакого silent fallback'а на embedded
+# dev passwords). Non-secrets (DB names, usernames, ports) сохраняют
+# `:-default` — это config, не secret.
 #
 # Production deployment — отдельный Issue Phase 2 (TLS, HA, prod credentials).
 
@@ -19,7 +29,8 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_KEYCLOAK_DB:-keycloak}
       POSTGRES_USER: ${POSTGRES_KEYCLOAK_USER:-keycloak}
-      POSTGRES_PASSWORD: ${POSTGRES_KEYCLOAK_PASSWORD:-keycloak}
+      # SECRET — required, no default.
+      POSTGRES_PASSWORD: ${POSTGRES_KEYCLOAK_PASSWORD:?POSTGRES_KEYCLOAK_PASSWORD required (см. ADR-0009 + make decrypt-dev)}
     volumes:
       - postgres-keycloak-data:/var/lib/postgresql/data
     healthcheck:
@@ -36,9 +47,11 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/${POSTGRES_KEYCLOAK_DB:-keycloak}
       KC_DB_USERNAME: ${POSTGRES_KEYCLOAK_USER:-keycloak}
-      KC_DB_PASSWORD: ${POSTGRES_KEYCLOAK_PASSWORD:-keycloak}
+      # SECRET (взято из postgres-keycloak же)
+      KC_DB_PASSWORD: ${POSTGRES_KEYCLOAK_PASSWORD:?POSTGRES_KEYCLOAK_PASSWORD required}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # SECRET — admin console password.
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD required (см. ADR-0009)}
       KC_HEALTH_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
@@ -68,7 +81,8 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_KB_DB:-rehome_kb}
       POSTGRES_USER: ${POSTGRES_KB_USER:-kb}
-      POSTGRES_PASSWORD: ${POSTGRES_KB_PASSWORD:-kb}
+      # SECRET — kb application database password.
+      POSTGRES_PASSWORD: ${POSTGRES_KB_PASSWORD:?POSTGRES_KB_PASSWORD required (см. ADR-0009 + make decrypt-dev)}
     ports:
       - "5432:5432"
     volumes:
