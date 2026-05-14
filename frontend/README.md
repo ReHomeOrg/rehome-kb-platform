@@ -161,9 +161,10 @@ frontend/
 
 ## Backlog после landing UI epic
 
-- **Playwright E2E** — foundation landed в #151 (smoke tests для /login
-  + 404). Backend-зависимые сценарии (auth flow, article view, chat
-  message, document detail) + CI integration с full stack — follow-up.
+- **Playwright E2E** — foundation landed (#151 smoke tests для /login +
+  404; #156 CI job `E2E (Playwright smoke)` с browser cache). Backend-
+  зависимые сценарии (auth flow, article view, chat message, document
+  detail) — follow-up с docker compose stack.
 - **Dark mode** — Tailwind dark: prefix variants.
 - **a11y review** — axe-core в CI, aria-labels checks.
 - **i18n** — пока только русский (single language).
