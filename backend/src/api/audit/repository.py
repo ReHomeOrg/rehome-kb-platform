@@ -4,12 +4,17 @@ Single method `record(...)` — INSERT row в текущую AsyncSession, БЕ�
 commit'а. Caller commit'ит вместе с trigger'ом — это даёт at-least-once
 гарантию: либо обе записи зафиксированы, либо обе rollback'нулись.
 
+`list_records(...)` — read-side search для compliance UI (#163,
+ФЗ-152 Subject Access Request).
+
 ADR-0008 Repository pattern.
 """
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.audit.models import AuditLog
@@ -53,6 +58,48 @@ class AuditRepository:
         self._session.add(row)
         await self._session.flush()
         return row
+
+    async def list_records(
+        self,
+        *,
+        actor_sub: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        action: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AuditLog]:
+        """Filtered query для compliance UI (#163).
+
+        Каждый фильтр — optional; combined через AND. Используются
+        composite indexes (ix_audit_log_actor_created,
+        ix_audit_log_resource_created) — date range scan'ы должны быть
+        efficient.
+
+        Ordering: `created_at DESC` (новейшие первые — типичный compliance
+        review pattern).
+
+        Offset pagination (вместо cursor) — для admin UI с table view
+        + jump-to-page. Audit log read low-volume; cursor overkill.
+        """
+        stmt = select(AuditLog)
+        if actor_sub is not None:
+            stmt = stmt.where(AuditLog.actor_sub == actor_sub)
+        if resource_type is not None:
+            stmt = stmt.where(AuditLog.resource_type == resource_type)
+        if resource_id is not None:
+            stmt = stmt.where(AuditLog.resource_id == resource_id)
+        if action is not None:
+            stmt = stmt.where(AuditLog.action == action)
+        if since is not None:
+            stmt = stmt.where(AuditLog.created_at >= since)
+        if until is not None:
+            stmt = stmt.where(AuditLog.created_at < until)
+        stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
 
 
 def get_audit_repository(
