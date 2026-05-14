@@ -89,12 +89,23 @@ export default async function AuditPage({
     <>
       <Nav />
       <main className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Compliance trail ФЗ-152. Каждое write-действие в kb-* модулях
-            зафиксировано здесь. Read-only.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Compliance trail ФЗ-152. Каждое write-действие в kb-*
+              модулях зафиксировано здесь. Read-only.
+            </p>
+          </div>
+          {/* CSV export (#172) — same filters as JSON view; browser
+              triggers download через Content-Disposition attachment.
+              Anti-DoS hard cap 10000 rows backend-side. */}
+          <a
+            href={`/api/kb/api/v1/audit-log/export.csv?${baseParams.toString()}`}
+            className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+          >
+            ↓ Экспорт CSV
+          </a>
         </header>
         <AuditFiltersBar
           initial={{
