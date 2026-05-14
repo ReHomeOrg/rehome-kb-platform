@@ -23,6 +23,7 @@ Result type: `RetrievalHit` (re-used от repository).
 """
 
 import logging
+import time
 from collections.abc import Sequence
 from typing import Final
 from uuid import UUID
@@ -33,6 +34,11 @@ from src.api.articles.repository import ArticleRepository, get_article_repositor
 from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
 from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
+from src.api.search.metrics import (
+    RETRIEVAL_DURATION_SECONDS,
+    RETRIEVAL_HITS,
+    RETRIEVAL_TOTAL,
+)
 from src.api.search.repository import (
     EmbeddingRepository,
     RetrievalHit,
@@ -83,8 +89,11 @@ class RetrievalService:
         Empty query / no access levels → empty list (defensive).
         """
         if not query.strip() or not access_levels:
+            RETRIEVAL_TOTAL.labels(has_results="no").inc()
+            RETRIEVAL_HITS.observe(0)
             return []
 
+        started = time.perf_counter()
         # 1. Embed query.
         embeddings = await self._provider.embed([query])
         query_vector = embeddings[0]
@@ -110,7 +119,11 @@ class RetrievalService:
         )
 
         # 4. RRF fusion.
-        return self._rrf_fuse(vector_hits, bm25_hits, top_k=top_k)
+        result = self._rrf_fuse(vector_hits, bm25_hits, top_k=top_k)
+        RETRIEVAL_DURATION_SECONDS.observe(time.perf_counter() - started)
+        RETRIEVAL_HITS.observe(len(result))
+        RETRIEVAL_TOTAL.labels(has_results="yes" if result else "no").inc()
+        return result
 
     @staticmethod
     def _rrf_fuse(

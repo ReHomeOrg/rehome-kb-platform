@@ -10,6 +10,7 @@ POST /messages, SSE, feedback, escalate — E3.3+.
 """
 
 import logging
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -29,6 +30,11 @@ from src.api.auth.dependency import get_current_access_levels, get_current_scope
 from src.api.auth.scope import AccessLevel, Scope
 from src.api.chat.llm import LLMMessage, LLMProvider, get_llm_provider
 from src.api.chat.llm.base import LLMRole
+from src.api.chat.metrics import (
+    MESSAGE_DURATION_SECONDS,
+    MESSAGES_TOTAL,
+    SESSIONS_CREATED_TOTAL,
+)
 from src.api.chat.owner import extract_chat_owner
 from src.api.chat.repository import ChatRepository, get_chat_repository
 from src.api.chat.schemas import (
@@ -104,6 +110,8 @@ async def create_session(
         scope=scope.value,
         context=context,
     )
+
+    SESSIONS_CREATED_TOTAL.labels(scope=scope.value).inc()
 
     if user_id is None:
         # Anon: возвращаем session_token в response header.
@@ -296,6 +304,9 @@ async def send_message(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    MESSAGES_TOTAL.labels(scope=session.scope).inc()
+    started = time.perf_counter()
+
     history = await repo.list_messages(session_id, user_id=user_id, session_token=session_token)
 
     # RAG retrieval (#136) — defensive, returns [] если disabled/empty/error.
@@ -309,7 +320,9 @@ async def send_message(
     citations = hits_to_citations(retrieved_chunks)
 
     if "text/event-stream" in accept.lower():
-        # SSE mode (E3.4).
+        # SSE mode (E3.4). Duration histogram не observed для SSE —
+        # генератор стримит после возврата handler'а; точное end-time
+        # потребовало бы wrap'а _stream_message_events. Backlog.
         return StreamingResponse(
             _stream_message_events(
                 session_id,
@@ -340,6 +353,7 @@ async def send_message(
         token_count=response.token_count,
         duration_ms=response.duration_ms,
     )
+    MESSAGE_DURATION_SECONDS.observe(time.perf_counter() - started)
     return ChatMessageResponse.from_model(assistant_msg)
 
 
