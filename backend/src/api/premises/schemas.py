@@ -62,6 +62,36 @@ class PremisesView(BaseModel):
     internal_data: dict[str, Any] | None = None
 
 
+class PremisesSearchHit(BaseModel):
+    """FTS search result hit — identification subset + relevance score."""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    id: UUID
+    slug: str
+    address: str
+    postal_code: str | None = None
+    cadastral_number: str | None = None
+    status: str
+    score: float = Field(ge=0)
+
+
+class PremisesSearchResponse(BaseModel):
+    """`POST /premises-cards/search` — список hits, no pagination
+    (top-N только, follow-up cursor если нужно)."""
+
+    data: list[PremisesSearchHit]
+
+
+class PremisesSearchInput(BaseModel):
+    """Body для POST /premises-cards/search."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    q: str = Field(min_length=1, max_length=500)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 class PremisesSummary(BaseModel):
     """Краткая карточка для list endpoint (без JSONB blocks).
 
