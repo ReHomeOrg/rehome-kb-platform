@@ -38,6 +38,9 @@ from src.api.premises.schemas import (
     PremisesInput,
     PremisesListResponse,
     PremisesPatch,
+    PremisesSearchHit,
+    PremisesSearchInput,
+    PremisesSearchResponse,
     PremisesSummary,
     PremisesView,
     project_for_scope,
@@ -117,6 +120,55 @@ async def list_premises_cards(
     return PremisesListResponse(
         data=[PremisesSummary.model_validate(r) for r in rows],
         pagination=PaginationInfo(cursor_next=next_cursor, has_more=has_more),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Search (#154) — Postgres FTS на address / cadastral / postal
+
+
+@router.post(
+    "/search",
+    response_model=PremisesSearchResponse,
+    summary="Полнотекстовый поиск карточек (Postgres FTS)",
+    responses={
+        422: {"description": "Невалидный body (q empty / too long)"},
+    },
+)
+async def search_premises_cards(
+    payload: PremisesSearchInput,
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: PremisesRepository = Depends(get_premises_repository),
+) -> PremisesSearchResponse:
+    """`POST /api/v1/premises-cards/search` — FTS по address + cadastral.
+
+    Russian language config — handles падежи / morfology. Score —
+    `ts_rank`; clip к 1.0 если ts_rank > 1 (theoretically возможно
+    на длинных query c повторяющимися словами). ADR-0003: status
+    filter в SQL (anon видит PUBLISHED + RENTED, STAFF — все).
+    """
+    # Whitespace-only — Pydantic min_length=1 пропустит, явный 422.
+    if not payload.q.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="q must not be whitespace-only",
+        )
+    rows = await repo.search(payload.q, access_levels, limit=payload.limit)
+    return PremisesSearchResponse(
+        data=[
+            PremisesSearchHit(
+                id=card.id,
+                slug=card.slug,
+                address=card.address,
+                postal_code=card.postal_code,
+                cadastral_number=card.cadastral_number,
+                status=card.status,
+                # ts_rank clipped в [0, 1] для OpenAPI consistency
+                # (FTS rank теоретически > 1 на длинных query).
+                score=min(max(score, 0.0), 1.0),
+            )
+            for card, score in rows
+        ]
     )
 
 
