@@ -209,6 +209,122 @@ def test_audit_no_filters_returns_recent_50(
     assert kwargs["resource_type"] is None
 
 
+# ---------------------------------------------------------------------------
+# CSV export (#172)
+
+
+def test_csv_export_requires_legal(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """tenant scope → 403 (no LEGAL)."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_csv_export_empty_returns_header_only(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Empty results → CSV с header row только (+ BOM)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    body = resp.text
+    # UTF-8 BOM prefix.
+    assert body.startswith("﻿")
+    lines = body.strip().split("\n")
+    assert len(lines) == 1  # header only
+    assert "created_at" in lines[0]
+    assert "actor_sub" in lines[0]
+
+
+def test_csv_export_serializes_rows(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    list_mock.return_value = [
+        _make_record(action="articles.created", resource_id="my-slug"),
+        _make_record(
+            action="articles.updated",
+            resource_id="x",
+            audit_metadata={"changed": ["title", "body"]},
+        ),
+    ]
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    body = resp.text
+    assert "articles.created" in body
+    assert "articles.updated" in body
+    assert "my-slug" in body
+    # Metadata serialized as single-line JSON (CSV escapes " → "").
+    assert '{""changed"":[""title"",""body""]}' in body
+
+
+def test_csv_export_filename_includes_timestamp(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    cd = resp.headers["content-disposition"]
+    assert 'filename="audit_log_' in cd
+    assert ".csv" in cd
+
+
+def test_csv_export_uses_max_limit(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Export endpoint passes CSV_EXPORT_MAX_ROWS limit (anti-DoS)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log/export.csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    kwargs = list_mock.call_args.kwargs
+    assert kwargs["limit"] == 10_000
+    assert kwargs["offset"] == 0
+
+
+def test_csv_export_filter_passthrough(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log/export.csv?actor_sub=u1&resource_type=article",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    kwargs = list_mock.call_args.kwargs
+    assert kwargs["actor_sub"] == "u1"
+    assert kwargs["resource_type"] == "article"
+
+
 @pytest.mark.asyncio
 async def test_repository_list_records_applies_filters() -> None:
     """Repository SQL inspection — verify фильтры попадают в bind params."""

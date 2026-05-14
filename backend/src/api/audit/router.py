@@ -1,21 +1,35 @@
-"""FastAPI router для `/api/v1/audit-log` (#163).
+"""FastAPI router для `/api/v1/audit-log` (#163, #172).
 
-Compliance search endpoint — ФЗ-152 Subject Access Request, forensic
+Compliance endpoints — ФЗ-152 Subject Access Request, forensic
 review, admin "что сделал user X". STAFF / LEGAL access tier.
 
 Audit log immutable — нет write endpoints (records создаются через
 `AuditRepository.record` из других router'ов, не через эту surface).
+
+Endpoints:
+- `GET /api/v1/audit-log` — JSON paginated search
+- `GET /api/v1/audit-log/export.csv` — CSV download (full filtered
+  result, до 10000 rows hard cap для anti-DoS)
 """
 
+import csv
+import io
+import json
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.audit.schemas import AuditListResponse, AuditRecordView
 from src.api.auth.dependency import require_access_level, require_authenticated
 from src.api.auth.scope import AccessLevel
+
+# Hard cap для CSV export — anti-DoS. 10k rows × ~500 bytes = ~5 MB,
+# acceptable для one-shot download. Дальнейшие compliance dumps —
+# через DB backup / pg_dump (operational, не API surface).
+CSV_EXPORT_MAX_ROWS = 10_000
 
 router = APIRouter(prefix="/audit-log", tags=["Audit"])
 
@@ -70,4 +84,78 @@ async def search_audit_log(
     return AuditListResponse(
         data=[AuditRecordView.model_validate(r) for r in rows],
         pagination={"limit": limit, "offset": offset, "count": len(rows)},
+    )
+
+
+@router.get(
+    "/export.csv",
+    summary="Export audit log as CSV (#172, LEGAL access)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Недостаточный scope"},
+        422: {"description": "Невалидный параметр"},
+    },
+)
+async def export_audit_log_csv(
+    actor_sub: str | None = Query(default=None, max_length=200),
+    resource_type: str | None = Query(default=None, max_length=32),
+    resource_id: str | None = Query(default=None, max_length=200),
+    action: str | None = Query(default=None, max_length=64),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    _legal_required: None = Depends(require_access_level(AccessLevel.LEGAL)),
+    repo: AuditRepository = Depends(get_audit_repository),
+) -> StreamingResponse:
+    """CSV download of filtered audit records.
+
+    Same фильтры что и JSON endpoint. Hard cap `CSV_EXPORT_MAX_ROWS`
+    (10000) для anti-DoS — caller должен narrow filters для дальнейших
+    chunks (или использовать DB backup).
+
+    Columns: `created_at,actor_sub,action,resource_type,resource_id,
+    metadata_json`. Metadata serialized как single-line JSON для
+    spreadsheet-safe handling.
+
+    Content-Disposition `attachment` triggers browser download.
+    Encoding: UTF-8 с BOM (Excel-compatible на Windows).
+    """
+    rows = await repo.list_records(
+        actor_sub=actor_sub,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        action=action,
+        since=since,
+        until=until,
+        limit=CSV_EXPORT_MAX_ROWS,
+        offset=0,
+    )
+
+    buf = io.StringIO()
+    # UTF-8 BOM для Excel — без BOM Excel decode'ит cyrillic как Cp1251.
+    buf.write("﻿")
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(
+        ["created_at", "actor_sub", "action", "resource_type", "resource_id", "metadata"]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r.created_at.isoformat(),
+                r.actor_sub,
+                r.action,
+                r.resource_type,
+                r.resource_id or "",
+                json.dumps(r.audit_metadata, ensure_ascii=False, separators=(",", ":")),
+            ]
+        )
+
+    filename = f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
     )
