@@ -8,6 +8,7 @@ Pin'аются по schema version для reproducibility.
 | Файл | Назначение |
 |---|---|
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
+| `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 
 ## kb-indexer dashboard
 
@@ -92,6 +93,63 @@ groups:
         annotations:
           summary: "kb-indexer p95 batch duration >60s"
           description: "HF provider degradation или batch_size too large"
+```
+
+## kb-webhooks dashboard
+
+**Назначение**: monitoring webhook delivery worker'а (E5.2). Combines
+metrics из `src/api/webhooks/metrics.py` (Cube W, #174).
+
+### Panels
+
+1. **Delivered rate (last)** — `rate(kb_webhook_deliveries_total{status="delivered"})`
+   stat. Baseline зависит от event volume; внезапный 0 при non-zero
+   retries → endpoint down.
+
+2. **Delivery rate by status (5m)** — `rate(kb_webhook_deliveries_total)`
+   broken by `status` label. Visualization: discriminate `delivered`
+   от `failed_4xx`/`failed_5xx`/`failed_network`.
+
+3. **Failure ratio (5m)** — `(failed_*) / (all)`. Thresholds:
+   green <1% / yellow 1-5% / red >5%. Spikes 100% при transient
+   subscriber outage норма.
+
+4. **Retries by event_type (5m)** — `rate(kb_webhook_retries_total)`.
+   Per-event_type breakdown показывает, какой downstream деградирует.
+
+5. **Delivery duration (p50/p95/p99, 5m, by event_type)** —
+   histogram quantiles. Baseline 50-200ms (LAN subscriber); p95 >5s
+   = subscriber slow или TLS handshake issue.
+
+### Suggested alerts
+
+```yaml
+groups:
+  - name: kb-webhooks
+    interval: 30s
+    rules:
+      - alert: KbWebhooksHighFailureRate
+        expr: |
+          sum(rate(kb_webhook_deliveries_total{status!="delivered"}[5m]))
+            / sum(rate(kb_webhook_deliveries_total[5m]))
+              > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-webhooks failure rate >5% за 10 минут"
+          description: "Check subscriber endpoints, network egress, DNS"
+
+      - alert: KbWebhooksSlowDelivery
+        expr: |
+          histogram_quantile(0.95,
+            sum by (event_type, le)
+              (rate(kb_webhook_delivery_duration_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-webhooks p95 delivery >5s для {{$labels.event_type}}"
 ```
 
 ## Backlog
