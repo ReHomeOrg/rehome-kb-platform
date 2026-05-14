@@ -1,0 +1,91 @@
+# reHome KB vault rotation reminders worker — Deployment (#170, #167).
+#
+# Daily scanner для `vault_secrets.expires_at` — emit'ит structured log
+# notifications. Reuses main API image (no heavy deps, в отличие от
+# kb-indexer); CMD overridden на `python -m src.workers.vault_reminders`.
+#
+# Prerequisites:
+# - Namespace `rehome-kb`
+# - Secret `kb-database` (тот же что у API gateway + indexer)
+# - Image `ghcr.io/rehome-one/kb-api:<digest>` (main backend, не
+#   индексер; vault reminders не требуют sentence-transformers)
+#
+# Apply:
+#   kubectl apply -f deploy/k8s/vault_reminders/
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kb-vault-reminders
+  namespace: rehome-kb
+  labels:
+    app.kubernetes.io/name: kb-vault-reminders
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: rehome-kb
+spec:
+  replicas: 1
+  # Single replica — idempotent scan (downstream sink дедуплицирует
+  # notification records); two replica'и удвоили бы log noise без
+  # benefit'а. Если масштабировать понадобится — `last_reminded_at`
+  # field + claim-based partitioning (см. backlog в #167).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kb-vault-reminders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kb-vault-reminders
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Daily scan finish'ится за <1s типично; небольшой grace.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: vault-reminders
+          # Использует main API image — vault_reminders worker не
+          # требует sentence-transformers (это просто SELECT + log).
+          # Indexer's heavy image оверкилл.
+          image: ghcr.io/rehome-one/kb-api@sha256:REPLACE_ME_AT_RELEASE
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "src.workers.vault_reminders"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kb-database
+                  key: DATABASE_URL
+            - name: VAULT_REMINDER_WINDOW_DAYS
+              value: "7"
+            - name: VAULT_REMINDER_SCAN_INTERVAL_SECONDS
+              value: "86400"  # 24h
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: LOG_FORMAT
+              value: "json"
+          resources:
+            # Worker idle ~24h, ~1s wake-up для scan. Minimal allocation.
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # Liveness — PID 1 alive. No HTTP endpoint, поэтому exec probe.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
