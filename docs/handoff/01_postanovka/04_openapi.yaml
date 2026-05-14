@@ -2968,6 +2968,117 @@ paths:
         '204':
           description: Disabled
 
+  /api/v1/vault/groups:
+    get:
+      tags: [Vault]
+      summary: List vault groups (user-membership filtered)
+      operationId: listVaultGroups
+      responses:
+        '200':
+          description: Группы пользователя
+        '401':
+          description: Не аутентифицирован
+    post:
+      tags: [Vault]
+      summary: Create group (auto-owner)
+      operationId: createVaultGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                description:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '201':
+          description: Группа создана; caller — auto-owner
+  /api/v1/vault/groups/{group_id}/members:
+    get:
+      tags: [Vault]
+      summary: List group members (must be member; non-member → 404)
+      operationId: listVaultGroupMembers
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Group не найдена ИЛИ caller — не member (anti-enumeration)
+    post:
+      tags: [Vault]
+      summary: Add member (owner-only)
+      operationId: addVaultGroupMember
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                role:
+                  type: string
+                  enum: [owner, member]
+                  default: member
+      responses:
+        '201':
+          description: Member added
+        '403':
+          description: Caller — не owner данной группы
+        '404':
+          description: Group / caller-membership absent
+        '409':
+          description: User уже member
+  /api/v1/vault/groups/{group_id}/members/{user_id}:
+    delete:
+      tags: [Vault]
+      summary: Remove member (owner-only; can't remove self)
+      operationId: removeVaultGroupMember
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Removed
+        '403':
+          description: Caller — не owner ИЛИ попытка removed себя (transfer
+            ownership first)
+        '404':
+          description: Group / member не найден
+
   /api/v1/audit-log:
     get:
       tags: [Audit]
