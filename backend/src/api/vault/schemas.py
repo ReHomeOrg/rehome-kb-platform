@@ -121,6 +121,32 @@ class VaultMeView(BaseModel):
     last_unlock_at: datetime | None = None
 
 
+class VaultTotpSetupInput(BaseModel):
+    """POST /vault/totp/setup body (#164).
+
+    Client генерит TOTP secret (RFC 6238) → encrypts under vault_key
+    (AES-256-GCM) → POSTs ciphertext. Zero-knowledge: server stores
+    opaque blob, не может decrypt / generate codes / verify.
+
+    TOTP enforcement на /unlock — client-side: must decrypt totp blob
+    + verify user code локально перед submitting auth_hash. Server
+    проверяет лишь что `totp_secret_encrypted` set (visible через
+    `has_totp` field в /vault/me).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    totp_secret_encrypted_b64: str
+
+    @field_validator("totp_secret_encrypted_b64")
+    @classmethod
+    def _v(cls, v: str) -> str:
+        # TOTP secret 32 bytes под AES-256-GCM ≈ 60-80 bytes ciphertext +
+        # 12 IV + 16 tag. 256 cap — headroom для recovery codes / metadata.
+        _decode_b64(v, 256, "totp_secret_encrypted")
+        return v
+
+
 class VaultUnlockResponse(BaseModel):
     """Unlock success → server возвращает 200 (для anti-bruteforce).
 
