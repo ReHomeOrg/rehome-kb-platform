@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.vault.models import VaultSecret
+from src.workers.vault_reminders.metrics import (
+    EMITTED_TOTAL,
+    SCAN_DURATION_SECONDS,
+    SCAN_ERRORS_TOTAL,
+    SCAN_TOTAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +82,7 @@ class VaultReminderWorker:
                 emitted = await self.run_once()
             except Exception:
                 logger.exception("vault_reminder.scan_failed")
+                SCAN_ERRORS_TOTAL.inc()
                 emitted = 0
             logger.info("vault_reminder.scan_done", extra={"emitted": emitted})
             # Sleep с interruption на stop signal.
@@ -88,35 +96,41 @@ class VaultReminderWorker:
         Query: SELECT secrets WHERE archived_at IS NULL AND expires_at
         BETWEEN now AND now + window. Только active (non-archived).
         """
-        async with self._session_factory() as session:
-            now = datetime.now(UTC)
-            deadline = now + self._window
-            stmt = (
-                select(VaultSecret)
-                .where(
-                    VaultSecret.archived_at.is_(None),
-                    VaultSecret.expires_at.isnot(None),
-                    VaultSecret.expires_at >= now,
-                    VaultSecret.expires_at < deadline,
+        SCAN_TOTAL.inc()
+        started = time.perf_counter()
+        try:
+            async with self._session_factory() as session:
+                now = datetime.now(UTC)
+                deadline = now + self._window
+                stmt = (
+                    select(VaultSecret)
+                    .where(
+                        VaultSecret.archived_at.is_(None),
+                        VaultSecret.expires_at.isnot(None),
+                        VaultSecret.expires_at >= now,
+                        VaultSecret.expires_at < deadline,
+                    )
+                    .order_by(VaultSecret.expires_at.asc())
                 )
-                .order_by(VaultSecret.expires_at.asc())
-            )
-            result = await session.execute(stmt)
-            rows = list(result.scalars().all())
-            for secret in rows:
-                assert secret.expires_at is not None  # mypy guard
-                days_until = (secret.expires_at - now).days
-                logger.info(
-                    "vault.reminder",
-                    extra={
-                        "secret_id": str(secret.id),
-                        "owner_id": str(secret.owner_id),
-                        "category": secret.category,
-                        "days_until_expiry": days_until,
-                        "expires_at": secret.expires_at.isoformat(),
-                    },
-                )
-            return len(rows)
+                result = await session.execute(stmt)
+                rows = list(result.scalars().all())
+                for secret in rows:
+                    assert secret.expires_at is not None  # mypy guard
+                    days_until = (secret.expires_at - now).days
+                    logger.info(
+                        "vault.reminder",
+                        extra={
+                            "secret_id": str(secret.id),
+                            "owner_id": str(secret.owner_id),
+                            "category": secret.category,
+                            "days_until_expiry": days_until,
+                            "expires_at": secret.expires_at.isoformat(),
+                        },
+                    )
+                    EMITTED_TOTAL.labels(category=secret.category).inc()
+                return len(rows)
+        finally:
+            SCAN_DURATION_SECONDS.observe(time.perf_counter() - started)
 
 
 def install_signal_handlers(

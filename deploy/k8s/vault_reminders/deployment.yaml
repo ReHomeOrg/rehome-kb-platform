@@ -66,10 +66,16 @@ spec:
               value: "7"
             - name: VAULT_REMINDER_SCAN_INTERVAL_SECONDS
               value: "86400"  # 24h
+            - name: VAULT_REMINDER_METRICS_PORT
+              value: "9101"  # Prometheus pull, #176 (indexer uses 9100)
             - name: LOG_LEVEL
               value: "INFO"
             - name: LOG_FORMAT
               value: "json"
+          ports:
+            - name: metrics
+              containerPort: 9101
+              protocol: TCP
           resources:
             # Worker idle ~24h, ~1s wake-up для scan. Minimal allocation.
             requests:
