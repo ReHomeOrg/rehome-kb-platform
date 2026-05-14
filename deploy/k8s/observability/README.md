@@ -7,6 +7,7 @@ Pin'аются по schema version для reproducibility.
 
 | Файл | Назначение |
 |---|---|
+| `kb-api-dashboard.json` | Grafana dashboard для kb-api gateway (Cube AA, #178) |
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 | `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
@@ -197,11 +198,57 @@ groups:
           description: "Check: kubectl logs -n rehome-kb deploy/kb-vault-reminders"
 ```
 
+## kb-api dashboard
+
+**Назначение**: monitoring API gateway HTTP-traffic. Metrics из
+`src/api/observability/metrics.py` (Cube #108 middleware).
+
+### Panels
+
+1. **Total RPS (5m)** — `sum(rate(http_requests_total))` stat.
+2. **5xx ratio (5m)** — `5xx / total` stat. Thresholds green <0.1%
+   / yellow 0.1-1% / red >1%.
+3. **Request rate by status class (5m)** — stacked timeseries по
+   1xx/2xx/3xx/4xx/5xx (label_replace status → status_class).
+4. **Request latency p50/p95/p99 (5m, all routes)** — histogram
+   quantiles aggregated.
+5. **Top 10 slowest routes (p95, 5m)** — `topk(10, ...)` highlights,
+   что нужно optimize first.
+6. **Top 10 routes by RPS (5m)** — capacity planning + hot paths.
+
+### Suggested alerts
+
+```yaml
+groups:
+  - name: kb-api
+    interval: 30s
+    rules:
+      - alert: KbApiHigh5xxRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m]))
+              > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "kb-api 5xx ratio >1% за 5 минут"
+          description: "Backend regression — check logs immediately"
+
+      - alert: KbApiSlowResponses
+        expr: |
+          histogram_quantile(0.95,
+            sum by (route, le)
+              (rate(http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-api p95 latency >2s для {{$labels.route}}"
+```
+
 ## Backlog
 
-- **Backend HTTP dashboard** — `http_requests_total` + `http_request_duration_seconds`
-  (Cube #108 metrics middleware). Defer until current production
-  baselines.
 - **Chat / RAG retrieval dashboard** — chat session count, SSE flow
   latency, retrieval hit rate.
 - **Vault audit dashboard** — unlock attempts (success/failed),
