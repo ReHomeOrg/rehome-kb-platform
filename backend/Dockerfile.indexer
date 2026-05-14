@@ -1,0 +1,83 @@
+# reHome KB indexer worker — production image (#149, ADR-0010 §Stage 1).
+#
+# Heavy variant of backend container: дополнительно устанавливает
+# requirements-rag.txt (sentence-transformers + PyTorch + transformers
+# ~1.5GB). Используется ТОЛЬКО для embedding worker'а (см.
+# src/workers/indexer/). Main API gateway использует обычный Dockerfile
+# с `EMBEDDING_PROVIDER=mock` пока worker не достигнет 100% coverage.
+#
+# Build: `docker build -f backend/Dockerfile.indexer -t kb-indexer backend/`
+# Run:   `docker run --rm -e DATABASE_URL=... -e EMBEDDING_PROVIDER=hf \
+#                -e RAG_ENABLED=true kb-indexer`
+#
+# Model weights (~2.3 GB intfloat/multilingual-e5-large) скачиваются
+# при первом старте через HuggingFace hub в `/home/app/.cache/huggingface/`.
+# Production: persistent volume mount или pre-baked layer.
+
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:d193c6f51a7dbd10395d6328de3a7edb0516fb0608ca138036576f574c3e07d2
+
+# ============================================================================
+# Stage 1: builder — installs both main + RAG deps
+# ============================================================================
+FROM ${PYTHON_IMAGE} AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+COPY requirements.txt requirements-rag.txt ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir -r requirements-rag.txt
+
+# ============================================================================
+# Stage 2: runtime
+# ============================================================================
+FROM ${PYTHON_IMAGE} AS runtime
+ARG PYTHON_IMAGE
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    # HF cache в writable home; persistent volume в проде.
+    HF_HOME=/home/app/.cache/huggingface \
+    # Anti-noise: HF telemetry off (ФЗ-152 + не нужны нам analytics).
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TRANSFORMERS_OFFLINE=0 \
+    # Worker default'ы — override через env per deployment.
+    INDEXER_BATCH_SIZE=10 \
+    INDEXER_POLL_INTERVAL_SECONDS=30
+
+# Non-root user (uid/gid 1000 совпадает с main API container и k8s
+# securityContext.runAsUser).
+RUN groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid app --shell /bin/bash --create-home app
+
+WORKDIR /app
+
+COPY --from=builder --chown=app:app /opt/venv /opt/venv
+
+COPY --chown=app:app src ./src
+COPY --chown=app:app alembic ./alembic
+COPY --chown=app:app alembic.ini ./alembic.ini
+
+# Prepare HF cache dir с right ownership.
+RUN install -d -o app -g app "$HF_HOME"
+
+USER app
+
+# Worker не слушает HTTP — нет EXPOSE.
+#
+# Healthcheck — process liveness (Python interpreter alive). Не
+# проверяет actual indexing progress; для этого Prometheus / log
+# monitoring. Для k8s startupProbe / livenessProbe — exec-style
+# probe в manifest'е.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=120s --retries=3 \
+    CMD ps -o pid= -p 1 > /dev/null || exit 1
+
+# Entrypoint — module-based, чтобы Python correctly resolved'ал пакетные
+# imports (см. src/workers/indexer/__main__.py).
+CMD ["python", "-m", "src.workers.indexer"]
