@@ -292,3 +292,38 @@ export interface WebhookTestResponse {
   delivery_id: string;
   status: "enqueued";
 }
+
+// ============================================================================
+// kb-hr (#153, PZ §7)
+
+export type EmployeeStatus = "ACTIVE" | "ON_LEAVE" | "TERMINATED";
+
+/** Brief view для list endpoint — без notes / contact_info (PII). */
+export interface HrEmployeeSummary {
+  id: string;
+  full_name: string;
+  position: string;
+  department: string | null;
+  hire_date: string;
+  status: EmployeeStatus;
+  updated_at: string;
+}
+
+/** Detail view — full employee record (HR_RESTRICTED). */
+export interface HrEmployee extends HrEmployeeSummary {
+  user_id: string | null;
+  personnel_number: string | null;
+  termination_date: string | null;
+  contact_info: Record<string, unknown>;
+  notes: Record<string, unknown>;
+  created_at: string;
+  archived_at: string | null;
+}
+
+export interface HrEmployeeListResponse {
+  data: HrEmployeeSummary[];
+  pagination: {
+    cursor_next: string | null;
+    has_more: boolean;
+  };
+}
