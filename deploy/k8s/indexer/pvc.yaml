@@ -1,0 +1,28 @@
+# PVC для HF model cache. Persists между pod restarts чтобы не
+# скачивать ~2.3GB intfloat/multilingual-e5-large weights каждый раз
+# (cold start ~5min без cache vs ~30s с cache).
+#
+# Storage class — placeholder; replace под конкретный k8s deployment.
+# Yandex Cloud — `yc-network-hdd`; Selectel — `slt-storage-class`;
+# on-prem с Longhorn / Rook — соответствующий.
+#
+# ReadWriteOnce — single-replica indexer; для multi-replica (когда
+# parallelism нужен) — ReadWriteMany + shared volume (NFS / CephFS).
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: indexer-hf-cache
+  namespace: rehome-kb
+  labels:
+    app.kubernetes.io/name: kb-indexer
+    app.kubernetes.io/component: cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 5Gi — model (2.3GB) + tokenizer + temp files + headroom для
+      # альтернативных models при blue-green re-embedding.
+      storage: 5Gi
+  storageClassName: standard
