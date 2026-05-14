@@ -95,6 +95,62 @@ describe("apiFetch (browser mode)", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
     await expect(apiFetch("/api/v1/x")).rejects.toThrow("fetch failed");
   });
+
+  // --- Refresh token flow (#161) -------------------------------------
+
+  it("401 triggers /api/auth/refresh + retry original request", async () => {
+    fetchMock
+      // 1) Original — 401
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "expired" }), { status: 401 }),
+      )
+      // 2) Refresh call — success
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+      // 3) Retry original — success
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
+
+    const result = await apiFetch<{ ok: boolean }>("/api/v1/articles");
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // 2-я call — refresh endpoint, POST.
+    const [refreshUrl, refreshInit] = fetchMock.mock.calls[1];
+    expect(refreshUrl).toBe("/api/auth/refresh");
+    expect((refreshInit as RequestInit).method).toBe("POST");
+  });
+
+  it("401 → refresh fail → throw ApiError(401)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "expired" }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 401 })); // refresh fail
+
+    await expect(apiFetch("/api/v1/articles")).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("401 → refresh success → retry — НО retry тоже 401 → no infinite loop", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 })) // refresh OK
+      .mockResolvedValueOnce(new Response("", { status: 401 })); // retry — 401
+
+    await expect(apiFetch("/api/v1/x")).rejects.toMatchObject({ status: 401 });
+    // Только один refresh attempt, не infinite loop.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("refresh fetch throws network error → fall through к ApiError(401)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockRejectedValueOnce(new TypeError("refresh net error"));
+
+    await expect(apiFetch("/api/v1/x")).rejects.toMatchObject({ status: 401 });
+  });
 });
 
 // SSR-mode тесты вынесены в `client.ssr.test.ts` с

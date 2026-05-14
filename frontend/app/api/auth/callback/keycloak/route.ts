@@ -23,7 +23,9 @@ import { getAuthConfig } from "@/lib/auth/config";
 import {
   COOKIE_OAUTH_STATE,
   COOKIE_PKCE_VERIFIER,
+  COOKIE_REFRESH,
   COOKIE_SESSION,
+  REFRESH_MAX_AGE_SECONDS,
   getCookieOptions,
 } from "@/lib/auth/cookies";
 import { exchangeCodeForToken } from "@/lib/auth/keycloak";
@@ -59,13 +61,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return new NextResponse("Token exchange failed", { status: 502 });
   }
 
-  // Чистим временные cookies и устанавливаем session cookie.
+  // Чистим временные cookies и устанавливаем session + refresh cookies.
   const response = NextResponse.redirect(new URL("/", request.url));
   response.cookies.set(
     COOKIE_SESSION,
     tokens.access_token,
     getCookieOptions(tokens.expires_in),
   );
+  // Refresh token persists дольше access (Keycloak default 30 дней).
+  // 401 на gated endpoint → /api/auth/refresh swap'нет access_token
+  // не теряя сессию (см. #161).
+  if (tokens.refresh_token) {
+    response.cookies.set(
+      COOKIE_REFRESH,
+      tokens.refresh_token,
+      getCookieOptions(REFRESH_MAX_AGE_SECONDS),
+    );
+  }
   response.cookies.delete(COOKIE_PKCE_VERIFIER);
   response.cookies.delete(COOKIE_OAUTH_STATE);
   return response;

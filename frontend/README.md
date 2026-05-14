@@ -174,8 +174,10 @@ frontend/
   (сейчас handwritten).
 - **React Query / SWR** — pre-fetch + cache. Сейчас Server Components
   с revalidate cover most cases.
-- **Refresh token flow** — backend выдаёт access_token TTL ≈ 5 min;
-  после expire — 401, нужен retry с refresh. Сейчас просто 401 в UI.
+- **Refresh token flow** — landed в #161. `kb_refresh` HttpOnly cookie
+  (30 day TTL) + `POST /api/auth/refresh` swap endpoint. `apiFetch`
+  на 401 автоматически retry'ит через refresh (browser only; SSR
+  caller redirect'ит на /login напрямую).
 - **Singleton API client** — sharable httpx-like fetch instance с
   connection pooling, retry policy.
 - **Linkable search results** — backend `SearchHit` нужен `slug` или

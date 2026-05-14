@@ -84,6 +84,47 @@ export async function exchangeCodeForToken(
 }
 
 /**
+ * Refresh access_token через Keycloak `/token` endpoint
+ * (`grant_type=refresh_token`). Returns same TokenResponse shape —
+ * новый access_token + (optionally) refresh_token rotation.
+ *
+ * Keycloak по default rotate'ит refresh token при каждом use'е — caller
+ * должен persist'ить новый `refresh_token` если он пришёл.
+ *
+ * Throws Error при 4xx / 5xx — caller forces re-login.
+ */
+export async function refreshAccessToken(
+  config: AuthConfig,
+  refreshToken: string,
+): Promise<TokenResponse> {
+  const issuer = buildIssuerUrl(config);
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: config.clientId,
+  });
+  const response = await fetch(`${issuer}/protocol/openid-connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(
+      `Refresh failed: ${response.status} ${errorBody.error ?? "unknown_error"}`,
+    );
+  }
+  const data = (await response.json()) as TokenResponse;
+  if (typeof data.access_token !== "string" || data.access_token.length === 0) {
+    throw new Error("Refresh returned no access_token");
+  }
+  return data;
+}
+
+/**
  * Build URL для Keycloak /logout (frontchannel logout).
  *
  * См. https://www.keycloak.org/docs/latest/securing_apps/#logout
