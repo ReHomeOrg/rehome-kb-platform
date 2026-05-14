@@ -1,0 +1,15 @@
+# RAG / kb-search heavy deps (#140, ADR-0010).
+#
+# НЕ установлены в default API контейнере (см. requirements.txt) —
+# ~2 GB PyTorch + transformers + model weights. Загружаются только в
+# dedicated indexer worker контейнер (отдельный Docker target, ADR-0010
+# §Stage 1 deployment topology).
+#
+# Local install:
+#     pip install -r backend/requirements.txt -r backend/requirements-rag.txt
+#
+# Model weights (~2.3 GB) скачиваются sentence-transformers'ом при первой
+# инстанциации; на проде — pre-cache в Docker build layer для скорости
+# startup'а.
+
+sentence-transformers>=2.7,<3.0

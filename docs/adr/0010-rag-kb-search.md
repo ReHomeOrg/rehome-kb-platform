@@ -94,6 +94,38 @@ Chat response включает `citations: [{slug, chunk_index, snippet}]`. UI
 - Knowledge graph augmentation.
 - Multi-turn conversational memory beyond chat session history.
 
+#### Stage 1 deployment topology — provider selection
+
+`EMBEDDING_PROVIDER` env (Settings.embedding_provider) выбирает между
+`mock` и `hf`:
+
+- **`mock`** (default для dev / CI / гейтвея до прод-cutover'а) —
+  deterministic SHA-based, нет heavy deps. Использует фиксированный
+  model_id `mock-v1` (НЕ `settings.embedding_model`) — fake vectors не
+  должны share model_id с реальной prod-моделью, иначе blue-green
+  invariant сломается при последующем switch на `hf`.
+
+- **`hf`** — `intfloat/multilingual-e5-large` через
+  `sentence-transformers`. ~1.5 GB PyTorch + ~2.3 GB model weights, не
+  загружаются в main API контейнер (см. `requirements.txt` vs
+  `requirements-rag.txt`). Используется в **dedicated indexer worker**
+  Docker target. Main gateway работает с `mock` пока индексер не
+  накопил production-grade vectors в Postgres и retrieval-side не
+  переключился.
+
+Wiring через `_build_provider(settings)` в `retrieval.py` — lazy
+import HF-provider'а защищает от ImportError при отсутствии
+`requirements-rag.txt` в API-контейнере.
+
+Cutover sequence:
+1. Indexer worker запускается с `EMBEDDING_PROVIDER=hf` → re-индексирует
+   все статьи под новым `model_id` (parallel rows в `article_embeddings`).
+2. Coverage >=100% (verified через `SELECT DISTINCT embedding_model_id
+   FROM article_embeddings`) → flip gateway `EMBEDDING_PROVIDER=mock` →
+   `hf`. Retrieval начнёт использовать real vectors.
+3. После burn-in (24-48h) → cleanup mock vectors через
+   `EmbeddingRepository.delete_by_model('mock-v1')`.
+
 ### Stage 2: Migration на Qdrant (триггер-based)
 
 Переезжаем на Qdrant когда **любой** trigger срабатывает:
