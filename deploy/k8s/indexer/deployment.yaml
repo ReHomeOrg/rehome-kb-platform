@@ -1,0 +1,140 @@
+# reHome KB indexer worker — Kubernetes Deployment (#157, ADR-0010 §Stage 1).
+#
+# Stand-alone embedding worker process. Heavy HF deps (~3.8GB image) —
+# отдельный Deployment, не sidecar к gateway. Single replica на старте:
+# blue-green re-embedding inherently serial (workers разных model_id
+# параллельны через separate Deployment'ы при cutover'е, не replica
+# count'ом).
+#
+# Prerequisites:
+# - Namespace `rehome-kb` (или kustomize patch для другого).
+# - Secret `kb-database` с `DATABASE_URL` (asyncpg DSN).
+# - PVC `indexer-hf-cache` для model weights (~2.3GB intfloat/multilingual-e5-large).
+# - Image `ghcr.io/rehome-one/kb-indexer:$DIGEST` build'нут из Dockerfile.indexer.
+#
+# Apply:
+#   kubectl apply -f deploy/k8s/indexer/
+#
+# Operational notes — см. README.md в этом директории.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kb-indexer
+  namespace: rehome-kb
+  labels:
+    app.kubernetes.io/name: kb-indexer
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: rehome-kb
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate — single replica + heavy startup (model
+  # load ~30s + HF cache cold-start). Rolling выгрузил бы старый pod до
+  # того как новый прогреет провайдер.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kb-indexer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kb-indexer
+        app.kubernetes.io/component: worker
+      annotations:
+        # Prometheus pod-level scrape (если используется service monitor
+        # вместо ServiceMonitor CRD).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Non-root invariant из CLAUDE-REVIEWER §securityContext. Совпадает
+      # с Dockerfile.indexer USER app (uid 1000).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Graceful shutdown — worker слушает SIGTERM, current batch
+      # завершится. ~120s sufficient для типичных batch + commit'а.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: indexer
+          # Digest pinning — supply-chain hygiene (CLAUDE-REVIEWER).
+          # Replace на актуальный digest на каждом release.
+          image: ghcr.io/rehome-one/kb-indexer@sha256:REPLACE_ME_AT_RELEASE
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kb-database
+                  key: DATABASE_URL
+            - name: EMBEDDING_PROVIDER
+              value: "hf"
+            - name: EMBEDDING_MODEL
+              value: "intfloat/multilingual-e5-large"
+            - name: EMBEDDING_DIM
+              value: "1024"
+            - name: RAG_ENABLED
+              value: "true"
+            - name: INDEXER_BATCH_SIZE
+              value: "10"
+            - name: INDEXER_POLL_INTERVAL_SECONDS
+              value: "30"
+            - name: INDEXER_METRICS_PORT
+              value: "9100"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: LOG_FORMAT
+              value: "json"
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            - name: HF_HOME
+              value: "/var/cache/huggingface"
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /var/cache/huggingface
+          resources:
+            # Default ResourceList tuned под intfloat/multilingual-e5-large
+            # CPU-only inference. GPU — отдельный manifest (наст-roadmap).
+            requests:
+              cpu: "1"
+              memory: "3Gi"
+            limits:
+              cpu: "2"
+              # 4Gi covers: ~1.5GB PyTorch + 2.3GB model + headroom.
+              # OOMKilled если evicted → check actual usage перед bump.
+              memory: "4Gi"
+          # Liveness — process-level (PID alive). Real health через
+          # Prometheus metrics + alert на kb_indexer_pending_articles
+          # growth (separate AlertManager rule, не probe'ом).
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import sys; sys.exit(0)"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness — model loaded (метрика exported). Pre-warm на
+          # startup; do not signal ready пока HF model не скачан.
+          readinessProbe:
+            tcpSocket:
+              port: 9100
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: indexer-hf-cache
