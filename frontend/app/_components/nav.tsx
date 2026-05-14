@@ -19,6 +19,7 @@ const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/articles", label: "Статьи" },
   { href: "/documents", label: "Документы" },
   { href: "/chat", label: "Чат" },
+  { href: "/hr", label: "Кадры" },
   { href: "/webhooks", label: "Webhooks" },
 ];
 
