@@ -196,11 +196,28 @@ export interface ChatSession {
   expires_at: string;
 }
 
+/**
+ * Citation для chat assistant message (#138).
+ *
+ * Соответствует backend `hits_to_citations` (chat/system_prompt.py).
+ * Stage 1: только `type='article'`. `url` всегда относительный
+ * (`/articles/{slug}`) — клиент navigate'ит в SPA-стиле.
+ */
+export interface Citation {
+  type: "article";
+  id: string;
+  title: string;
+  slug: string;
+  chunk_index: number;
+  score: number;
+  url: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
-  citations: Array<Record<string, unknown>>;
+  citations: Citation[];
   feedback: { rating: "up" | "down"; comment?: string } | null;
   token_count: number | null;
   duration_ms: number | null;
