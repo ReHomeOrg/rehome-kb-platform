@@ -12,7 +12,7 @@ POST /messages, SSE, feedback, escalate — E3.3+.
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
@@ -25,8 +25,8 @@ from src.api.audit import (
     AuditRepository,
     get_audit_repository,
 )
-from src.api.auth.dependency import get_current_scope
-from src.api.auth.scope import Scope
+from src.api.auth.dependency import get_current_access_levels, get_current_scope
+from src.api.auth.scope import AccessLevel, Scope
 from src.api.chat.llm import LLMMessage, LLMProvider, get_llm_provider
 from src.api.chat.llm.base import LLMRole
 from src.api.chat.owner import extract_chat_owner
@@ -42,8 +42,10 @@ from src.api.chat.schemas import (
     SendMessageInput,
 )
 from src.api.chat.sse import format_sse_event
-from src.api.chat.system_prompt import SYSTEM_PROMPT
+from src.api.chat.system_prompt import build_rag_system_prompt, hits_to_citations
 from src.api.config import Settings, get_settings
+from src.api.search.repository import RetrievalHit
+from src.api.search.retrieval import RetrievalService, get_retrieval_service
 from src.api.webhooks.dispatcher import (
     WebhookEventDispatcher,
     get_webhook_event_dispatcher,
@@ -137,6 +139,42 @@ async def get_session_detail(
     return ChatSessionDetailResponse.from_models(session, messages)
 
 
+# RAG retrieval breadth для chat — меньше чем endpoint default (~10),
+# т.к. длинный context block увеличивает LLM input tokens. 5 chunks ≈
+# ~10K chars worst case, что вмещается в 8K-32K context window
+# типичных open-weight моделей.
+_RAG_CHAT_TOP_K = 5
+
+
+async def _retrieve_chunks_for_rag(
+    *,
+    enabled: bool,
+    query: str,
+    access_levels: frozenset[AccessLevel],
+    retrieval: RetrievalService,
+) -> list[RetrievalHit]:
+    """Defensive retrieval для chat RAG.
+
+    Возвращает [] если:
+    - RAG_ENABLED=False (no-op).
+    - Empty query / access_levels (defensive — `RetrievalService.search`
+      уже handle'ит, но guard здесь делает behavior obvious).
+    - Retrieval бросил exception — chat НЕ должен валиться от RAG'а
+      (log + degraded mode без context).
+    """
+    if not enabled or not query.strip() or not access_levels:
+        return []
+    try:
+        return await retrieval.search(
+            query=query,
+            access_levels=access_levels,
+            top_k=_RAG_CHAT_TOP_K,
+        )
+    except Exception:
+        logger.exception("chat.rag_retrieval_failed", extra={"query_len": len(query)})
+        return []
+
+
 def _build_llm_history(history_messages: list[object], new_user_content: str) -> list[LLMMessage]:
     """Конвертировать DB messages + new user content в LLMMessage list.
 
@@ -160,11 +198,15 @@ async def _stream_message_events(
     llm: LLMProvider,
     repo: ChatRepository,
     max_tokens: int,
+    system_prompt: str,
+    citations: list[dict[str, Any]],
 ) -> AsyncIterator[str]:
     """Generator для SSE streaming (E3.4).
 
     Events:
     - `message-start` (без message_id, см. architect deviation Issue #67)
+    - `citations` (#136) — emitted после `message-start`, до first
+      `chunk`. Frontend знает sources до начала streaming'а (UX win).
     - `chunk` per LLM yield
     - `error` если LLM exception (NO DB write)
     - `message-end` с message_id, total_tokens
@@ -177,11 +219,15 @@ async def _stream_message_events(
         "message-start",
         {"created_at": datetime.now(UTC).isoformat()},
     )
+    # `citations` всегда emit'ится (даже empty) — frontend опирается на
+    # consistent event order. Empty список — explicit signal что RAG
+    # disabled или не нашёл relevant chunks.
+    yield format_sse_event("citations", {"data": citations})
 
     llm_messages = _build_llm_history(history_messages, user_content)
     chunks: list[str] = []
     try:
-        async for chunk in llm.stream(llm_messages, SYSTEM_PROMPT, max_tokens=max_tokens):
+        async for chunk in llm.stream(llm_messages, system_prompt, max_tokens=max_tokens):
             chunks.append(chunk)
             yield format_sse_event("chunk", {"text": chunk})
     except Exception:
@@ -199,7 +245,7 @@ async def _stream_message_events(
         session_id,
         user_content=user_content,
         assistant_content=full_content,
-        citations=[],
+        citations=citations,
         token_count=token_count,
         duration_ms=None,
     )
@@ -221,8 +267,10 @@ async def send_message(
     payload: SendMessageInput = Body(...),
     accept: str = Header(default="application/json", alias="Accept"),
     owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: ChatRepository = Depends(get_chat_repository),
     llm: LLMProvider = Depends(get_llm_provider),
+    retrieval: RetrievalService = Depends(get_retrieval_service),
     settings: Settings = Depends(get_settings),
 ) -> ChatMessageResponse | StreamingResponse:
     """`POST /chat/sessions/{id}/messages` — JSON или SSE mode.
@@ -235,8 +283,11 @@ async def send_message(
     Оба mode:
     1. Owner-gate session через `get_session_by_owner`. None → 404.
     2. Build conversation history.
-    3. Call LLM (стриминг или complete).
-    4. `record_chat_turn` — atomic INSERT обоих сообщений (после LLM).
+    3. **RAG retrieve** (#136): если `RAG_ENABLED` — top-K chunks через
+       `RetrievalService.search`, augment system prompt, attach citations.
+       ADR-0003: `access_levels` определяют видимость chunk'ов.
+    4. Call LLM с augmented system prompt (стриминг или complete).
+    5. `record_chat_turn` — atomic INSERT обоих сообщений с citations.
     """
     user_id, session_token = owner
     session = await repo.get_session_by_owner(
@@ -246,6 +297,16 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Session not found")
 
     history = await repo.list_messages(session_id, user_id=user_id, session_token=session_token)
+
+    # RAG retrieval (#136) — defensive, returns [] если disabled/empty/error.
+    retrieved_chunks = await _retrieve_chunks_for_rag(
+        enabled=settings.rag_enabled,
+        query=payload.content,
+        access_levels=access_levels,
+        retrieval=retrieval,
+    )
+    system_prompt = build_rag_system_prompt(retrieved_chunks)
+    citations = hits_to_citations(retrieved_chunks)
 
     if "text/event-stream" in accept.lower():
         # SSE mode (E3.4).
@@ -257,6 +318,8 @@ async def send_message(
                 llm,
                 repo,
                 settings.llm_max_tokens,
+                system_prompt,
+                citations,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
@@ -266,14 +329,14 @@ async def send_message(
     llm_messages = _build_llm_history(list(history), payload.content)
     response = await llm.complete(
         llm_messages,
-        SYSTEM_PROMPT,
+        system_prompt,
         max_tokens=settings.llm_max_tokens,
     )
     assistant_msg = await repo.record_chat_turn(
         session_id,
         user_content=payload.content,
         assistant_content=response.content,
-        citations=[],
+        citations=citations,
         token_count=response.token_count,
         duration_ms=response.duration_ms,
     )

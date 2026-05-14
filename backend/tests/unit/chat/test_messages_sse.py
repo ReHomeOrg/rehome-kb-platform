@@ -188,7 +188,7 @@ def test_sse_emits_message_start_chunks_message_end_done_in_order(
         )
         events = _parse_sse_events(resp.text)
         names = [name for name, _ in events]
-        assert names == ["message-start", "chunk", "chunk", "message-end", "done"]
+        assert names == ["message-start", "citations", "chunk", "chunk", "message-end", "done"]
     finally:
         _restore_llm()
 
@@ -300,7 +300,7 @@ def test_sse_llm_exception_emits_error_event_no_persist(
         events = _parse_sse_events(resp.text)
         names = [name for name, _ in events]
         # Должны быть: message-start, chunk (первый), error. Нет message-end / done.
-        assert names == ["message-start", "chunk", "error"]
+        assert names == ["message-start", "citations", "chunk", "error"]
         # DB не тронута
         record_turn_mock.assert_not_called()
     finally:
@@ -326,7 +326,7 @@ def test_sse_immediate_llm_failure_no_chunks(
         )
         events = _parse_sse_events(resp.text)
         names = [name for name, _ in events]
-        assert names == ["message-start", "error"]
+        assert names == ["message-start", "citations", "error"]
         record_turn_mock.assert_not_called()
     finally:
         _restore_llm()
@@ -352,7 +352,7 @@ def test_sse_empty_stream_still_persists_empty_message(
         )
         events = _parse_sse_events(resp.text)
         names = [name for name, _ in events]
-        assert names == ["message-start", "message-end", "done"]
+        assert names == ["message-start", "citations", "message-end", "done"]
         record_turn_mock.assert_called_once()
         assert record_turn_mock.call_args.kwargs["assistant_content"] == ""
     finally:
