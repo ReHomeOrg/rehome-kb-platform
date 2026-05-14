@@ -9,26 +9,41 @@ End-to-end query flow (ADR-0010 §"Stage 1 — Retrieval"):
 4. RRF fusion (k=60):
        score = 1/(k + v_rank+1) + 1/(k + b_rank+1)
    Asymmetric — vector-only hits OK (если no BM25 match, contributing
-   только vector term). BM25-only article hits → 0 (т.к. нет chunk
-   granularity без vector hit).
+   только vector term). **BM25-only article hits dropped**: т.к. fusion
+   итерирует по `vector_hits` (chunk granularity), статья ранжированная
+   только BM25 без vector chunk match в output не попадёт. Это
+   осознанный trade-off: chunk granularity у output обязательна для
+   citations / chat-grounding (article без конкретного chunk
+   бесполезна), а vector с правильно настроенным top-K (30) на типичных
+   ru-IR workloads даёт высокую recall. Регрессионный тест:
+   `test_rrf_fuse_bm25_only_articles_dropped`.
 5. Sort by fused score desc → top_k chunks.
 
 Result type: `RetrievalHit` (re-used от repository).
 """
 
 import logging
-from typing import Any, Final
+from collections.abc import Sequence
+from typing import Final
+from uuid import UUID
 
 from fastapi import Depends
 
 from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings, get_settings
 from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
 from src.api.search.repository import (
     EmbeddingRepository,
     RetrievalHit,
     get_embedding_repository,
 )
+
+# Row shape от `ArticleRepository.search`: (id, title, snippet, ts_rank).
+# Используется только для индекса rank (id) — поля title/snippet/score
+# игнорируются в fusion. Алиас облегчает refactoring если ArticleRepository
+# когда-нибудь поменяет shape.
+type BM25Row = tuple[UUID, str, str | None, float]
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +89,13 @@ class RetrievalService:
         embeddings = await self._provider.embed([query])
         query_vector = embeddings[0]
 
-        # 2-3. Parallel retrievers — vector + BM25.
-        # Sequential для simplicity; `asyncio.gather` дал бы небольшой win,
-        # но обе queries hit same DB pool — overlap нетривиален.
+        # 2-3. Vector + BM25 retrievers, sequential.
+        # `asyncio.gather` НЕ применим: обе queries исполняются на одной
+        # `AsyncSession`, а SQLAlchemy AsyncSession не concurrency-safe
+        # (одна connection одновременно — один statement). Параллельность
+        # потребовала бы second `AsyncSession` per retriever — сложность
+        # на уровне DI ради ~50ms win'а. Punt'ит до того как retrieval
+        # станет hot path.
         vector_hits = await self._embedding_repo.search(
             query_vector=query_vector,
             access_levels=access_levels,
@@ -96,16 +115,18 @@ class RetrievalService:
     @staticmethod
     def _rrf_fuse(
         vector_hits: list[RetrievalHit],
-        # BM25 rows shape from ArticleRepository.search: (id, title,
-        # snippet, score). Hetero-typed — Any для caller-typed clarity.
-        bm25_articles: list[tuple[Any, ...]],
+        # `Sequence` (covariant) чтобы принять `list[tuple[UUID, str,
+        # str, float]]` от ArticleRepository.search — list invariant.
+        bm25_articles: Sequence[BM25Row],
         *,
         top_k: int,
     ) -> list[RetrievalHit]:
         """Asymmetric RRF: chunks from vector + article BM25 ranks.
 
         BM25 returns articles (no chunk granularity) — promote'им
-        BM25 rank на все chunks этой статьи (via lookup map).
+        BM25 rank на все chunks этой статьи (via lookup map). Статьи,
+        ранжированные только BM25 без vector match, в output не
+        попадают: см. docstring модуля §"BM25-only article hits dropped".
         """
         bm25_rank_by_article = {
             article_row[0]: rank + 1 for rank, article_row in enumerate(bm25_articles)
@@ -124,6 +145,7 @@ class RetrievalService:
                     RetrievalHit(
                         article_id=hit.article_id,
                         slug=hit.slug,
+                        title=hit.title,
                         chunk_index=hit.chunk_index,
                         text=hit.text,
                         char_start=hit.char_start,
@@ -136,15 +158,42 @@ class RetrievalService:
         return [hit for _, hit in fused[:top_k]]
 
 
+def _build_provider(settings: Settings) -> EmbeddingProvider:
+    """Provider factory по `settings.embedding_provider`.
+
+    - `"mock"` — deterministic SHA-based, для dev / tests (см.
+      `embeddings.py`).
+    - `"hf"` — sentence-transformers, real `intfloat/multilingual-e5-large`.
+      Импорт ленивый: PyTorch / transformers — ~2 GB деп, не нужны в
+      Mock-режиме. Сам HF-provider landing'ится в follow-up; пока в
+      `"hf"` режиме fail-fast с ясным сообщением.
+    """
+    choice = settings.embedding_provider.lower()
+    if choice == "mock":
+        # Mock использует свой стабильный `mock-v1` model_id (не
+        # `settings.embedding_model`) — fake vectors не должны share
+        # model_id с реальной production model, иначе blue-green
+        # invariant сломается при последующем switch на 'hf'.
+        return MockEmbeddingProvider()
+    if choice == "hf":
+        raise RuntimeError(
+            "embedding_provider='hf' selected but HF provider not yet "
+            "implemented; set EMBEDDING_PROVIDER=mock or wait for follow-up PR"
+        )
+    raise ValueError(
+        f"unknown embedding_provider={settings.embedding_provider!r}; " "expected 'mock' or 'hf'"
+    )
+
+
 def get_retrieval_service(
     embedding_repo: EmbeddingRepository = Depends(get_embedding_repository),
     article_repo: ArticleRepository = Depends(get_article_repository),
+    settings: Settings = Depends(get_settings),
 ) -> RetrievalService:
-    """FastAPI dependency — RetrievalService с default MockProvider.
+    """FastAPI dependency — RetrievalService с settings-driven provider.
 
-    Real provider deploy'ится separate worker (ADR-0010). Gateway query
-    side всё ещё использует Mock (deterministic for tests). Когда real
-    indexer landed prod-side, ingest'ит real vectors, и gateway query
-    embedder перейдёт на ту же real model — отдельная wire-up.
+    Default `EMBEDDING_PROVIDER=mock` для dev / tests. Production
+    переключение на `hf` — после landing'а HF embedder + ingest'а
+    real vectors через indexer worker.
     """
-    return RetrievalService(embedding_repo, article_repo, MockEmbeddingProvider())
+    return RetrievalService(embedding_repo, article_repo, _build_provider(settings))

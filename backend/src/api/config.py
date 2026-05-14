@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # foundation landed в off-state, явный flip когда indexer + endpoint
     # готовы. Эмбеддинги через self-hosted model (ФЗ-152: no external API).
     rag_enabled: bool = Field(default=False, alias="RAG_ENABLED")
+    # Provider selection: 'mock' (default, deterministic SHA — для dev/tests),
+    # 'hf' (sentence-transformers, production). HF provider land'ится в
+    # follow-up; до тех пор `hf` режим fail-fast при startup.
+    embedding_provider: Literal["mock", "hf"] = Field(
+        default="mock",
+        alias="EMBEDDING_PROVIDER",
+    )
     embedding_model: str = Field(
         default="intfloat/multilingual-e5-large",
         alias="EMBEDDING_MODEL",

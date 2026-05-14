@@ -21,6 +21,8 @@ from src.api.search.repository import (
     get_embedding_repository,
 )
 from src.api.search.retrieval import RetrievalService, get_retrieval_service
+from src.api.search.router import router as search_router
+from src.api.search.schemas import SearchHit, SearchInput, SearchResponse
 
 __all__ = [
     "ArticleEmbedding",
@@ -32,8 +34,12 @@ __all__ = [
     "MockEmbeddingProvider",
     "RetrievalHit",
     "RetrievalService",
+    "SearchHit",
+    "SearchInput",
+    "SearchResponse",
     "chunk_text",
     "get_embedding_repository",
     "get_indexer_service",
     "get_retrieval_service",
+    "search_router",
 ]
