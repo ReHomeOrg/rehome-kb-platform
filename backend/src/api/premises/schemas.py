@@ -17,13 +17,18 @@ Per-tenant access (наниматель видит tenant_info) и per-owner acc
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth.scope import AccessLevel
 from src.api.premises.models import PremisesCard
+
+# Slug pattern идентичен articles (lowercase ASCII + цифры + дефисы).
+SLUG_PATTERN = r"^[a-z0-9-]+$"
+
+PremisesStatus = Literal["DRAFT", "PUBLISHED", "RENTED", "ARCHIVED"]
 
 
 class PremisesView(BaseModel):
@@ -129,3 +134,64 @@ def project_for_scope(
             internal_data=card.internal_data,
         )
     return PremisesView.model_validate(base)
+
+
+# ---------------------------------------------------------------------------
+# Write-side schemas (#148, PZ §5)
+
+
+class PremisesInput(BaseModel):
+    """Body для POST /premises-cards — full create.
+
+    `slug` — caller-provided (не auto-derived от address, т.к. адреса
+    могут быть длинные / non-ASCII). Pattern enforced на router'е.
+    `status` default DRAFT — explicit lifecycle.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str = Field(min_length=1, max_length=200, pattern=SLUG_PATTERN)
+    internal_code: str | None = Field(default=None, max_length=64)
+    status: PremisesStatus = "DRAFT"
+    premises_uuid: UUID | None = None
+    address: str = Field(min_length=1, max_length=500)
+    postal_code: str | None = Field(default=None, max_length=16)
+    cadastral_number: str | None = Field(default=None, max_length=64)
+    owner: dict[str, Any] = Field(default_factory=dict)
+    owner_representative: dict[str, Any] | None = None
+    current_tenant: dict[str, Any] | None = None
+    financial_data: dict[str, Any] = Field(default_factory=dict)
+    tenant_info: dict[str, Any] = Field(default_factory=dict)
+    internal_data: dict[str, Any] = Field(default_factory=dict)
+    extra_identification: dict[str, Any] = Field(default_factory=dict)
+
+
+class PremisesPatch(BaseModel):
+    """Body для PATCH /premises-cards/{slug} — partial update.
+
+    Все fields optional; только non-None попадают в patch dict. Status
+    transitions произвольные (DRAFT → ARCHIVED через PATCH допустим;
+    archive endpoint — convenience wrapper).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    internal_code: str | None = Field(default=None, max_length=64)
+    status: PremisesStatus | None = None
+    premises_uuid: UUID | None = None
+    address: str | None = Field(default=None, min_length=1, max_length=500)
+    postal_code: str | None = Field(default=None, max_length=16)
+    cadastral_number: str | None = Field(default=None, max_length=64)
+    owner: dict[str, Any] | None = None
+    owner_representative: dict[str, Any] | None = None
+    current_tenant: dict[str, Any] | None = None
+    financial_data: dict[str, Any] | None = None
+    tenant_info: dict[str, Any] | None = None
+    internal_data: dict[str, Any] | None = None
+    extra_identification: dict[str, Any] | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _v_status(cls, v: PremisesStatus | None) -> PremisesStatus | None:
+        # Literal enforce'ит — null passthrough.
+        return v

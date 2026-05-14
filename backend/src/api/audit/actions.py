@@ -11,6 +11,7 @@ from typing import Final
 RESOURCE_ARTICLE: Final = "article"
 RESOURCE_WEBHOOK: Final = "webhook"
 RESOURCE_CHAT_SESSION: Final = "chat_session"
+RESOURCE_PREMISES_CARD: Final = "premises_card"
 
 # Article actions.
 ACTION_ARTICLES_CREATED: Final = "articles.created"
@@ -24,6 +25,11 @@ ACTION_WEBHOOKS_TESTED: Final = "webhooks.tested"
 
 # Chat actions.
 ACTION_CHAT_ESCALATED: Final = "chat.escalated"
+
+# Premises actions (#148, PZ §5 write side).
+ACTION_PREMISES_CREATED: Final = "premises.created"
+ACTION_PREMISES_UPDATED: Final = "premises.updated"
+ACTION_PREMISES_ARCHIVED: Final = "premises.archived"
 
 # Vault actions (#146, ADR-0011).
 # Resource — `vault_secret` для secret-level operations, `vault_user` для
