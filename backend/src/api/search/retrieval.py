@@ -163,10 +163,10 @@ def _build_provider(settings: Settings) -> EmbeddingProvider:
 
     - `"mock"` — deterministic SHA-based, для dev / tests (см.
       `embeddings.py`).
-    - `"hf"` — sentence-transformers, real `intfloat/multilingual-e5-large`.
-      Импорт ленивый: PyTorch / transformers — ~2 GB деп, не нужны в
-      Mock-режиме. Сам HF-provider landing'ится в follow-up; пока в
-      `"hf"` режиме fail-fast с ясным сообщением.
+    - `"hf"` — sentence-transformers (см. `embeddings_hf.py`). Импорт
+      ленивый: PyTorch + transformers — ~2 GB деп, не загружаются в
+      main API контейнер. Используется в dedicated indexer worker;
+      главный gateway работает с `mock` пока прод-cutover не сделан.
     """
     choice = settings.embedding_provider.lower()
     if choice == "mock":
@@ -176,12 +176,18 @@ def _build_provider(settings: Settings) -> EmbeddingProvider:
         # invariant сломается при последующем switch на 'hf'.
         return MockEmbeddingProvider()
     if choice == "hf":
-        raise RuntimeError(
-            "embedding_provider='hf' selected but HF provider not yet "
-            "implemented; set EMBEDDING_PROVIDER=mock or wait for follow-up PR"
+        # Lazy import — `embeddings_hf` импортирует sentence_transformers
+        # которая не установлена в default API контейнере.
+        from src.api.search.embeddings_hf import (
+            SentenceTransformersEmbeddingProvider,
+        )
+
+        return SentenceTransformersEmbeddingProvider(
+            model_name=settings.embedding_model,
+            dim=settings.embedding_dim,
         )
     raise ValueError(
-        f"unknown embedding_provider={settings.embedding_provider!r}; " "expected 'mock' or 'hf'"
+        f"unknown embedding_provider={settings.embedding_provider!r}; expected 'mock' or 'hf'"
     )
 
 

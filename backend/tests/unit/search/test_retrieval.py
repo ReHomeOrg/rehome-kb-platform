@@ -1,4 +1,4 @@
-"""Unit tests for RetrievalService — RRF fusion (#132)."""
+"""Unit tests for RetrievalService — RRF fusion (#132) + provider factory (#140)."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -7,9 +7,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings
 from src.api.search.embeddings import MockEmbeddingProvider
 from src.api.search.repository import RetrievalHit
-from src.api.search.retrieval import RetrievalService
+from src.api.search.retrieval import RetrievalService, _build_provider
 
 
 def _hit(article_id: UUID, chunk_index: int = 0, score: float = 0.5) -> RetrievalHit:
@@ -168,3 +169,36 @@ def test_rrf_score_replaces_distance_in_hit() -> None:
     fused = RetrievalService._rrf_fuse(vector_hits, [], top_k=10)
     assert fused[0].score != 0.234  # replaced
     assert fused[0].score == 1.0 / 61
+
+
+# ---------------------------------------------------------------------------
+# _build_provider factory (#140)
+
+
+def test_build_provider_mock_returns_mock_instance() -> None:
+    settings = Settings(EMBEDDING_PROVIDER="mock")
+    provider = _build_provider(settings)
+    assert isinstance(provider, MockEmbeddingProvider)
+    # Mock использует свой stable `mock-v1`, не `settings.embedding_model`.
+    assert provider.model_id == "mock-v1"
+
+
+def test_build_provider_hf_lazy_imports_only_when_selected() -> None:
+    """`mock` choice не должен trigger'ить import sentence_transformers.
+
+    Проверяет что lazy import рабочает: даже если деп не установлен,
+    `mock` path работает (что critical для CI без RAG deps).
+    """
+    settings = Settings(EMBEDDING_PROVIDER="mock")
+    # Должно не упасть даже без sentence_transformers.
+    _build_provider(settings)
+
+
+def test_build_provider_unknown_raises() -> None:
+    """Unknown choice → ValueError fail-fast."""
+    # bypass'им Literal validation на pydantic — конструируем Settings
+    # с mock и затем mutируем поле напрямую.
+    settings = Settings(EMBEDDING_PROVIDER="mock")
+    object.__setattr__(settings, "embedding_provider", "bogus")
+    with pytest.raises(ValueError, match="unknown embedding_provider"):
+        _build_provider(settings)
