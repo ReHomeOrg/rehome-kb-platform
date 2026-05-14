@@ -17,6 +17,7 @@ import { COOKIE_SESSION } from "@/lib/auth/cookies";
 const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/", label: "Главная" },
   { href: "/articles", label: "Статьи" },
+  { href: "/premises", label: "Квартиры" },
   { href: "/documents", label: "Документы" },
   { href: "/chat", label: "Чат" },
   { href: "/hr", label: "Кадры" },

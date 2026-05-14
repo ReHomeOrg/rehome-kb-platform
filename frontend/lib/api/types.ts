@@ -327,3 +327,67 @@ export interface HrEmployeeListResponse {
     has_more: boolean;
   };
 }
+
+// ============================================================================
+// kb-premises (#160, PZ §5)
+
+export type PremisesStatus = "DRAFT" | "PUBLISHED" | "RENTED" | "ARCHIVED";
+
+/** Brief view для list — только identification (без PII / financial). */
+export interface PremisesSummary {
+  id: string;
+  slug: string;
+  status: PremisesStatus | string;
+  address: string;
+  postal_code: string | null;
+  cadastral_number: string | null;
+  updated_at: string;
+}
+
+/** Detail view с per-scope projection.
+ *
+ * Non-STAFF получают только identification subset (PII fields null/omitted).
+ * STAFF tier видит все blocks.
+ */
+export interface PremisesView {
+  id: string;
+  slug: string;
+  status: PremisesStatus | string;
+  address: string;
+  postal_code: string | null;
+  cadastral_number: string | null;
+  extra_identification: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  // STAFF-only fields (omit'аются в anon/tenant response).
+  internal_code?: string | null;
+  premises_uuid?: string | null;
+  owner?: Record<string, unknown> | null;
+  owner_representative?: Record<string, unknown> | null;
+  current_tenant?: Record<string, unknown> | null;
+  financial_data?: Record<string, unknown> | null;
+  tenant_info?: Record<string, unknown> | null;
+  internal_data?: Record<string, unknown> | null;
+}
+
+export interface PremisesListResponse {
+  data: PremisesSummary[];
+  pagination: {
+    cursor_next: string | null;
+    has_more: boolean;
+  };
+}
+
+export interface PremisesSearchHit {
+  id: string;
+  slug: string;
+  address: string;
+  postal_code: string | null;
+  cadastral_number: string | null;
+  status: PremisesStatus | string;
+  score: number;
+}
+
+export interface PremisesSearchResponse {
+  data: PremisesSearchHit[];
+}
