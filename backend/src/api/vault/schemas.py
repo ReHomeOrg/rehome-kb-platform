@@ -257,6 +257,38 @@ class VaultGroupListResponse(BaseModel):
     data: list[VaultGroupView]
 
 
+# ---------------------------------------------------------------------------
+# Group members (#155)
+
+
+class VaultGroupMemberAddInput(BaseModel):
+    """Body для POST /vault/groups/{id}/members.
+
+    `role` — 'owner' | 'member'. Default 'member' защищает от случайного
+    privilege escalation (нужен явный 'owner').
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: UUID
+    role: str = Field(default="member", pattern=r"^(owner|member)$")
+
+
+class VaultGroupMemberView(BaseModel):
+    """Membership row для list endpoint."""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    group_id: UUID
+    user_id: UUID
+    role: str
+    added_at: datetime
+
+
+class VaultGroupMemberListResponse(BaseModel):
+    data: list[VaultGroupMemberView]
+
+
 class VaultSecretListResponse(BaseModel):
     data: list[VaultSecretMetadataView]
 

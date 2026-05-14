@@ -100,6 +100,30 @@ class VaultRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_group(self, group_id: UUID) -> VaultGroup | None:
+        result = await self._session.execute(select(VaultGroup).where(VaultGroup.id == group_id))
+        return result.scalar_one_or_none()
+
+    async def get_group_member(
+        self,
+        group_id: UUID,
+        user_id: UUID,
+    ) -> VaultGroupMember | None:
+        result = await self._session.execute(
+            select(VaultGroupMember).where(
+                (VaultGroupMember.group_id == group_id) & (VaultGroupMember.user_id == user_id)
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_group_members(self, group_id: UUID) -> list[VaultGroupMember]:
+        result = await self._session.execute(
+            select(VaultGroupMember)
+            .where(VaultGroupMember.group_id == group_id)
+            .order_by(VaultGroupMember.added_at)
+        )
+        return list(result.scalars().all())
+
     async def add_group_member(
         self,
         *,
@@ -111,6 +135,24 @@ class VaultRepository:
         self._session.add(member)
         await self._session.flush()
         return member
+
+    async def remove_group_member(
+        self,
+        *,
+        group_id: UUID,
+        user_id: UUID,
+    ) -> bool:
+        """Returns True если row удалена, False если её не было.
+
+        Owner CAN'T remove themselves (defensive — иначе group остаётся
+        без owner'а и becomes management-orphaned). Endpoint enforce'ит.
+        """
+        member = await self.get_group_member(group_id, user_id)
+        if member is None:
+            return False
+        await self._session.delete(member)
+        await self._session.flush()
+        return True
 
     # -----------------------------------------------------------------
     # VaultSecret
