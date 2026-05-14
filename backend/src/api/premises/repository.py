@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.auth.scope import AccessLevel
@@ -167,6 +167,38 @@ class PremisesRepository:
         card.updated_at = datetime.now(UTC)
         await self._session.flush()
         return card
+
+    async def search(
+        self,
+        query: str,
+        access_levels: frozenset[AccessLevel],
+        *,
+        limit: int = 20,
+    ) -> list[tuple[PremisesCard, float]]:
+        """FTS search через `websearch_to_tsquery` + ts_rank (#154).
+
+        - `websearch_to_tsquery` — handles human-friendly syntax
+          (quoted phrases, OR/AND).
+        - `ts_rank(search_vector, query)` — relevance scoring.
+        - ADR-0003 status filter применён (PUBLISHED+RENTED для anon,
+          all для STAFF tier).
+
+        Returns `[(card, score), ...]` sorted by score desc, limited.
+        """
+        statuses = self._visible_statuses(access_levels)
+        tsquery = func.websearch_to_tsquery("russian", query)
+        rank = func.ts_rank(PremisesCard.search_vector, tsquery).label("rank")
+        stmt = (
+            select(PremisesCard, rank)
+            .where(
+                PremisesCard.status.in_(statuses),
+                PremisesCard.search_vector.op("@@")(tsquery),
+            )
+            .order_by(rank.desc(), PremisesCard.id.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [(row[0], float(row[1])) for row in result]
 
     async def archive(self, slug: str) -> bool:
         """Soft-delete: status='ARCHIVED' + archived_at.
