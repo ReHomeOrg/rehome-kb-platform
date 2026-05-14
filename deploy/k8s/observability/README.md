@@ -8,6 +8,7 @@ Pin'аются по schema version для reproducibility.
 | Файл | Назначение |
 |---|---|
 | `kb-api-dashboard.json` | Grafana dashboard для kb-api gateway (Cube AA, #178) |
+| `kb-chat-rag-dashboard.json` | Grafana dashboard для chat + RAG retrieval (Cube BB, #179) |
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 | `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
@@ -216,6 +217,25 @@ groups:
    что нужно optimize first.
 6. **Top 10 routes by RPS (5m)** — capacity planning + hot paths.
 
+## kb-chat-rag dashboard
+
+**Назначение**: monitoring chat traffic + RAG retrieval health.
+Metrics из `src/api/chat/metrics.py` + `src/api/search/metrics.py`
+(Cube BB, #179).
+
+### Panels
+
+1. **Sessions created (1h, by scope)** — stacked bars по guest/tenant/
+   staff/legal. Traffic distribution.
+2. **Messages sent rate (5m, by scope)** — counter rate.
+3. **Retrieval hit ratio (5m)** — `has_results=yes / total`. Thresholds
+   red <30% / yellow 30-60% / green ≥60%. Low ratio → корпус мал или
+   embedding model drift.
+4. **Retrieval duration p50/p95/p99 (5m)** — histogram quantiles.
+   Baseline ~100ms; p95 >500ms → HF provider / DB load.
+5. **Chat message E2E duration (5m, JSON mode)** — retrieval + LLM.
+   Outliers до 30s. SSE durations — backlog.
+
 ### Suggested alerts
 
 ```yaml
@@ -245,12 +265,38 @@ groups:
           severity: warning
         annotations:
           summary: "kb-api p95 latency >2s для {{$labels.route}}"
+
+  - name: kb-chat-rag
+    interval: 30s
+    rules:
+      - alert: KbRetrievalLowHitRatio
+        expr: |
+          sum(rate(kb_retrieval_total{has_results="yes"}[15m]))
+            / sum(rate(kb_retrieval_total[15m]))
+              < 0.3
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-retrieval hit ratio <30% за 30 минут"
+          description: "Корпус не покрывает запросы / embedding drift"
+
+      - alert: KbRetrievalSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le)
+              (rate(kb_retrieval_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-retrieval p95 >500ms"
 ```
 
 ## Backlog
 
-- **Chat / RAG retrieval dashboard** — chat session count, SSE flow
-  latency, retrieval hit rate.
 - **Vault audit dashboard** — unlock attempts (success/failed),
   secret access patterns (compliance forensic).
 - **Service blackbox** — `up` / `probe_success` для liveness rollup.
+- **Chat SSE duration histogram** — wrap `_stream_message_events`
+  generator для observability streaming response'ов.
