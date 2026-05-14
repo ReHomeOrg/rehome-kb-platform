@@ -73,14 +73,36 @@ function buildUrl(path: string): string {
  *
  * При 4xx/5xx — `ApiError` с status + parsed body.
  * При network error — bubble through (fetch native exception).
+ *
+ * **Refresh token flow (#161)**: на browser-side при 401 → один retry
+ * через `/api/auth/refresh` (swap'ает access_token cookie). SSR retry
+ * НЕ делаем — Server Components не имеют lifecycle для re-render'а
+ * после mutation cookie; SSR caller должен явно handle 401 (redirect).
  */
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  return _doFetch<T>(path, init, /* allowRefresh */ !isServer());
+}
+
+async function _doFetch<T>(
+  path: string,
+  init: RequestInit | undefined,
+  allowRefresh: boolean,
+): Promise<T> {
   const headers = await buildHeaders(init?.headers);
   const url = buildUrl(path);
   const response = await fetch(url, { ...init, headers });
+  if (response.status === 401 && allowRefresh) {
+    // Token expired или revoked; try refresh once. На success — retry
+    // original request с свежим cookie. На refresh failure — fall through
+    // в ApiError(401); caller redirect'нет на /login.
+    const refreshed = await _tryRefresh();
+    if (refreshed) {
+      return _doFetch<T>(path, init, /* allowRefresh */ false);
+    }
+  }
   if (!response.ok) {
     let body: unknown;
     try {
@@ -100,4 +122,16 @@ export async function apiFetch<T>(
     return undefined as T;
   }
   return JSON.parse(text) as T;
+}
+
+async function _tryRefresh(): Promise<boolean> {
+  try {
+    const r = await fetch("/api/auth/refresh", {
+      method: "POST",
+      cache: "no-store",
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
 }
