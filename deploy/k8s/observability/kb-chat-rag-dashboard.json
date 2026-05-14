@@ -262,7 +262,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Chat message E2E duration p50/p95/p99 (JSON mode only — SSE backlog). Включает retrieval + LLM completion. Outliers до 30s.",
+      "description": "Chat message E2E duration p50/p95/p99 (JSON + SSE modes; SSE observed в generator finally, #181). Включает retrieval + LLM completion. Outliers до 30s.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -322,7 +322,7 @@
           "refId": "C"
         }
       ],
-      "title": "Chat message E2E duration (p50/p95/p99, 5m, JSON mode)",
+      "title": "Chat message E2E duration (p50/p95/p99, 5m, JSON + SSE)",
       "type": "timeseries"
     }
   ],

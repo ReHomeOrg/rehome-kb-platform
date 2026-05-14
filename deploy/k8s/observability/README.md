@@ -234,8 +234,8 @@ Metrics из `src/api/chat/metrics.py` + `src/api/search/metrics.py`
    embedding model drift.
 4. **Retrieval duration p50/p95/p99 (5m)** — histogram quantiles.
    Baseline ~100ms; p95 >500ms → HF provider / DB load.
-5. **Chat message E2E duration (5m, JSON mode)** — retrieval + LLM.
-   Outliers до 30s. SSE durations — backlog.
+5. **Chat message E2E duration (5m, JSON + SSE)** — retrieval + LLM.
+   Outliers до 30s. SSE observed в generator `finally` (#181).
 
 ## kb-vault-audit dashboard
 
@@ -343,5 +343,3 @@ groups:
 ## Backlog
 
 - **Service blackbox** — `up` / `probe_success` для liveness rollup.
-- **Chat SSE duration histogram** — wrap `_stream_message_events`
-  generator для observability streaming response'ов.

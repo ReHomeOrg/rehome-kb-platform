@@ -208,6 +208,7 @@ async def _stream_message_events(
     max_tokens: int,
     system_prompt: str,
     citations: list[dict[str, Any]],
+    started: float,
 ) -> AsyncIterator[str]:
     """Generator для SSE streaming (E3.4).
 
@@ -222,47 +223,54 @@ async def _stream_message_events(
 
     Retry-safety: chunks в memory, `record_chat_turn` только после
     успешного завершения LLM iteration.
+
+    `started` — `time.perf_counter()` snapshot до handler dispatch.
+    Histogram observed в finally — измеряет full SSE lifecycle вплоть до
+    last yield (включая generator GC при early client disconnect).
     """
-    yield format_sse_event(
-        "message-start",
-        {"created_at": datetime.now(UTC).isoformat()},
-    )
-    # `citations` всегда emit'ится (даже empty) — frontend опирается на
-    # consistent event order. Empty список — explicit signal что RAG
-    # disabled или не нашёл relevant chunks.
-    yield format_sse_event("citations", {"data": citations})
-
-    llm_messages = _build_llm_history(history_messages, user_content)
-    chunks: list[str] = []
     try:
-        async for chunk in llm.stream(llm_messages, system_prompt, max_tokens=max_tokens):
-            chunks.append(chunk)
-            yield format_sse_event("chunk", {"text": chunk})
-    except Exception:
-        # Defensive: НЕ эхо'им детали exception'а в SSE event
-        # (могут содержать sensitive info от upstream LLM).
-        logger.exception("chat.sse_stream_failed", extra={"session_id": str(session_id)})
-        yield format_sse_event("error", {"message": "LLM upstream error"})
-        return
+        yield format_sse_event(
+            "message-start",
+            {"created_at": datetime.now(UTC).isoformat()},
+        )
+        # `citations` всегда emit'ится (даже empty) — frontend опирается на
+        # consistent event order. Empty список — explicit signal что RAG
+        # disabled или не нашёл relevant chunks.
+        yield format_sse_event("citations", {"data": citations})
 
-    full_content = "".join(chunks)
-    token_count = len(full_content) // _CHARS_PER_TOKEN
+        llm_messages = _build_llm_history(history_messages, user_content)
+        chunks: list[str] = []
+        try:
+            async for chunk in llm.stream(llm_messages, system_prompt, max_tokens=max_tokens):
+                chunks.append(chunk)
+                yield format_sse_event("chunk", {"text": chunk})
+        except Exception:
+            # Defensive: НЕ эхо'им детали exception'а в SSE event
+            # (могут содержать sensitive info от upstream LLM).
+            logger.exception("chat.sse_stream_failed", extra={"session_id": str(session_id)})
+            yield format_sse_event("error", {"message": "LLM upstream error"})
+            return
 
-    # Atomic persist после успешного stream'а — retry-safe.
-    assistant_msg = await repo.record_chat_turn(
-        session_id,
-        user_content=user_content,
-        assistant_content=full_content,
-        citations=citations,
-        token_count=token_count,
-        duration_ms=None,
-    )
+        full_content = "".join(chunks)
+        token_count = len(full_content) // _CHARS_PER_TOKEN
 
-    yield format_sse_event(
-        "message-end",
-        {"message_id": str(assistant_msg.id), "total_tokens": token_count},
-    )
-    yield format_sse_event("done", {})
+        # Atomic persist после успешного stream'а — retry-safe.
+        assistant_msg = await repo.record_chat_turn(
+            session_id,
+            user_content=user_content,
+            assistant_content=full_content,
+            citations=citations,
+            token_count=token_count,
+            duration_ms=None,
+        )
+
+        yield format_sse_event(
+            "message-end",
+            {"message_id": str(assistant_msg.id), "total_tokens": token_count},
+        )
+        yield format_sse_event("done", {})
+    finally:
+        MESSAGE_DURATION_SECONDS.observe(time.perf_counter() - started)
 
 
 @router.post(
@@ -320,9 +328,9 @@ async def send_message(
     citations = hits_to_citations(retrieved_chunks)
 
     if "text/event-stream" in accept.lower():
-        # SSE mode (E3.4). Duration histogram не observed для SSE —
-        # генератор стримит после возврата handler'а; точное end-time
-        # потребовало бы wrap'а _stream_message_events. Backlog.
+        # SSE mode (E3.4). Duration observed внутри generator'а в `finally`
+        # (#181) — covers normal completion, LLM error path, и client
+        # disconnect (early generator close).
         return StreamingResponse(
             _stream_message_events(
                 session_id,
@@ -333,6 +341,7 @@ async def send_message(
                 settings.llm_max_tokens,
                 system_prompt,
                 citations,
+                started,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
