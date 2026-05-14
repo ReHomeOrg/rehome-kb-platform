@@ -56,6 +56,14 @@ files = ["src", "tests"]
 module = "tests.*"
 disallow_untyped_decorators = false
 
+[[tool.mypy.overrides]]
+# `sentence_transformers` — heavy RAG dep (см. requirements-rag.txt),
+# не установлена в default API контейнере. HF provider импортирует её
+# лениво; без stubs mypy не может resolve type, этот override делает
+# import opaque (typed как Any) вместо missing-stubs error.
+module = ["sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
 python_files = ["test_*.py"]
