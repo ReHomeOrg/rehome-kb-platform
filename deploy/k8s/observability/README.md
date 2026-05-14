@@ -12,6 +12,7 @@ Pin'аются по schema version для reproducibility.
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 | `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
+| `kb-vault-audit-dashboard.json` | Grafana dashboard для vault security/audit (Cube CC, #180) |
 
 ## kb-indexer dashboard
 
@@ -236,6 +237,28 @@ Metrics из `src/api/chat/metrics.py` + `src/api/search/metrics.py`
 5. **Chat message E2E duration (5m, JSON mode)** — retrieval + LLM.
    Outliers до 30s. SSE durations — backlog.
 
+## kb-vault-audit dashboard
+
+**Назначение**: security forensic — vault unlock attempts + secret
+access patterns. Metrics из `src/api/vault/metrics.py` (Cube CC, #180).
+
+Zero-knowledge invariant (ADR-0011): metrics не leak'ят PII. Labels —
+только `result`, `action`, `category` (fixed enum). Никаких user_id /
+secret_id / plaintext.
+
+### Panels
+
+1. **Failed unlock attempts (last 1h)** — stat. Thresholds green=0 /
+   yellow ≥5 / red ≥20 (bruteforce indicator).
+2. **Unlock success ratio (15m)** — stat. Sustained <50% → UX bug
+   or attack. Thresholds red <50% / yellow / green ≥90%.
+3. **Unlock rate by result (5m)** — timeseries discriminates
+   success / failed lines.
+4. **Secret access rate by action (5m)** — stacked created/read/deleted.
+5. **Secret reads by category (1h)** — bar chart skew detection
+   (hot keys vs cold certs).
+6. **Cumulative vault events** — slope-based liveness check.
+
 ### Suggested alerts
 
 ```yaml
@@ -291,12 +314,34 @@ groups:
           severity: warning
         annotations:
           summary: "kb-retrieval p95 >500ms"
+
+  - name: kb-vault-audit
+    interval: 30s
+    rules:
+      - alert: KbVaultBruteforceSuspected
+        expr: increase(kb_vault_unlock_total{result="failed"}[1h]) > 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: ">50 failed unlocks за час — возможный bruteforce"
+          description: "Cross-reference с audit_log по user_id для identification"
+
+      - alert: KbVaultUnlockFailureSpike
+        expr: |
+          sum(rate(kb_vault_unlock_total{result="failed"}[5m]))
+            / sum(rate(kb_vault_unlock_total[5m]))
+              > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-vault unlock failure rate >50% за 10 минут"
+          description: "Либо bruteforce, либо backend хеш-validator broken"
 ```
 
 ## Backlog
 
-- **Vault audit dashboard** — unlock attempts (success/failed),
-  secret access patterns (compliance forensic).
 - **Service blackbox** — `up` / `probe_success` для liveness rollup.
 - **Chat SSE duration histogram** — wrap `_stream_message_events`
   generator для observability streaming response'ов.
