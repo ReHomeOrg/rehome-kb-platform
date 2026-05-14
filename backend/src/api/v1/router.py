@@ -13,6 +13,7 @@ from src.api.articles.router import router as articles_router
 from src.api.categories.router import router as categories_router
 from src.api.chat.router import router as chat_router
 from src.api.documents.router import router as documents_router
+from src.api.hr.router import router as hr_router
 from src.api.premises.router import router as premises_router
 from src.api.search.router import router as search_router
 from src.api.tags.router import router as tags_router
@@ -30,5 +31,6 @@ router.include_router(documents_router)
 router.include_router(chat_router)
 router.include_router(search_router)
 router.include_router(premises_router)
+router.include_router(hr_router)
 router.include_router(vault_router)
 router.include_router(webhooks_router)
