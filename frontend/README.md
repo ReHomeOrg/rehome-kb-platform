@@ -166,7 +166,9 @@ frontend/
   зависимые сценарии (auth flow, article view, chat message, document
   detail) — follow-up с docker compose stack.
 - **Dark mode** — Tailwind dark: prefix variants.
-- **a11y review** — axe-core в CI, aria-labels checks.
+- **a11y review** — axe-core integration landed (#158). WCAG 2.1 AA
+  violations checked в `e2e/a11y.spec.ts` (login + 404 pages).
+  Backend-зависимые pages — расширить после landing full-stack E2E.
 - **i18n** — пока только русский (single language).
 - **Generated TS types** из OpenAPI через `openapi-typescript-codegen`
   (сейчас handwritten).
