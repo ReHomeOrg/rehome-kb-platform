@@ -88,12 +88,20 @@ export default async function PremisesPage({
     <>
       <Nav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Квартиры</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Каталог сдаваемых квартир. Полная карточка с финансовыми и
-            контактными данными — для сотрудников reHome.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Квартиры</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Каталог сдаваемых квартир. Полная карточка с финансовыми и
+              контактными данными — для сотрудников reHome.
+            </p>
+          </div>
+          <Link
+            href="/premises/new"
+            className="shrink-0 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            + Новая карточка
+          </Link>
         </header>
         <SearchForm initialQuery={query} />
         {mode === "search" ? (
