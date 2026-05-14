@@ -86,6 +86,11 @@ make lint        # ESLint
 make typecheck   # tsc --noEmit (strict)
 make test        # Vitest run + coverage (порог 60% по ТЗ 8.3 для UI)
 make build       # Next.js production build
+
+# Playwright E2E (#151, smoke tests):
+npm run e2e:install   # one-time: скачивает Chromium browser (~140MB)
+npm run e2e           # запуск smoke tests против dev server (auto-spawn)
+npm run e2e:ui        # UI mode для разработки тестов
 ```
 
 ## Переменные окружения
@@ -156,8 +161,9 @@ frontend/
 
 ## Backlog после landing UI epic
 
-- **Playwright E2E** — реальный browser test main flows (auth, article
-  view, chat message, document detail). Требует CI job с full stack.
+- **Playwright E2E** — foundation landed в #151 (smoke tests для /login
+  + 404). Backend-зависимые сценарии (auth flow, article view, chat
+  message, document detail) + CI integration с full stack — follow-up.
 - **Dark mode** — Tailwind dark: prefix variants.
 - **a11y review** — axe-core в CI, aria-labels checks.
 - **i18n** — пока только русский (single language).

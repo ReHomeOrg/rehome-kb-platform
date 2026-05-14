@@ -8,6 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    // E2E tests (Playwright) живут в `e2e/` — отдельный runner;
+    // vitest их не подбирает. Default Vitest matcher — `*.test.*`,
+    // а e2e использует `*.spec.*` — fail-safe overlap.
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
