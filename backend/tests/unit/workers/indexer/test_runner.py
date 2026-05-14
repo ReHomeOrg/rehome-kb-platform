@@ -32,12 +32,33 @@ def _stub_indexer(model_id: str = "mock-v1") -> MagicMock:
     return indexer
 
 
+def _session_with_results(*results: Any) -> MagicMock:
+    """Helper: mock session.execute с list of side_effect results.
+
+    Каждый вызов execute возвращает следующий result из `results`.
+    Универсальный для tests где run_once вызывает execute несколько раз
+    (fetch_pending + pending_gauge count + opt. batch processing).
+    """
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=list(results))
+    session.commit = AsyncMock()
+    return session
+
+
+def _rows_result(rows: list[Any]) -> MagicMock:
+    """Mock result для execute returning iterable rows."""
+    return MagicMock(__iter__=lambda _self: iter(rows))
+
+
+def _count_result(value: int) -> MagicMock:
+    """Mock result для PENDING_ARTICLES gauge count query."""
+    return MagicMock(scalar_one=lambda: value)
+
+
 @pytest.mark.asyncio
 async def test_run_once_empty_returns_zero() -> None:
     """Нет pending articles → return 0, indexer не вызывается."""
-    session = MagicMock()
-    session.execute = AsyncMock(return_value=iter([]))
-    session.commit = AsyncMock()
+    session = _session_with_results(_rows_result([]), _count_result(0))
 
     indexer = _stub_indexer()
 
@@ -55,12 +76,9 @@ async def test_run_once_empty_returns_zero() -> None:
 @pytest.mark.asyncio
 async def test_run_once_processes_batch() -> None:
     """Pending articles → каждый передан indexer'у."""
-    session = MagicMock()
     article_ids = [uuid4(), uuid4(), uuid4()]
-    # Simulate result iterator с row-like объектами.
     rows = [MagicMock(id=aid, body_markdown=f"body-{i}") for i, aid in enumerate(article_ids)]
-    session.execute = AsyncMock(return_value=iter(rows))
-    session.commit = AsyncMock()
+    session = _session_with_results(_rows_result(rows), _count_result(0))
 
     indexer = _stub_indexer()
 
@@ -79,11 +97,9 @@ async def test_run_once_processes_batch() -> None:
 @pytest.mark.asyncio
 async def test_run_once_continues_on_per_article_failure() -> None:
     """Один article failed → остальные обрабатываются; processed считает только успехи."""
-    session = MagicMock()
     article_ids = [uuid4(), uuid4(), uuid4()]
     rows = [MagicMock(id=aid, body_markdown="body") for aid in article_ids]
-    session.execute = AsyncMock(return_value=iter(rows))
-    session.commit = AsyncMock()
+    session = _session_with_results(_rows_result(rows), _count_result(0))
 
     indexer = _stub_indexer()
     indexer.index_article = AsyncMock(side_effect=[2, RuntimeError("provider down"), 4])
@@ -103,10 +119,8 @@ async def test_run_once_continues_on_per_article_failure() -> None:
 @pytest.mark.asyncio
 async def test_run_once_skips_zero_chunk_articles() -> None:
     """index_article возвращает 0 (empty body) → не counted в processed."""
-    session = MagicMock()
     rows = [MagicMock(id=uuid4(), body_markdown="")]
-    session.execute = AsyncMock(return_value=iter(rows))
-    session.commit = AsyncMock()
+    session = _session_with_results(_rows_result(rows), _count_result(0))
 
     indexer = _stub_indexer()
     indexer.index_article = AsyncMock(return_value=0)  # empty body
@@ -125,7 +139,19 @@ async def test_run_once_skips_zero_chunk_articles() -> None:
 async def test_request_stop_breaks_run_forever() -> None:
     """stop_event прерывает loop."""
     session = MagicMock()
-    session.execute = AsyncMock(return_value=iter([]))
+    # Loop делает несколько iterations; каждая — 2 execute calls
+    # (fetch + count). Default mock возвращает same value во всех
+    # calls — proper для idle loop.
+    session.execute = AsyncMock(
+        side_effect=lambda *_: _rows_result([]) if False else _count_result(0)
+    )
+
+    # Простой mock: return rows_result iterating empty + count_result(0)
+    # by alternating. Используем cycle для безопасности.
+    from itertools import cycle
+
+    _cycle = cycle([_rows_result([]), _count_result(0)])
+    session.execute = AsyncMock(side_effect=lambda *_: next(_cycle))
     session.commit = AsyncMock()
 
     worker = IndexerWorker(
@@ -178,7 +204,12 @@ async def test_run_forever_recovers_from_batch_exception() -> None:
 async def test_fetch_pending_uses_current_model_id() -> None:
     """Query фильтрует embeddings по provider.model_id."""
     session = MagicMock()
-    session.execute = AsyncMock(return_value=iter([]))
+    # `run_once` теперь вызывает execute дважды: fetch pending + count
+    # для PENDING_ARTICLES gauge (#152). Second call возвращает
+    # mock с scalar_one. Empty fetch — empty iterator.
+    fetch_result = MagicMock(__iter__=lambda _self: iter([]))
+    count_result = MagicMock(scalar_one=lambda: 0)
+    session.execute = AsyncMock(side_effect=[fetch_result, count_result])
     session.commit = AsyncMock()
 
     indexer = _stub_indexer(model_id="hf-multilingual-e5-large-v2")
@@ -190,9 +221,11 @@ async def test_fetch_pending_uses_current_model_id() -> None:
         poll_interval_seconds=0.01,
     )
     await worker.run_once()
-    session.execute.assert_awaited_once()
-    stmt = session.execute.call_args.args[0]
-    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    # Первый execute — fetch_pending; второй — pending gauge count.
+    assert session.execute.await_count == 2
+    # First call query содержит model_id в bind params.
+    fetch_stmt = session.execute.call_args_list[0].args[0]
+    compiled = fetch_stmt.compile(compile_kwargs={"literal_binds": False})
     flat: list[object] = []
     for v in compiled.params.values():
         if isinstance(v, list):

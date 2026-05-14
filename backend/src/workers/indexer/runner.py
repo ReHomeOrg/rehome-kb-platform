@@ -26,17 +26,24 @@ import asyncio
 import contextlib
 import logging
 import signal
+import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from uuid import UUID
 
-from sqlalchemy import and_, not_, select
+from sqlalchemy import and_, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.models import Article
 from src.api.search.indexer import IndexerService
 from src.api.search.models import ArticleEmbedding
 from src.api.search.repository import EmbeddingRepository
+from src.workers.indexer.metrics import (
+    ARTICLES_FAILED_TOTAL,
+    ARTICLES_PROCESSED_TOTAL,
+    BATCH_DURATION_SECONDS,
+    PENDING_ARTICLES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +112,17 @@ class IndexerWorker:
         """Один batch tick. Returns count articles processed."""
         async with self._session_factory() as session:
             indexer = self._make_indexer(session)
+            model_id = indexer._provider.model_id
+            batch_start = time.perf_counter()
             pending = await self._fetch_pending_articles(session, indexer)
+            # Pending gauge — refreshed perевой fetch'е независимо
+            # от processing outcome. Approximate (batch_size limit
+            # truncates), но достаточно для backlog trend visibility.
+            await self._refresh_pending_gauge(session, model_id)
             if not pending:
+                BATCH_DURATION_SECONDS.labels(model_id=model_id).observe(
+                    time.perf_counter() - batch_start
+                )
                 return 0
             processed = 0
             for article_id, body_markdown in pending:
@@ -117,17 +133,60 @@ class IndexerWorker:
                     )
                     if n > 0:
                         processed += 1
+                        ARTICLES_PROCESSED_TOTAL.labels(model_id=model_id).inc()
+                    else:
+                        # n=0 — empty body / provider returned no embeddings.
+                        # `indexer.index_article` уже log'нет details; в
+                        # metrics это «отсутствие success», не failure.
+                        pass
                 except Exception:
+                    ARTICLES_FAILED_TOTAL.labels(model_id=model_id, reason="unknown").inc()
                     logger.exception(
                         "indexer_worker.article_failed",
                         extra={"article_id": str(article_id)},
                     )
             await session.commit()
+            BATCH_DURATION_SECONDS.labels(model_id=model_id).observe(
+                time.perf_counter() - batch_start
+            )
             logger.info(
                 "indexer_worker.batch_done",
                 extra={"processed": processed, "total_pending": len(pending)},
             )
             return processed
+
+    async def _refresh_pending_gauge(
+        self,
+        session: AsyncSession,
+        model_id: str,
+    ) -> None:
+        """Refresh `kb_indexer_pending_articles` gauge.
+
+        Counts PUBLISHED articles без embeddings под current model_id —
+        backlog visibility для Prometheus alerting.
+        """
+        embedding_exists = (
+            select(1)
+            .where(
+                and_(
+                    ArticleEmbedding.article_id == Article.id,
+                    ArticleEmbedding.embedding_model_id == model_id,
+                )
+            )
+            .exists()
+        )
+        stmt = select(func.count()).where(
+            Article.status == "PUBLISHED",
+            not_(embedding_exists),
+        )
+        try:
+            result = await session.execute(stmt)
+            count = result.scalar_one()
+        except Exception:
+            # Defensive: counting failure не должна валить batch'у.
+            logger.exception("indexer_worker.pending_count_failed")
+            return
+        PENDING_ARTICLES.labels(model_id=model_id).set(count or 0)
 
     async def _fetch_pending_articles(
         self,
