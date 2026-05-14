@@ -85,13 +85,17 @@ def _make_settings() -> Settings:
 
 
 def _counter_value(counter: Any, **labels: str) -> float:
-    """Reads current counter value для конкретного label set'а."""
-    return counter.labels(**labels)._value.get()
+    """Reads current counter value для конкретного label set'а.
+
+    `_value.get()` — prometheus_client internal, returns Any. Explicit
+    float() cast для mypy strict (no-any-return).
+    """
+    return float(counter.labels(**labels)._value.get())
 
 
 def _histogram_count(histogram: Any, **labels: str) -> float:
     """Reads histogram total observation count."""
-    return histogram.labels(**labels)._sum.get()
+    return float(histogram.labels(**labels)._sum.get())
 
 
 # ---------------------------------------------------------------------------
