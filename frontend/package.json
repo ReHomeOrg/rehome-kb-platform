@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "isomorphic-dompurify": "^3.12.0",
@@ -19,6 +22,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
