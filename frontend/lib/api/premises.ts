@@ -51,3 +51,56 @@ export async function searchPremises(
     headers: { "Content-Type": "application/json" },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Write side (#162) — staff_admin only.
+
+export interface PremisesCreateInput {
+  slug: string;
+  address: string;
+  status?: "DRAFT" | "PUBLISHED" | "RENTED" | "ARCHIVED";
+  internal_code?: string | null;
+  postal_code?: string | null;
+  cadastral_number?: string | null;
+  premises_uuid?: string | null;
+  owner?: Record<string, unknown>;
+  owner_representative?: Record<string, unknown> | null;
+  current_tenant?: Record<string, unknown> | null;
+  financial_data?: Record<string, unknown>;
+  tenant_info?: Record<string, unknown>;
+  internal_data?: Record<string, unknown>;
+  extra_identification?: Record<string, unknown>;
+}
+
+export async function createPremisesCard(
+  input: PremisesCreateInput,
+): Promise<PremisesView> {
+  return apiFetch<PremisesView>("/api/v1/premises-cards", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export type PremisesPatchInput = Partial<Omit<PremisesCreateInput, "slug">>;
+
+export async function patchPremisesCard(
+  slug: string,
+  input: PremisesPatchInput,
+): Promise<PremisesView> {
+  return apiFetch<PremisesView>(
+    `/api/v1/premises-cards/${encodeURIComponent(slug)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function archivePremisesCard(slug: string): Promise<void> {
+  await apiFetch<void>(
+    `/api/v1/premises-cards/${encodeURIComponent(slug)}`,
+    { method: "DELETE" },
+  );
+}
