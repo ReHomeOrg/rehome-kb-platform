@@ -41,6 +41,7 @@ from src.api.audit.actions import (
 )
 from src.api.audit.models import AuditLog
 from src.api.audit.repository import AuditRepository, get_audit_repository
+from src.api.audit.router import router as audit_router
 
 __all__ = [
     "ACTION_ARTICLES_ARCHIVED",
@@ -71,6 +72,7 @@ __all__ = [
     "ANON_ACTOR_TOKEN_PREFIX_LEN",
     "AuditLog",
     "AuditRepository",
+    "audit_router",
     "RESOURCE_ARTICLE",
     "RESOURCE_CHAT_SESSION",
     "RESOURCE_HR_EMPLOYEE",
