@@ -9,6 +9,7 @@ Pin'аются по schema version для reproducibility.
 |---|---|
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
+| `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
 
 ## kb-indexer dashboard
 
@@ -121,6 +122,29 @@ metrics из `src/api/webhooks/metrics.py` (Cube W, #174).
    histogram quantiles. Baseline 50-200ms (LAN subscriber); p95 >5s
    = subscriber slow или TLS handshake issue.
 
+## kb-vault-reminders dashboard
+
+**Назначение**: monitoring daily scanner за expiring vault secrets
+(ADR-0011 zero-knowledge). Metrics из `src/workers/vault_reminders/metrics.py`
+(Cube Y, #176).
+
+### Panels
+
+1. **Scans (last 24h)** — `increase(kb_vault_reminders_scan_total[24h])`.
+   Expected ≥1; 0 → cron died. Thresholds red <1 / green ≥1.
+
+2. **Scan errors (last 24h)** — `increase(kb_vault_reminders_scan_errors_total[24h])`.
+   ≥1 → investigate logs. Thresholds green=0 / red ≥1.
+
+3. **Reminders emitted (7d, by category)** — bar chart по
+   `vault_secrets.category`. Persistent skew → review rotation policy.
+
+4. **Cumulative scans + reminders** — smooth slope = healthy daily cron;
+   plateau = worker died.
+
+5. **Scan duration (p50/p95/p99, 1h)** — histogram quantiles. Baseline
+   50-200ms; p95 >1s → DB load или vault scale ballooning.
+
 ### Suggested alerts
 
 ```yaml
@@ -150,6 +174,27 @@ groups:
           severity: warning
         annotations:
           summary: "kb-webhooks p95 delivery >5s для {{$labels.event_type}}"
+
+  - name: kb-vault-reminders
+    interval: 30s
+    rules:
+      - alert: KbVaultRemindersScanMissed
+        expr: increase(kb_vault_reminders_scan_total[26h]) < 1
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-vault-reminders: nothing scanned за >24h"
+          description: "Worker died или scan_interval misconfig"
+
+      - alert: KbVaultRemindersErrors
+        expr: increase(kb_vault_reminders_scan_errors_total[24h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb-vault-reminders scan failure(s)"
+          description: "Check: kubectl logs -n rehome-kb deploy/kb-vault-reminders"
 ```
 
 ## Backlog
