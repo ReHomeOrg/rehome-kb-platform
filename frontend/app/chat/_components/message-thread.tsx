@@ -16,8 +16,9 @@ import { useRouter } from "next/navigation";
 
 import { getSession, streamMessage } from "@/lib/api/chat";
 import { ApiError } from "@/lib/api/client";
-import type { ChatMessage } from "@/lib/api/types";
+import type { ChatMessage, Citation } from "@/lib/api/types";
 
+import CitationsBlock from "./citations-block";
 import EscalateButton from "./escalate-button";
 import FeedbackButtons from "./feedback-buttons";
 import MessageInput from "./message-input";
@@ -45,6 +46,25 @@ function isChunkText(data: unknown): data is { text: string } {
   return typeof (data as Record<string, unknown>).text === "string";
 }
 
+function isCitationsPayload(data: unknown): data is { data: unknown[] } {
+  if (typeof data !== "object" || data === null) return false;
+  return Array.isArray((data as Record<string, unknown>).data);
+}
+
+function isCitation(value: unknown): value is Citation {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    v.type === "article" &&
+    typeof v.id === "string" &&
+    typeof v.title === "string" &&
+    typeof v.slug === "string" &&
+    typeof v.chunk_index === "number" &&
+    typeof v.score === "number" &&
+    typeof v.url === "string"
+  );
+}
+
 export default function MessageThread({
   sessionId,
   sessionToken,
@@ -52,6 +72,7 @@ export default function MessageThread({
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingAssistant, setPendingAssistant] = useState<string | null>(null);
+  const [pendingCitations, setPendingCitations] = useState<Citation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -94,6 +115,7 @@ export default function MessageThread({
     };
     setMessages((prev) => [...prev, userMessage]);
     setPendingAssistant("");
+    setPendingCitations([]);
     setError(null);
 
     try {
@@ -105,10 +127,14 @@ export default function MessageThread({
       let accumulated = "";
       let messageEnd: { message_id: string; total_tokens?: number } | null =
         null;
+      let citations: Citation[] = [];
       for await (const ev of iterator as AsyncIterableIterator<StreamEvent>) {
         if (ev.event === "chunk" && isChunkText(ev.data)) {
           accumulated += ev.data.text;
           setPendingAssistant(accumulated);
+        } else if (ev.event === "citations" && isCitationsPayload(ev.data)) {
+          citations = ev.data.data.filter(isCitation);
+          setPendingCitations(citations);
         } else if (ev.event === "message-end" && isMessageEnd(ev.data)) {
           messageEnd = ev.data;
         } else if (ev.event === "error") {
@@ -120,7 +146,7 @@ export default function MessageThread({
           id: messageEnd.message_id,
           role: "assistant",
           content: accumulated,
-          citations: [],
+          citations,
           feedback: null,
           token_count: messageEnd.total_tokens ?? null,
           duration_ms: null,
@@ -139,6 +165,7 @@ export default function MessageThread({
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
     } finally {
       setPendingAssistant(null);
+      setPendingCitations([]);
     }
   }
 
@@ -185,6 +212,9 @@ export default function MessageThread({
             <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
               {m.content}
             </p>
+            {m.role === "assistant" ? (
+              <CitationsBlock citations={m.citations} />
+            ) : null}
           </li>
         ))}
         {pendingAssistant !== null ? (
@@ -195,6 +225,7 @@ export default function MessageThread({
             <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
               {pendingAssistant}
             </p>
+            <CitationsBlock citations={pendingCitations} />
           </li>
         ) : null}
       </ul>
