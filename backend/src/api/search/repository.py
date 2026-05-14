@@ -47,6 +47,7 @@ class RetrievalHit:
 
     article_id: UUID
     slug: str
+    title: str
     chunk_index: int
     text: str
     char_start: int
@@ -170,6 +171,7 @@ class EmbeddingRepository:
             select(
                 ArticleEmbedding.article_id,
                 Article.slug,
+                Article.title,
                 ArticleEmbedding.chunk_index,
                 text_expr,
                 ArticleEmbedding.char_start,
@@ -190,6 +192,7 @@ class EmbeddingRepository:
             RetrievalHit(
                 article_id=row.article_id,
                 slug=row.slug,
+                title=row.title,
                 chunk_index=row.chunk_index,
                 text=row.text,
                 char_start=row.char_start,

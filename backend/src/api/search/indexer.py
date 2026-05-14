@@ -29,8 +29,9 @@ from uuid import UUID
 
 from fastapi import Depends
 
+from src.api.config import Settings, get_settings
 from src.api.search.chunker import chunk_text
-from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
+from src.api.search.embeddings import EmbeddingProvider
 from src.api.search.repository import EmbeddingRepository, get_embedding_repository
 
 logger = logging.getLogger(__name__)
@@ -151,11 +152,15 @@ class IndexerService:
 
 def get_indexer_service(
     repo: EmbeddingRepository = Depends(get_embedding_repository),
+    settings: Settings = Depends(get_settings),
 ) -> IndexerService:
-    """FastAPI dependency — IndexerService с default MockProvider.
+    """FastAPI dependency — IndexerService с settings-driven provider.
 
-    Real provider injection — отдельный embedding worker deployment
-    (ADR-0010). В gateway по-прежнему Mock; реальные vectors live ones
-    создаёт separate process'ом.
+    Indexer и retrieval ОБЯЗАНЫ использовать тот же provider (одинаковый
+    `model_id` — иначе search по индексу model_id'а вернёт пустоту).
+    Общее настройка через `EMBEDDING_PROVIDER` гарантирует это.
     """
-    return IndexerService(repo, MockEmbeddingProvider())
+    # Lazy import — избегаем circular import retrieval ↔ indexer.
+    from src.api.search.retrieval import _build_provider
+
+    return IndexerService(repo, _build_provider(settings))

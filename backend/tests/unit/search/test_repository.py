@@ -103,7 +103,9 @@ async def test_search_executes_query_with_access_filter() -> None:
     """Verify search SQL включает access_level filter (ADR-0003).
 
     Inspect compiled SQL — нет real DB, но проверяем что filter
-    действительно попадает в WHERE clause.
+    действительно попадает в WHERE clause через bound parameters
+    (более надёжно чем substring match на rendered SQL — устойчиво к
+    рефакторингу comment'ов и whitespace).
     """
     from src.api.auth.scope import AccessLevel
 
@@ -113,16 +115,29 @@ async def test_search_executes_query_with_access_filter() -> None:
     hits = await repo.search(
         query_vector=[0.1] * 4,
         access_levels=frozenset([AccessLevel.PUBLIC, AccessLevel.LOGGED]),
-        model_id="m",
+        model_id="my-model-v2",
         top_k=10,
     )
     assert hits == []
     session.execute.assert_awaited_once()
     stmt = session.execute.call_args.args[0]
-    sql_text = str(stmt.compile(compile_kwargs={"literal_binds": False}))
-    assert "access_level" in sql_text
-    assert "status" in sql_text
-    assert "embedding_model_id" in sql_text
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    # `params` — dict[name, value] от bound parameters. Структурная
+    # проверка: filter values действительно пробросились в SQL bind'ы
+    # (надёжнее substring match на rendered SQL). `query_vector` —
+    # unhashable list, поэтому используем `in` на flat list.
+    flat_values: list[object] = []
+    for v in compiled.params.values():
+        if isinstance(v, list) and v and not isinstance(v[0], float):
+            # list-bound (IN-expansion на access_levels). Skip vector
+            # list (floats).
+            flat_values.extend(v)
+        else:
+            flat_values.append(v)
+    assert "PUBLISHED" in flat_values  # status filter
+    assert "my-model-v2" in flat_values  # embedding_model_id filter
+    assert AccessLevel.PUBLIC.value in flat_values
+    assert AccessLevel.LOGGED.value in flat_values
 
 
 @pytest.mark.asyncio
