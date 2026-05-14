@@ -391,3 +391,21 @@ export interface PremisesSearchHit {
 export interface PremisesSearchResponse {
   data: PremisesSearchHit[];
 }
+
+// ============================================================================
+// Audit log (#166, backend #161)
+
+export interface AuditRecord {
+  id: string;
+  actor_sub: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AuditListResponse {
+  data: AuditRecord[];
+  pagination: { limit: number; offset: number; count: number };
+}
