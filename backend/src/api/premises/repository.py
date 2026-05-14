@@ -9,6 +9,9 @@ audit + RBAC.
 """
 
 from base64 import urlsafe_b64decode, urlsafe_b64encode
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -93,6 +96,92 @@ class PremisesRepository:
         rows = list(result.scalars().all())
         has_more = len(rows) > limit
         return rows[:limit], has_more
+
+    # -------- Write side (#148) ----------------------------------------
+
+    async def get_by_slug_raw(self, slug: str) -> PremisesCard | None:
+        """Lookup БЕЗ status filter — для write side (staff видит все)."""
+        result = await self._session.execute(select(PremisesCard).where(PremisesCard.slug == slug))
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        slug: str,
+        internal_code: str | None,
+        status: str,
+        address: str,
+        postal_code: str | None,
+        cadastral_number: str | None,
+        premises_uuid: UUID | None,
+        owner: dict[str, Any],
+        owner_representative: dict[str, Any] | None,
+        current_tenant: dict[str, Any] | None,
+        financial_data: dict[str, Any],
+        tenant_info: dict[str, Any],
+        internal_data: dict[str, Any],
+        extra_identification: dict[str, Any],
+    ) -> PremisesCard:
+        """INSERT новую карточку. Caller отвечает за commit.
+
+        IntegrityError на duplicate slug → перехватывается endpoint'ом
+        как 409 (стандартный pattern article repository).
+        """
+        card = PremisesCard(
+            slug=slug,
+            internal_code=internal_code,
+            status=status,
+            address=address,
+            postal_code=postal_code,
+            cadastral_number=cadastral_number,
+            premises_uuid=premises_uuid,
+            owner=owner,
+            owner_representative=owner_representative,
+            current_tenant=current_tenant,
+            financial_data=financial_data,
+            tenant_info=tenant_info,
+            internal_data=internal_data,
+            extra_identification=extra_identification,
+        )
+        self._session.add(card)
+        await self._session.flush()
+        return card
+
+    async def update(
+        self,
+        slug: str,
+        *,
+        patch: dict[str, Any],
+    ) -> PremisesCard | None:
+        """Partial update. Patch dict содержит только non-None fields.
+
+        Returns None если карточка не найдена.
+        Returns updated card иначе. archived_at filter — caller'ом
+        (нет смысла обновлять archived).
+        """
+        card = await self.get_by_slug_raw(slug)
+        if card is None or card.archived_at is not None:
+            return None
+        for key, value in patch.items():
+            setattr(card, key, value)
+        card.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return card
+
+    async def archive(self, slug: str) -> bool:
+        """Soft-delete: status='ARCHIVED' + archived_at.
+
+        Идемпотентно: повторный archive на уже-ARCHIVED → False (404
+        для caller'а).
+        """
+        card = await self.get_by_slug_raw(slug)
+        if card is None or card.archived_at is not None:
+            return False
+        card.status = "ARCHIVED"
+        card.archived_at = datetime.now(UTC)
+        card.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return True
 
 
 def get_premises_repository(
