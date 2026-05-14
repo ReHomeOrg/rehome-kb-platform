@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint, DateTime, Index, String, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,6 +84,13 @@ class PremisesCard(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # FTS auto-populated column (migration 0018, #154). Composite weighted
+    # vector: A=address, B=cadastral_number, C=postal_code. GIN index
+    # `ix_premises_cards_search_vector` для O(log) lookups.
+    # `init=False` чтобы ORM не пытался writeя при INSERT (GENERATED
+    # column — PG сам fills).
+    search_vector: Mapped[Any | None] = mapped_column(TSVECTOR, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
