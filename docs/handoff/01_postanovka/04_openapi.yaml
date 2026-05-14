@@ -2709,6 +2709,318 @@ paths:
                     example: 3 рабочих дня
                   message:
                     type: string
+
+  # ==========================================================================
+  # Implemented endpoints (#168 OpenAPI sync — landed модули добавлены здесь).
+  # Существующие path-определения в спеке выше — design-stage; landed
+  # backend имеет собственные эндпоинты ниже. Naming divergence отражает
+  # фактический shipping код (см. PR #142 / #147 / #148 / #149 / #153 /
+  # #163 / #166).
+  # ==========================================================================
+
+  /api/v1/premises-cards:
+    get:
+      tags: [Premises]
+      summary: Список карточек квартир (cursor pagination)
+      operationId: listPremisesCards
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Невалидный cursor
+    post:
+      tags: [Premises]
+      summary: Создать карточку квартиры (staff_admin)
+      operationId: createPremisesCard
+      responses:
+        '201':
+          description: Создано
+        '409':
+          description: slug already exists
+  /api/v1/premises-cards/search:
+    post:
+      tags: [Premises]
+      summary: Полнотекстовый поиск (Postgres FTS)
+      operationId: searchPremisesCards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [q]
+              properties:
+                q:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 20
+      responses:
+        '200':
+          description: Результаты
+  # NB: `/api/v1/premises-cards/{premises_id}` (line 740) — existing
+  # design-stage definition; landed реализация использует {slug}
+  # parameter (PR #142). Path template renaming — отдельный future cube
+  # (требует oasdiff coordination, см. spec §"renames" pattern).
+
+  /api/v1/hr/employees:
+    get:
+      tags: [HR]
+      summary: Список сотрудников (HR_RESTRICTED scope)
+      operationId: listHrEmployees
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: include_terminated
+        in: query
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: OK
+        '403':
+          description: Требуется HR_RESTRICTED scope
+    post:
+      tags: [HR]
+      summary: Создать карточку сотрудника
+      operationId: createHrEmployee
+      responses:
+        '201':
+          description: Создано
+  /api/v1/hr/employees/{employee_id}:
+    get:
+      tags: [HR]
+      summary: Карточка сотрудника (audited per view)
+      operationId: getHrEmployee
+      parameters:
+      - name: employee_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Не найден
+    patch:
+      tags: [HR]
+      summary: Partial update
+      operationId: patchHrEmployee
+      parameters:
+      - name: employee_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [HR]
+      summary: Архивировать (ФЗ-152 50-year retention compliance)
+      operationId: archiveHrEmployee
+      parameters:
+      - name: employee_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Архивирован
+
+  /api/v1/vault/me:
+    get:
+      tags: [Vault]
+      summary: Текущее crypto state пользователя (для unlock UI)
+      operationId: getVaultMe
+      responses:
+        '200':
+          description: salt + pubkey + encrypted_privkey + has_totp bit
+  /api/v1/vault/setup:
+    post:
+      tags: [Vault]
+      summary: Initial vault setup (zero-knowledge)
+      operationId: setupVault
+      responses:
+        '201':
+          description: Создано
+        '409':
+          description: Vault already set up
+  /api/v1/vault/unlock:
+    post:
+      tags: [Vault]
+      summary: Verify auth_hash (anti-bruteforce, audited)
+      operationId: unlockVault
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Invalid auth_hash
+  /api/v1/vault/secrets:
+    get:
+      tags: [Vault]
+      summary: List accessible secrets (metadata-only)
+      operationId: listVaultSecrets
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Vault]
+      summary: Create encrypted secret + wraps
+      operationId: createVaultSecret
+      responses:
+        '201':
+          description: Создано
+  /api/v1/vault/secrets/{secret_id}:
+    get:
+      tags: [Vault]
+      summary: Detail + caller wrapped_key (audited read)
+      operationId: getVaultSecret
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not found or no access (anti-enumeration)
+    put:
+      tags: [Vault]
+      summary: Update blob (optimistic version match)
+      operationId: updateVaultSecret
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '409':
+          description: Version mismatch
+    delete:
+      tags: [Vault]
+      summary: Archive (soft-delete, owner-only)
+      operationId: archiveVaultSecret
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Archived
+  /api/v1/vault/totp/setup:
+    post:
+      tags: [Vault]
+      summary: Enable TOTP 2FA (encrypted secret)
+      operationId: setupVaultTotp
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Vault не setup
+  /api/v1/vault/totp:
+    delete:
+      tags: [Vault]
+      summary: Disable TOTP 2FA
+      operationId: disableVaultTotp
+      responses:
+        '204':
+          description: Disabled
+
+  /api/v1/audit-log:
+    get:
+      tags: [Audit]
+      summary: Search audit log (LEGAL access)
+      description: 'Implemented endpoint для compliance search. ФЗ-152 SAR /
+        forensic. См. также `/api/v1/admin/audit-log` (design-stage, не
+        реализован).'
+      operationId: searchAuditLog
+      parameters:
+      - name: actor_sub
+        in: query
+        schema:
+          type: string
+      - name: resource_type
+        in: query
+        schema:
+          type: string
+      - name: resource_id
+        in: query
+        schema:
+          type: string
+      - name: action
+        in: query
+        schema:
+          type: string
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: until
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      responses:
+        '200':
+          description: OK
+        '403':
+          description: Требуется LEGAL scope
 components:
   securitySchemes:
     BearerAuth:
