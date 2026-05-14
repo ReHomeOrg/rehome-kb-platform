@@ -45,6 +45,7 @@ from src.api.audit import (
 )
 from src.api.auth.dependency import require_authenticated
 from src.api.db import get_session
+from src.api.vault.metrics import SECRET_ACCESS_TOTAL, UNLOCK_TOTAL
 from src.api.vault.models import VaultGroupMember, VaultSecret, VaultSecretWrap
 from src.api.vault.repository import VaultRepository, get_vault_repository
 from src.api.vault.schemas import (
@@ -173,6 +174,7 @@ async def unlock(
             resource_id=str(user_id),
         )
         await session.commit()
+        UNLOCK_TOTAL.labels(result="success").inc()
         return VaultUnlockResponse(success=True)
     await audit.record(
         actor_sub=str(user_id),
@@ -181,6 +183,7 @@ async def unlock(
         resource_id=str(user_id),
     )
     await session.commit()
+    UNLOCK_TOTAL.labels(result="failed").inc()
     raise HTTPException(status_code=401, detail="Invalid auth_hash")
 
 
@@ -268,6 +271,7 @@ async def create_secret(
         metadata={"category": secret.category, "wrap_count": len(wrap_models)},
     )
     await session.commit()
+    SECRET_ACCESS_TOTAL.labels(action="created", category=secret.category).inc()
 
     blob = await repo.get_secret_blob(secret.id)
     assert blob is not None
@@ -320,6 +324,7 @@ async def get_secret(
         resource_id=str(secret_id),
     )
     await session.commit()
+    SECRET_ACCESS_TOTAL.labels(action="read", category=secret.category).inc()
 
     return secret_detail_view(secret, blob, chosen.wrapped_key, via_group_id=chosen.group_id)
 
@@ -452,6 +457,7 @@ async def delete_secret(
         resource_id=str(secret_id),
     )
     await session.commit()
+    SECRET_ACCESS_TOTAL.labels(action="deleted", category=secret.category).inc()
 
 
 # ---------------------------------------------------------------------------
