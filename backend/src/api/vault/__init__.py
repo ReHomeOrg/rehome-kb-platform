@@ -14,6 +14,7 @@ from src.api.vault.models import (
     VaultUser,
 )
 from src.api.vault.repository import VaultRepository, get_vault_repository
+from src.api.vault.router import router as vault_router
 
 __all__ = [
     "VaultGroup",
@@ -24,4 +25,5 @@ __all__ = [
     "VaultSecretWrap",
     "VaultUser",
     "get_vault_repository",
+    "vault_router",
 ]
