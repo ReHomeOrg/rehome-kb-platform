@@ -23,12 +23,14 @@ from base64 import b64decode
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.audit import (
     ACTION_VAULT_GROUP_CREATED,
+    ACTION_VAULT_GROUP_MEMBER_ADDED,
+    ACTION_VAULT_GROUP_MEMBER_REMOVED,
     ACTION_VAULT_SECRET_CREATED,
     ACTION_VAULT_SECRET_DELETED,
     ACTION_VAULT_SECRET_READ,
@@ -48,6 +50,9 @@ from src.api.vault.repository import VaultRepository, get_vault_repository
 from src.api.vault.schemas import (
     VaultGroupCreateInput,
     VaultGroupListResponse,
+    VaultGroupMemberAddInput,
+    VaultGroupMemberListResponse,
+    VaultGroupMemberView,
     VaultGroupView,
     VaultMeView,
     VaultSecretCreateInput,
@@ -494,3 +499,150 @@ async def list_groups(
     user_id = _user_id_from_claims(claims)
     groups = await repo.list_groups_for_user(user_id)
     return VaultGroupListResponse(data=[group_view(g) for g in groups])
+
+
+# ---------------------------------------------------------------------------
+# Group members (#155) — owner-only management
+
+
+async def _require_group_owner(
+    repo: VaultRepository,
+    group_id: UUID,
+    user_id: UUID,
+) -> None:
+    """Helper: 403 если caller — НЕ owner данной группы.
+
+    404 если group не существует или caller — не member вообще (anti-
+    enumeration: чужие group_id не должны expose'иться через 403 vs 404).
+    """
+    group = await repo.get_group(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    member = await repo.get_group_member(group_id, user_id)
+    if member is None:
+        # 404, не 403 — anti-enumeration.
+        raise HTTPException(status_code=404, detail="Group not found")
+    if member.role != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail="Only group owner can manage members",
+        )
+
+
+@router.get(
+    "/groups/{group_id}/members",
+    response_model=VaultGroupMemberListResponse,
+    summary="List group members (must be member to see)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        404: {"description": "Group не найдена или caller — не member"},
+    },
+)
+async def list_group_members(
+    group_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+) -> VaultGroupMemberListResponse:
+    """Membership readable любому member группы. Non-member → 404."""
+    user_id = _user_id_from_claims(claims)
+    if not await repo.is_group_member(group_id, user_id):
+        raise HTTPException(status_code=404, detail="Group not found")
+    members = await repo.list_group_members(group_id)
+    return VaultGroupMemberListResponse(
+        data=[VaultGroupMemberView.model_validate(m) for m in members]
+    )
+
+
+@router.post(
+    "/groups/{group_id}/members",
+    response_model=VaultGroupMemberView,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add member to group (owner-only)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Caller — не owner данной группы"},
+        404: {"description": "Group не найдена или caller — не member"},
+        409: {"description": "User уже member"},
+    },
+)
+async def add_group_member(
+    group_id: UUID = Path(...),
+    payload: VaultGroupMemberAddInput = Body(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> VaultGroupMemberView:
+    """Add member. Client должен сделать follow-up calls для re-wrap'а
+    existing secrets под новый pubkey (см. POST /vault/secrets — wraps
+    можно add при secret create; для existing — отдельный endpoint в
+    follow-up PR'е).
+
+    Это PR обеспечивает membership change; cryptographic re-wrap —
+    отдельная операция (см. backlog Stage 1.4).
+    """
+    actor_id = _user_id_from_claims(claims)
+    await _require_group_owner(repo, group_id, actor_id)
+
+    # Idempotency: already-member → 409 (caller должен fetch existing).
+    if await repo.is_group_member(group_id, payload.user_id):
+        raise HTTPException(status_code=409, detail="User already member")
+
+    member = await repo.add_group_member(
+        group_id=group_id, user_id=payload.user_id, role=payload.role
+    )
+    await audit.record(
+        actor_sub=str(actor_id),
+        action=ACTION_VAULT_GROUP_MEMBER_ADDED,
+        resource_type=RESOURCE_VAULT_GROUP,
+        resource_id=str(group_id),
+        metadata={"added_user_id": str(payload.user_id), "role": payload.role},
+    )
+    await session.commit()
+    return VaultGroupMemberView.model_validate(member)
+
+
+@router.delete(
+    "/groups/{group_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove member from group (owner-only, can't remove self)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Caller — не owner или попытка removed себя"},
+        404: {"description": "Group или member не найдены"},
+    },
+)
+async def remove_group_member(
+    group_id: UUID = Path(...),
+    user_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Remove member. Defensive: owner НЕ может удалить себя — иначе
+    group остаётся без owner'а и becomes management-orphaned (force
+    transfer ownership через explicit endpoint — backlog).
+    """
+    actor_id = _user_id_from_claims(claims)
+    await _require_group_owner(repo, group_id, actor_id)
+
+    if user_id == actor_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot remove yourself; transfer ownership first",
+        )
+
+    removed = await repo.remove_group_member(group_id=group_id, user_id=user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    await audit.record(
+        actor_sub=str(actor_id),
+        action=ACTION_VAULT_GROUP_MEMBER_REMOVED,
+        resource_type=RESOURCE_VAULT_GROUP,
+        resource_id=str(group_id),
+        metadata={"removed_user_id": str(user_id)},
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
