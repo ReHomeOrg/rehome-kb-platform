@@ -65,6 +65,27 @@ class VaultRepository:
         await self._session.flush()
         return user
 
+    async def set_totp_secret(
+        self,
+        user_id: UUID,
+        totp_secret_encrypted: bytes | None,
+    ) -> VaultUser | None:
+        """Set or clear `totp_secret_encrypted` (#164).
+
+        `None` → disable TOTP. Returns updated row или None если
+        vault_user не существует (caller → 404).
+        """
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        user = await self.get_user(user_id)
+        if user is None:
+            return None
+        user.totp_secret_encrypted = totp_secret_encrypted
+        user.updated_at = _dt.now(UTC)
+        await self._session.flush()
+        return user
+
     # -----------------------------------------------------------------
     # VaultGroup
 

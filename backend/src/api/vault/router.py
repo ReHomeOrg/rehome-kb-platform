@@ -60,6 +60,7 @@ from src.api.vault.schemas import (
     VaultSecretUpdateInput,
     VaultSecretView,
     VaultSetupInput,
+    VaultTotpSetupInput,
     VaultUnlockInput,
     VaultUnlockResponse,
     group_view,
@@ -643,6 +644,89 @@ async def remove_group_member(
         resource_type=RESOURCE_VAULT_GROUP,
         resource_id=str(group_id),
         metadata={"removed_user_id": str(user_id)},
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# TOTP setup (#164) — 2FA enrollment
+
+
+@router.post(
+    "/totp/setup",
+    response_model=VaultMeView,
+    summary="Enable TOTP 2FA (store client-encrypted secret)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        404: {"description": "Vault не setup'нут"},
+    },
+)
+async def setup_totp(
+    payload: VaultTotpSetupInput = Body(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> VaultMeView:
+    """Store client-encrypted TOTP secret.
+
+    Zero-knowledge: client генерит TOTP secret (RFC 6238) + encrypts
+    под vault_key + POSTs ciphertext. Server stores opaque blob,
+    не может derive codes / verify.
+
+    Replaces existing secret если already set (rotation). Idempotent
+    same-value: client может re-POST one и тот же ciphertext.
+
+    После setup'а `GET /vault/me` возвращает `has_totp: true`.
+    """
+    user_id = _user_id_from_claims(claims)
+    updated = await repo.set_totp_secret(
+        user_id,
+        b64decode(payload.totp_secret_encrypted_b64),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Vault not set up")
+    await audit.record(
+        actor_sub=str(user_id),
+        action="vault.totp.enabled",
+        resource_type=RESOURCE_VAULT_USER,
+        resource_id=str(user_id),
+    )
+    await session.commit()
+    return me_view_from_user(updated)
+
+
+@router.delete(
+    "/totp",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disable TOTP 2FA (clear encrypted secret)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        404: {"description": "Vault не setup'нут или TOTP уже отключен"},
+    },
+)
+async def disable_totp(
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Clear `totp_secret_encrypted`. 404 если vault not set up или
+    TOTP уже disabled (idempotency note: повторный DELETE на already-
+    disabled → 404; caller должен check `has_totp` через /me)."""
+    user_id = _user_id_from_claims(claims)
+    user = await repo.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Vault not set up")
+    if user.totp_secret_encrypted is None:
+        raise HTTPException(status_code=404, detail="TOTP not enabled")
+    await repo.set_totp_secret(user_id, None)
+    await audit.record(
+        actor_sub=str(user_id),
+        action="vault.totp.disabled",
+        resource_type=RESOURCE_VAULT_USER,
+        resource_id=str(user_id),
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
