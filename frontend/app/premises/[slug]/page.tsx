@@ -68,9 +68,19 @@ export default async function PremisesDetailPage({
           ← К списку квартир
         </Link>
         <header>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {card.address}
-          </h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              {card.address}
+            </h1>
+            {isStaff ? (
+              <Link
+                href={`/premises/${card.slug}/edit`}
+                className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+              >
+                ✎ Редактировать
+              </Link>
+            ) : null}
+          </div>
           <dl className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
             <div>
               <dt className="font-medium text-gray-700">Статус</dt>
