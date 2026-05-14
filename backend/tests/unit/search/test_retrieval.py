@@ -16,6 +16,7 @@ def _hit(article_id: UUID, chunk_index: int = 0, score: float = 0.5) -> Retrieva
     return RetrievalHit(
         article_id=article_id,
         slug=f"slug-{article_id}",
+        title=f"Title {article_id}",
         chunk_index=chunk_index,
         text=f"chunk-{chunk_index}",
         char_start=0,
@@ -128,6 +129,35 @@ def test_rrf_fuse_respects_top_k() -> None:
 
 def test_rrf_fuse_empty_inputs() -> None:
     assert RetrievalService._rrf_fuse([], [], top_k=10) == []
+
+
+def test_rrf_fuse_bm25_only_articles_dropped() -> None:
+    """Article ранжированная только BM25 (без vector chunk match) НЕ
+    появляется в fused output.
+
+    Это осознанный trade-off (см. retrieval.py docstring §"BM25-only
+    article hits dropped"): output обязан быть chunk-granularity для
+    citations / chat-grounding, и article без конкретного chunk
+    бесполезна.
+    """
+    bm25_only = uuid4()
+    # vector_hits — пусто (или содержит другие article'и), BM25 нашёл
+    # `bm25_only` article, но без vector chunk — её не должно быть в fused.
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[],
+        bm25_articles=[(bm25_only, "title", "snippet", 0.9)],
+        top_k=10,
+    )
+    assert fused == []
+    # Тот же scenario с vector chunk'ами других article'й — BM25-only
+    # article всё равно не появляется.
+    other = uuid4()
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[_hit(other, chunk_index=0)],
+        bm25_articles=[(bm25_only, "title", "snippet", 0.9)],
+        top_k=10,
+    )
+    assert {h.article_id for h in fused} == {other}
 
 
 def test_rrf_score_replaces_distance_in_hit() -> None:
