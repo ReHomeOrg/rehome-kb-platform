@@ -12,6 +12,7 @@ RESOURCE_ARTICLE: Final = "article"
 RESOURCE_WEBHOOK: Final = "webhook"
 RESOURCE_CHAT_SESSION: Final = "chat_session"
 RESOURCE_PREMISES_CARD: Final = "premises_card"
+RESOURCE_HR_EMPLOYEE: Final = "hr_employee"
 
 # Article actions.
 ACTION_ARTICLES_CREATED: Final = "articles.created"
@@ -30,6 +31,14 @@ ACTION_CHAT_ESCALATED: Final = "chat.escalated"
 ACTION_PREMISES_CREATED: Final = "premises.created"
 ACTION_PREMISES_UPDATED: Final = "premises.updated"
 ACTION_PREMISES_ARCHIVED: Final = "premises.archived"
+
+# HR actions (#150, PZ §7).
+# Все read'ы employee records audit'ятся (PZ §7 — журналирование всех
+# просмотров для ФЗ-152 compliance).
+ACTION_HR_EMPLOYEE_VIEWED: Final = "hr.employee.viewed"
+ACTION_HR_EMPLOYEE_CREATED: Final = "hr.employee.created"
+ACTION_HR_EMPLOYEE_UPDATED: Final = "hr.employee.updated"
+ACTION_HR_EMPLOYEE_ARCHIVED: Final = "hr.employee.archived"
 
 # Vault actions (#146, ADR-0011).
 # Resource — `vault_secret` для secret-level operations, `vault_user` для
