@@ -1,0 +1,24 @@
+# Service для kb-indexer (#157). ClusterIP — internal-only (Prometheus
+# scrape via in-cluster service discovery; не публикуется ingress'ом).
+#
+# Anti-DoS / security: /metrics НЕ должен быть публичным. NetworkPolicy
+# (отдельный manifest, оставлен в backlog) restricts traffic to
+# prometheus-server pod's namespace + labels.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kb-indexer-metrics
+  namespace: rehome-kb
+  labels:
+    app.kubernetes.io/name: kb-indexer
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kb-indexer
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+      protocol: TCP
