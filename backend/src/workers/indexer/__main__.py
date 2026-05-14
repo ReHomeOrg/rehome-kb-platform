@@ -8,6 +8,7 @@ Environment:
 - `EMBEDDING_MODEL=intfloat/multilingual-e5-large`
 - `INDEXER_BATCH_SIZE=10`
 - `INDEXER_POLL_INTERVAL_SECONDS=30`
+- `INDEXER_METRICS_PORT=9100` (#152, 0 = disabled)
 """
 
 import asyncio
@@ -15,6 +16,7 @@ import logging
 import os
 import sys
 
+from prometheus_client import start_http_server
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.api.config import get_settings
@@ -40,6 +42,15 @@ async def main() -> None:
 
     batch_size = int(os.environ.get("INDEXER_BATCH_SIZE", "10"))
     poll_interval = float(os.environ.get("INDEXER_POLL_INTERVAL_SECONDS", "30"))
+    metrics_port = int(os.environ.get("INDEXER_METRICS_PORT", "9100"))
+
+    # Prometheus pull endpoint (#152). 0 = disabled (CI / dev без
+    # Prometheus). По умолчанию слушает 0.0.0.0:9100 — Anti-DoS
+    # invariant: внутренний port, scope'ить через k8s NetworkPolicy
+    # или nginx upstream только для Prometheus pod'а.
+    if metrics_port > 0:
+        start_http_server(metrics_port)
+        logger.info("indexer_worker.metrics_started", extra={"port": metrics_port})
 
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
