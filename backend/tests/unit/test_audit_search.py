@@ -418,9 +418,7 @@ async def test_repository_q_filter_compiles_with_ilike_wildcards() -> None:
     from unittest.mock import MagicMock
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = AuditRepository(session)
     await repo.list_records(q="article-foo", limit=10)
     stmt = session.execute.call_args.args[0]
@@ -436,9 +434,7 @@ async def test_repository_empty_q_skipped() -> None:
     from unittest.mock import MagicMock
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = AuditRepository(session)
     # Пустая строка falsy — не должна попасть в bind params.
     await repo.list_records(q="", limit=10)
