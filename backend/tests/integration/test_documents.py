@@ -217,13 +217,14 @@ def test_list_related_entity_filter(
 
 
 @pytest.mark.integration
-def test_list_related_entity_malformed_pattern_returns_422(
+def test_list_related_entity_invalid_chars_returns_422(
     kb_client: httpx.Client,
 ) -> None:
-    """Pattern `<type>:<identifier>` обязателен — anti-injection guard."""
+    """Pattern `^[A-Za-z0-9_.:-]{1,200}$` — anti-injection guard.
+    Pass space (charset violation) → 422."""
     response = kb_client.get(
         "/api/v1/documents",
-        params={"related_entity": "no-colon-here"},
+        params={"related_entity": "foo bar"},
     )
     assert response.status_code == 422
     assert "related_entity" in response.text
