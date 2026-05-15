@@ -50,9 +50,7 @@ def test_hr_create_anon_401(kb_client: httpx.Client) -> None:
 
 
 @pytest.mark.integration
-def test_hr_list_m2m_staff_admin_403(
-    kb_client: httpx.Client, m2m_token: str
-) -> None:
+def test_hr_list_m2m_staff_admin_403(kb_client: httpx.Client, m2m_token: str) -> None:
     """staff_admin НЕ имеет HR_RESTRICTED — 403 не 401."""
     response = kb_client.get(
         "/api/v1/hr/employees",
@@ -62,9 +60,7 @@ def test_hr_list_m2m_staff_admin_403(
 
 
 @pytest.mark.integration
-def test_hr_get_m2m_staff_admin_403(
-    kb_client: httpx.Client, m2m_token: str
-) -> None:
+def test_hr_get_m2m_staff_admin_403(kb_client: httpx.Client, m2m_token: str) -> None:
     response = kb_client.get(
         f"/api/v1/hr/employees/{uuid4()}",
         headers={"Authorization": f"Bearer {m2m_token}"},
@@ -73,9 +69,7 @@ def test_hr_get_m2m_staff_admin_403(
 
 
 @pytest.mark.integration
-def test_hr_create_m2m_staff_admin_403(
-    kb_client: httpx.Client, m2m_token: str
-) -> None:
+def test_hr_create_m2m_staff_admin_403(kb_client: httpx.Client, m2m_token: str) -> None:
     response = kb_client.post(
         "/api/v1/hr/employees",
         json={
@@ -89,9 +83,7 @@ def test_hr_create_m2m_staff_admin_403(
 
 
 @pytest.mark.integration
-def test_hr_patch_m2m_staff_admin_403(
-    kb_client: httpx.Client, m2m_token: str
-) -> None:
+def test_hr_patch_m2m_staff_admin_403(kb_client: httpx.Client, m2m_token: str) -> None:
     response = kb_client.patch(
         f"/api/v1/hr/employees/{uuid4()}",
         json={"position": "Senior Engineer"},
@@ -101,9 +93,7 @@ def test_hr_patch_m2m_staff_admin_403(
 
 
 @pytest.mark.integration
-def test_hr_delete_m2m_staff_admin_403(
-    kb_client: httpx.Client, m2m_token: str
-) -> None:
+def test_hr_delete_m2m_staff_admin_403(kb_client: httpx.Client, m2m_token: str) -> None:
     response = kb_client.delete(
         f"/api/v1/hr/employees/{uuid4()}",
         headers={"Authorization": f"Bearer {m2m_token}"},
