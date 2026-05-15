@@ -87,6 +87,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           defaultValue={initial.q}
           placeholder="substring (slug / UUID / field)"
           maxLength={200}
+          aria-label="Search metadata substring"
           className="w-56 rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
