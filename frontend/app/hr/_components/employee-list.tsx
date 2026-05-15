@@ -38,7 +38,10 @@ export default function EmployeeList({
 }: Props): JSX.Element {
   if (data.length === 0) {
     return (
-      <p className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+      <p
+        role="status"
+        className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600"
+      >
         Сотрудники не найдены.
       </p>
     );
@@ -54,14 +57,30 @@ export default function EmployeeList({
 
   return (
     <div className="flex flex-col gap-4">
-      <table className="w-full table-auto border-collapse text-sm">
+      <table
+        className="w-full table-auto border-collapse text-sm"
+        aria-label="Employee list"
+      >
+        <caption className="sr-only">
+          ФИО, должность, подразделение, дата приёма, статус сотрудника
+        </caption>
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-            <th className="py-2 pr-4">ФИО</th>
-            <th className="py-2 pr-4">Должность</th>
-            <th className="py-2 pr-4">Подразделение</th>
-            <th className="py-2 pr-4">Принят</th>
-            <th className="py-2 pr-4">Статус</th>
+            <th scope="col" className="py-2 pr-4">
+              ФИО
+            </th>
+            <th scope="col" className="py-2 pr-4">
+              Должность
+            </th>
+            <th scope="col" className="py-2 pr-4">
+              Подразделение
+            </th>
+            <th scope="col" className="py-2 pr-4">
+              Принят
+            </th>
+            <th scope="col" className="py-2 pr-4">
+              Статус
+            </th>
           </tr>
         </thead>
         <tbody>
