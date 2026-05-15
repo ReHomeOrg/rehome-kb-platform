@@ -11,8 +11,10 @@ from src.api.documents.storage import (
     StorageError,
     StorageNotConfiguredError,
     category_subdir,
+    compute_storage_key,
     presigned_get_url,
     reset_client_cache,
+    upload_object,
 )
 
 
@@ -150,3 +152,117 @@ def test_presigned_get_url_s3_error_no_such_key_is_not_transient(
     with pytest.raises(StorageError) as exc_info:
         presigned_get_url(s, "k")
     assert exc_info.value.transient is False
+
+
+# ---------------------------------------------------------------------------
+# compute_storage_key (Phase B #215)
+
+
+def test_compute_storage_key_matches_tz_hierarchy() -> None:
+    """Per TZ §3.2: legal/<subdir>/<doc_id>/<version>/<format>.<ext>."""
+    key = compute_storage_key(
+        category="B",
+        document_id="abc-123",
+        version="1.0",
+        file_format="pdf",
+    )
+    assert key == "legal/contracts/abc-123/1.0/pdf.pdf"
+
+
+def test_compute_storage_key_all_formats() -> None:
+    for fmt, ext in [("docx", "docx"), ("pdf", "pdf"), ("html", "html")]:
+        key = compute_storage_key(
+            category="A",
+            document_id="d",
+            version="2",
+            file_format=fmt,
+        )
+        assert key.endswith(f"/{fmt}.{ext}")
+
+
+def test_compute_storage_key_unknown_format_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown file_format"):
+        compute_storage_key(
+            category="A",
+            document_id="d",
+            version="1",
+            file_format="exe",
+        )
+
+
+def test_compute_storage_key_unknown_category_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown category"):
+        compute_storage_key(
+            category="Z",
+            document_id="d",
+            version="1",
+            file_format="pdf",
+        )
+
+
+# ---------------------------------------------------------------------------
+# upload_object (Phase B #215)
+
+
+def test_upload_object_minio_disabled_raises_not_configured() -> None:
+    s = _settings(minio_enabled=False)
+    with pytest.raises(StorageNotConfiguredError):
+        upload_object(s, "legal/external/d/1/pdf.pdf", b"data")
+
+
+def test_upload_object_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = _settings()
+    mock_client = MagicMock()
+
+    import src.api.documents.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "get_minio_client", lambda _: mock_client)
+
+    upload_object(s, "legal/contracts/d/1/pdf.pdf", b"hello", content_type="application/pdf")
+
+    kwargs = mock_client.put_object.call_args.kwargs
+    assert kwargs["bucket_name"] == "rehome-kb-files"
+    assert kwargs["object_name"] == "legal/contracts/d/1/pdf.pdf"
+    assert kwargs["length"] == 5
+    assert kwargs["content_type"] == "application/pdf"
+
+
+def test_upload_object_s3_error_internal_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    s = _settings()
+    from minio.error import S3Error
+
+    mock_client = MagicMock()
+    mock_client.put_object.side_effect = S3Error(
+        code="InternalError",
+        message="boom",
+        resource="x",
+        request_id="r",
+        host_id="h",
+        response=MagicMock(),
+    )
+
+    import src.api.documents.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "get_minio_client", lambda _: mock_client)
+
+    with pytest.raises(StorageError) as exc_info:
+        upload_object(s, "k", b"x")
+    assert exc_info.value.transient is True
+
+
+def test_upload_object_network_error_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    s = _settings()
+    mock_client = MagicMock()
+    mock_client.put_object.side_effect = ConnectionError("refused")
+
+    import src.api.documents.storage as storage_mod
+
+    monkeypatch.setattr(storage_mod, "get_minio_client", lambda _: mock_client)
+
+    with pytest.raises(StorageError) as exc_info:
+        upload_object(s, "k", b"x")
+    assert exc_info.value.transient is True

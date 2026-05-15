@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
     # Per TZ §3.4 — TTL подписи 5 минут.
     signed_url_ttl_seconds: int = Field(default=300, alias="SIGNED_URL_TTL_SECONDS")
+    # Phase B (ADR-0012): max payload для multipart upload, anti-DoS.
+    # 50 MB — приемлемо для legal docs (типичный DOCX < 5MB, PDF < 20MB).
+    # Большие файлы — backlog для multipart-init flow.
+    document_max_upload_bytes: int = Field(
+        default=50 * 1024 * 1024, alias="DOCUMENT_MAX_UPLOAD_BYTES"
+    )
 
     model_config = SettingsConfigDict(
         env_file=None,

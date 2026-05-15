@@ -10,12 +10,14 @@
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.documents.models import Document
 from src.api.documents.repository import DocumentRepository, get_document_repository
 from src.api.main import app
@@ -369,3 +371,230 @@ def test_download_minio_not_configured_returns_503(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/{id}/files — multipart upload (#215, ADR-0012 Phase B)
+
+
+@pytest.fixture
+def audit_mock() -> Iterator[AsyncMock]:
+    record = AsyncMock()
+    fake = MagicMock(spec=AuditRepository)
+    fake.record = record
+    app.dependency_overrides[get_audit_repository] = lambda: fake
+    yield record
+    app.dependency_overrides.pop(get_audit_repository, None)
+
+
+@pytest.fixture
+def upsert_file_mock(
+    override_repo: tuple[AsyncMock, AsyncMock],
+) -> AsyncMock:
+    """Дополняет override_repo `upsert_file` методом для POST handler'а."""
+    upsert = AsyncMock(side_effect=lambda doc, _entry: doc)
+    factory = app.dependency_overrides[get_document_repository]
+    repo = factory()
+    repo.upsert_file = upsert
+    return upsert
+
+
+def _multipart(file_bytes: bytes = b"hello-pdf", file_format: str = "pdf") -> dict[str, Any]:
+    return {
+        "files": {"file": ("test.pdf", file_bytes, "application/pdf")},
+        "data": {"format": file_format, "version": "1.0"},
+    }
+
+
+def test_upload_anon_returns_401(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+) -> None:
+    mp = _multipart()
+    resp = client.post(f"/api/v1/documents/{uuid4()}/files", **mp)
+    assert resp.status_code == 401
+
+
+def test_upload_tenant_returns_403(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """tenant scope не имеет STAFF → 403."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    mp = _multipart()
+    resp = client.post(
+        f"/api/v1/documents/{uuid4()}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        **mp,
+    )
+    assert resp.status_code == 403
+
+
+def test_upload_missing_file_returns_422(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/documents/{uuid4()}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"format": "pdf", "version": "1.0"},
+    )
+    assert resp.status_code == 422
+
+
+def test_upload_invalid_format_returns_422(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    mp = _multipart(file_format="exe")
+    resp = client.post(
+        f"/api/v1/documents/{uuid4()}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        **mp,
+    )
+    assert resp.status_code == 422
+
+
+def test_upload_doc_not_found_returns_404(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    _, get_mock = override_repo
+    get_mock.return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    mp = _multipart()
+    resp = client.post(
+        f"/api/v1/documents/{uuid4()}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        **mp,
+    )
+    assert resp.status_code == 404
+
+
+def test_upload_minio_not_configured_returns_503(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    upsert_file_mock: AsyncMock,
+    audit_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Default MINIO_ENABLED=False → 503."""
+    _, get_mock = override_repo
+    doc = _doc(confidentiality="INTERNAL")
+    get_mock.return_value = doc
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    mp = _multipart()
+    resp = client.post(
+        f"/api/v1/documents/{doc.id}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        **mp,
+    )
+    assert resp.status_code == 503
+    upsert_file_mock.assert_not_awaited()
+    audit_mock.assert_not_awaited()
+
+
+def test_upload_oversized_returns_413(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    upsert_file_mock: AsyncMock,
+    audit_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Body > document_max_upload_bytes → 413, MinIO не вызывается."""
+    from src.api.config import get_settings
+
+    base = get_settings()
+
+    def small_limit() -> Any:
+        return base.model_copy(update={"document_max_upload_bytes": 10})
+
+    app.dependency_overrides[get_settings] = small_limit
+    try:
+        _, get_mock = override_repo
+        doc = _doc(confidentiality="INTERNAL")
+        get_mock.return_value = doc
+        token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+        mp = _multipart(file_bytes=b"x" * 100)
+        resp = client.post(
+            f"/api/v1/documents/{doc.id}/files",
+            headers={"Authorization": f"Bearer {token}"},
+            **mp,
+        )
+        assert resp.status_code == 413
+        upsert_file_mock.assert_not_awaited()
+        audit_mock.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+
+def test_upload_success_returns_201_with_audit(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    upsert_file_mock: AsyncMock,
+    audit_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: MinIO put_object mocked, response shape + audit verified."""
+    _, get_mock = override_repo
+    doc = _doc(confidentiality="INTERNAL", category="B")
+    get_mock.return_value = doc
+
+    # Override get_session with a fake exposing async commit() (другие тесты
+    # могут оставить override с `object()` без commit, что сломает handler).
+    from src.api.db import get_session
+
+    fake_session = MagicMock()
+    fake_session.commit = AsyncMock()
+
+    async def _session_override() -> Any:
+        yield fake_session
+
+    app.dependency_overrides[get_session] = _session_override
+
+    # Mock upload_object to skip real MinIO call.
+    def _noop(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr("src.api.documents.router.upload_object", _noop)
+
+    token = make_jwt(roles=["staff_admin"], sub="alice-sub")
+    file_bytes = b"hello-pdf-payload"
+    mp = _multipart(file_bytes=file_bytes)
+    resp = client.post(
+        f"/api/v1/documents/{doc.id}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        **mp,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["format"] == "pdf"
+    assert body["version"] == "1.0"
+    assert body["size_bytes"] == len(file_bytes)
+    assert body["storage_key"] == f"legal/contracts/{doc.id}/1.0/pdf.pdf"
+    # sha256 — детерминистичный
+    import hashlib
+
+    assert body["sha256"] == hashlib.sha256(file_bytes).hexdigest()
+
+    upsert_file_mock.assert_awaited_once()
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "documents.file.uploaded"
+    assert kwargs["resource_type"] == "document"
+    assert kwargs["resource_id"] == str(doc.id)
+    md = kwargs["metadata"]
+    assert md["format"] == "pdf"
+    assert md["version"] == "1.0"
+    assert md["size_bytes"] == len(file_bytes)
+    assert md["sha256"] == body["sha256"]
+    fake_session.commit.assert_awaited_once()
+    app.dependency_overrides.pop(get_session, None)

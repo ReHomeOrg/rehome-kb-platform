@@ -5,10 +5,15 @@
 
 ADR-0008: Repository pattern обязателен. Router не работает с
 AsyncSession напрямую.
+
+#215 (ADR-0012 Phase B): добавлен `upsert_file` для multipart
+upload — мутирует JSONB array `documents.files` атомарно с audit
+row через caller's commit.
 """
 
 import re
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
@@ -96,6 +101,30 @@ class DocumentRepository:
         stmt = select(Document).where(*clauses).limit(1)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def upsert_file(
+        self,
+        document: Document,
+        file_entry: dict[str, Any],
+    ) -> Document:
+        """Вставляет или заменяет entry в `documents.files` по `format`.
+
+        Replace by format key — каждый формат уникален в files array.
+        Мутирует in-place — caller отвечает за `await session.commit()`
+        для atomicity с audit row.
+        """
+        # Replace existing entry с тем же format, либо append.
+        file_format = file_entry["format"]
+        new_files = [f for f in document.files if f.get("format") != file_format]
+        new_files.append(file_entry)
+        document.files = new_files
+        # Mark column as mutated — SQLAlchemy ORM не detects изменения
+        # внутри JSONB list automatically.
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(document, "files")
+        await self._session.flush()
+        return document
 
 
 def get_document_repository(
