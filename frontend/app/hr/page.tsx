@@ -50,7 +50,10 @@ export default async function HrPage({
           <Nav />
           <main className="mx-auto max-w-3xl px-6 py-8">
             <h1 className="text-2xl font-semibold tracking-tight">Кадры</h1>
-            <p className="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+            <p
+              role="status"
+              className="mt-4 rounded-md border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800"
+            >
               Доступ к разделу «Кадры» ограничен — требуется роль{" "}
               <code>staff_hr</code> или <code>director</code>.
             </p>
