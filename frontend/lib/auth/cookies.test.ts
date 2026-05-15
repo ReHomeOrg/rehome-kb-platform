@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   COOKIE_OAUTH_STATE,
@@ -28,10 +28,8 @@ describe("auth/cookies constants", () => {
 });
 
 describe("getCookieOptions", () => {
-  const originalEnv = process.env.NODE_ENV;
-
   afterAll(() => {
-    process.env.NODE_ENV = originalEnv;
+    vi.unstubAllEnvs();
   });
 
   it("httpOnly=true всегда (XSS-protection)", () => {
@@ -56,12 +54,12 @@ describe("getCookieOptions", () => {
   });
 
   it("secure=true в production env", () => {
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     expect(getCookieOptions(100).secure).toBe(true);
   });
 
   it("secure=false в development / test env", () => {
-    process.env.NODE_ENV = "development";
+    vi.stubEnv("NODE_ENV", "development");
     expect(getCookieOptions(100).secure).toBe(false);
   });
 });
