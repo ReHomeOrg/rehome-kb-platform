@@ -3140,6 +3140,68 @@ paths:
           description: OK
         '403':
           description: Требуется LEGAL scope
+  /api/v1/audit-log/export.csv:
+    get:
+      tags: [Audit]
+      summary: Export audit log as CSV (LEGAL access)
+      description: 'Streaming CSV export — same filters как JSON endpoint
+        (`GET /audit-log`). Hard cap 10000 rows для anti-DoS. UTF-8 с BOM
+        для Excel-compatibility. Columns: created_at, actor_sub, action,
+        resource_type, resource_id, metadata (single-line JSON).
+        Implemented в Cube U (#170).'
+      operationId: exportAuditLogCsv
+      parameters:
+      - name: actor_sub
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: resource_type
+        in: query
+        schema:
+          type: string
+          maxLength: 32
+      - name: resource_id
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: action
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: until
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: q
+        in: query
+        description: Substring search over metadata JSONB.
+        schema:
+          type: string
+          maxLength: 200
+      responses:
+        '200':
+          description: CSV download (Content-Disposition attachment)
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="audit_log_YYYYMMDD_HHMMSS.csv"'
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Требуется LEGAL scope
 components:
   securitySchemes:
     BearerAuth:
