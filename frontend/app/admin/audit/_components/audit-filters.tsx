@@ -23,6 +23,8 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
     <form
       method="get"
       action="/admin/audit"
+      role="search"
+      aria-label="Audit log filters"
       className="flex flex-wrap items-end gap-3 rounded-md border border-gray-200 bg-gray-50 p-4"
     >
       <label className="flex flex-col gap-1 text-xs">
@@ -32,6 +34,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           name="actor_sub"
           defaultValue={initial.actor_sub}
           placeholder="UUID или email"
+          aria-label="Actor subject identifier"
           className="w-48 rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
@@ -40,6 +43,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
         <select
           name="resource_type"
           defaultValue={initial.resource_type}
+          aria-label="Filter by resource type"
           className="w-32 rounded-md border border-gray-300 px-2 py-1 text-xs"
         >
           <option value="">все</option>
@@ -60,6 +64,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           name="resource_id"
           defaultValue={initial.resource_id}
           placeholder="slug / UUID"
+          aria-label="Filter by resource identifier"
           className="w-48 rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
@@ -70,6 +75,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           name="action"
           defaultValue={initial.action}
           placeholder="articles.created"
+          aria-label="Filter by action name"
           className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
@@ -90,6 +96,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           type="datetime-local"
           name="since"
           defaultValue={initial.since}
+          aria-label="From datetime (inclusive)"
           className="rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
@@ -99,6 +106,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           type="datetime-local"
           name="until"
           defaultValue={initial.until}
+          aria-label="Until datetime (exclusive)"
           className="rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
@@ -110,6 +118,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
       </button>
       <a
         href="/admin/audit"
+        aria-label="Reset all filters"
         className="text-xs text-blue-700 underline hover:text-blue-900"
       >
         Сбросить
