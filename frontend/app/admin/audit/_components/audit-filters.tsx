@@ -11,6 +11,8 @@ interface Props {
     resource_type: string;
     resource_id: string;
     action: string;
+    /** Substring search inside metadata JSONB (#183). */
+    q: string;
     since: string;
     until: string;
   };
@@ -69,6 +71,17 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           defaultValue={initial.action}
           placeholder="articles.created"
           className="w-44 rounded-md border border-gray-300 px-2 py-1 text-xs"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-600">Поиск в metadata</span>
+        <input
+          type="search"
+          name="q"
+          defaultValue={initial.q}
+          placeholder="substring (slug / UUID / field)"
+          maxLength={200}
+          className="w-56 rounded-md border border-gray-300 px-2 py-1 text-xs"
         />
       </label>
       <label className="flex flex-col gap-1 text-xs">

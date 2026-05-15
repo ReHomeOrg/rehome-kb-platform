@@ -13,6 +13,8 @@ export interface AuditFilters {
   resource_type?: string;
   resource_id?: string;
   action?: string;
+  /** Substring search over metadata JSONB (#183). */
+  q?: string;
   since?: string; // ISO 8601
   until?: string;
   limit?: number;
@@ -27,6 +29,7 @@ export async function listAudit(
   if (filters.resource_type) params.set("resource_type", filters.resource_type);
   if (filters.resource_id) params.set("resource_id", filters.resource_id);
   if (filters.action) params.set("action", filters.action);
+  if (filters.q) params.set("q", filters.q);
   if (filters.since) params.set("since", filters.since);
   if (filters.until) params.set("until", filters.until);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));

@@ -52,6 +52,11 @@ async def search_audit_log(
     action: str | None = Query(default=None, max_length=64),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
+    q: str | None = Query(
+        default=None,
+        max_length=200,
+        description="Substring match over metadata JSONB (#183, forensic discovery)",
+    ),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     _claims: dict[str, Any] = Depends(require_authenticated),
@@ -78,6 +83,7 @@ async def search_audit_log(
         action=action,
         since=since,
         until=until,
+        q=q,
         limit=limit,
         offset=offset,
     )
@@ -103,6 +109,7 @@ async def export_audit_log_csv(
     action: str | None = Query(default=None, max_length=64),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
     _claims: dict[str, Any] = Depends(require_authenticated),
     _legal_required: None = Depends(require_access_level(AccessLevel.LEGAL)),
     repo: AuditRepository = Depends(get_audit_repository),
@@ -127,6 +134,7 @@ async def export_audit_log_csv(
         action=action,
         since=since,
         until=until,
+        q=q,
         limit=CSV_EXPORT_MAX_ROWS,
         offset=0,
     )

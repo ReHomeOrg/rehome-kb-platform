@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import Text, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.audit.models import AuditLog
@@ -68,15 +68,23 @@ class AuditRepository:
         action: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AuditLog]:
-        """Filtered query для compliance UI (#163).
+        """Filtered query для compliance UI (#163, #183).
 
         Каждый фильтр — optional; combined через AND. Используются
         composite indexes (ix_audit_log_actor_created,
         ix_audit_log_resource_created) — date range scan'ы должны быть
         efficient.
+
+        `q` — substring match over metadata JSONB сериализованного в text.
+        Forensic discovery — позволяет искать по произвольным polymorphic
+        полям ("какие были changes на article X" → `q=article-slug`).
+        Сейчас — последовательный scan (нет GIN-индекса на metadata::text);
+        bounded `limit`/`since` обязательны при использовании `q` чтобы
+        избежать table scan на больших audit log.
 
         Ordering: `created_at DESC` (новейшие первые — типичный compliance
         review pattern).
@@ -97,6 +105,10 @@ class AuditRepository:
             stmt = stmt.where(AuditLog.created_at >= since)
         if until is not None:
             stmt = stmt.where(AuditLog.created_at < until)
+        if q:
+            # ILIKE на serialized JSON — каждый row visit'ится; ставим
+            # после datetime фильтров чтобы reduce candidate set first.
+            stmt = stmt.where(cast(AuditLog.audit_metadata, Text).ilike(f"%{q}%"))
         stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())

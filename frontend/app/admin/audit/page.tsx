@@ -18,6 +18,7 @@ interface PageProps {
     resource_type?: string;
     resource_id?: string;
     action?: string;
+    q?: string;
     since?: string;
     until?: string;
     offset?: string;
@@ -46,6 +47,7 @@ export default async function AuditPage({
     resource_type: params.resource_type || undefined,
     resource_id: params.resource_id || undefined,
     action: params.action || undefined,
+    q: params.q || undefined,
     since: normalizeIsoInput(params.since),
     until: normalizeIsoInput(params.until),
     limit: PAGE_SIZE,
@@ -113,6 +115,7 @@ export default async function AuditPage({
             resource_type: params.resource_type ?? "",
             resource_id: params.resource_id ?? "",
             action: params.action ?? "",
+            q: params.q ?? "",
             since: params.since ?? "",
             until: params.until ?? "",
           }}
