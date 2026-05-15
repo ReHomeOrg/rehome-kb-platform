@@ -22,30 +22,11 @@ import {
 import { ApiError } from "@/lib/api/client";
 import type { PremisesStatus, PremisesView } from "@/lib/api/types";
 
+import { jsonToString, parseJsonOrNull } from "./form-helpers";
+
 interface Props {
   /** When provided — edit mode; иначе create. */
   initial?: PremisesView;
-}
-
-function jsonToString(value: unknown): string {
-  if (value == null || (typeof value === "object" && Object.keys(value).length === 0)) {
-    return "";
-  }
-  return JSON.stringify(value, null, 2);
-}
-
-function parseJsonOrNull(str: string): Record<string, unknown> | null | string {
-  const trimmed = str.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed === null || (typeof parsed === "object" && !Array.isArray(parsed))) {
-      return parsed as Record<string, unknown> | null;
-    }
-    return "must be JSON object";
-  } catch {
-    return "invalid JSON";
-  }
 }
 
 const STATUSES: PremisesStatus[] = ["DRAFT", "PUBLISHED", "RENTED", "ARCHIVED"];
