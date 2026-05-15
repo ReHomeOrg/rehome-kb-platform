@@ -142,6 +142,124 @@ def test_list_category_filter(
 
 
 # ---------------------------------------------------------------------------
+# Cube HH (#185) — расширенное покрытие фильтров и pagination
+
+
+@pytest.fixture
+async def seed_extra_filters(db: asyncpg.Connection) -> AsyncIterator[dict[str, str]]:
+    """Seed для status / related_entity / cursor coverage.
+
+    Все PUBLIC чтобы isolation от access-level — отдельно тестируется.
+    """
+    suffix = uuid4().hex[:8]
+    draft_id = uuid4()
+    active_id = uuid4()
+    related_id = uuid4()
+
+    await db.execute(
+        """INSERT INTO documents (id, title, category, status, confidentiality)
+           VALUES ($1, $2, 'A', 'DRAFT', 'PUBLIC')""",
+        draft_id,
+        f"Draft Doc {suffix}",
+    )
+    await db.execute(
+        """INSERT INTO documents (id, title, category, status, confidentiality)
+           VALUES ($1, $2, 'A', 'ACTIVE', 'PUBLIC')""",
+        active_id,
+        f"Active Doc {suffix}",
+    )
+    await db.execute(
+        """INSERT INTO documents
+               (id, title, category, status, confidentiality, related_entity)
+           VALUES ($1, $2, 'A', 'ACTIVE', 'PUBLIC', $3)""",
+        related_id,
+        f"Premises Doc {suffix}",
+        f"premises:{suffix}",
+    )
+
+    yield {
+        "draft": str(draft_id),
+        "active": str(active_id),
+        "related": str(related_id),
+        "related_entity": f"premises:{suffix}",
+    }
+
+    for doc_id in (draft_id, active_id, related_id):
+        await db.execute("DELETE FROM documents WHERE id = $1", doc_id)
+
+
+@pytest.mark.integration
+def test_list_status_filter_draft(
+    kb_client: httpx.Client, seed_extra_filters: dict[str, str]
+) -> None:
+    response = kb_client.get(
+        "/api/v1/documents",
+        params={"status": "DRAFT", "limit": 100},
+    )
+    assert response.status_code == 200
+    ids = _ids_in_list(response.json())
+    assert seed_extra_filters["draft"] in ids
+    assert seed_extra_filters["active"] not in ids
+
+
+@pytest.mark.integration
+def test_list_related_entity_filter(
+    kb_client: httpx.Client, seed_extra_filters: dict[str, str]
+) -> None:
+    response = kb_client.get(
+        "/api/v1/documents",
+        params={"related_entity": seed_extra_filters["related_entity"], "limit": 100},
+    )
+    assert response.status_code == 200
+    ids = _ids_in_list(response.json())
+    assert seed_extra_filters["related"] in ids
+    assert seed_extra_filters["active"] not in ids
+
+
+@pytest.mark.integration
+def test_list_related_entity_invalid_chars_returns_422(
+    kb_client: httpx.Client,
+) -> None:
+    """Pattern `^[A-Za-z0-9_.:-]{1,200}$` — anti-injection guard.
+    Pass space (charset violation) → 422."""
+    response = kb_client.get(
+        "/api/v1/documents",
+        params={"related_entity": "foo bar"},
+    )
+    assert response.status_code == 422
+    assert "related_entity" in response.text
+
+
+@pytest.mark.integration
+def test_list_cursor_pagination(
+    kb_client: httpx.Client, seed_extra_filters: dict[str, str]
+) -> None:
+    """limit=1 → has_more=True + cursor_next; вторая страница работает."""
+    first = kb_client.get("/api/v1/documents", params={"limit": 1})
+    assert first.status_code == 200
+    body1 = first.json()
+    assert body1["pagination"]["has_more"] is True
+    cursor = body1["pagination"]["cursor_next"]
+    assert isinstance(cursor, str)
+    assert cursor
+
+    second = kb_client.get("/api/v1/documents", params={"limit": 1, "cursor": cursor})
+    assert second.status_code == 200
+    body2 = second.json()
+    # Курсор продвинул выборку — id'ы первой и второй страниц различаются.
+    ids1 = _ids_in_list(body1)
+    ids2 = _ids_in_list(body2)
+    assert ids1.isdisjoint(ids2)
+
+
+@pytest.mark.integration
+def test_list_invalid_limit_returns_422(kb_client: httpx.Client) -> None:
+    """limit < LIMIT_MIN или > LIMIT_MAX → 422."""
+    assert kb_client.get("/api/v1/documents", params={"limit": 0}).status_code == 422
+    assert kb_client.get("/api/v1/documents", params={"limit": 10000}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # GET /documents/{id} — detail
 
 
