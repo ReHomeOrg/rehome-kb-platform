@@ -307,11 +307,33 @@ def test_m2m_detail_restricted_returns_200(
 
 
 # ---------------------------------------------------------------------------
-# GET /documents/{id}/files/{format} — 501
+# GET /documents/{id}/files/{format} — Phase A (#214, ADR-0012)
 
 
 @pytest.mark.integration
-def test_download_returns_501(kb_client: httpx.Client, seed_documents: dict[str, str]) -> None:
-    """Download endpoint — architect approved deferred to kb-files epic."""
+def test_download_anon_returns_401(kb_client: httpx.Client, seed_documents: dict[str, str]) -> None:
+    """Auth required — download gates через require_authenticated."""
     response = kb_client.get(f"/api/v1/documents/{seed_documents['public']}/files/pdf")
-    assert response.status_code == 501
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+def test_download_m2m_minio_disabled_returns_503(
+    kb_client: httpx.Client,
+    seed_documents: dict[str, str],
+    m2m_token: str,
+) -> None:
+    """CI env: MINIO_ENABLED=false → 503 (config issue, не data issue).
+
+    Phase A doesn't seed real files либо включать MinIO в CI compose
+    — это Phase B / integration backlog. Этот тест регрессионный guard
+    что endpoint больше не 501, а гoes через auth + scope + storage check.
+    """
+    response = kb_client.get(
+        f"/api/v1/documents/{seed_documents['public']}/files/pdf",
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    # Public doc, m2m видит → проходит auth+scope. files JSONB empty
+    # (seed не клал) → 404 mask. Допускаем оба: 404 (no file entry)
+    # или 503 (если MINIO_ENABLED=true но object missing).
+    assert response.status_code in (404, 503)

@@ -13,4 +13,8 @@ prometheus-client==0.21.1
 # Server-side требует `pgvector/pgvector:pg16` Docker image (см. infra/
 # docker-compose.yml). ADR-0010 #126.
 pgvector==0.4.0
+# Object storage SDK (ADR-0012). Lightweight S3-compatible client.
+# Used только в documents/storage.py; lazy import чтобы boot не падал
+# если MINIO_ENABLED=False (CI default).
+minio==7.2.10
 

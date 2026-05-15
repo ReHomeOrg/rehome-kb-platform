@@ -20,12 +20,16 @@ FileFormat = Literal["docx", "pdf", "html"]
 class DocumentFile(BaseModel):
     """Один файл документа (метаданные без download URL).
 
-    Источник scheme — OpenAPI Document.files item.
+    Источник scheme — OpenAPI Document.files item. Phase A (#214) добавил
+    `storage_key` — MinIO object path, нужен для presigned URL generation
+    на GET /files/{format}. Поле optional (None) для legacy rows без
+    backed-up файла; router возвращает 404 в таком случае.
     """
 
     format: FileFormat
     size_bytes: int = Field(ge=0)
     sha256: str
+    storage_key: str | None = None
 
 
 class SignedBy(BaseModel):
