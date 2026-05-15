@@ -11,6 +11,8 @@ import Nav from "@/app/_components/nav";
 import { listTags } from "@/lib/api/tags";
 import { ApiError } from "@/lib/api/client";
 
+import TagsList from "./_components/tags-list";
+
 interface PageProps {
   searchParams: Promise<{
     q?: string;
@@ -85,51 +87,7 @@ export default async function TagsAdminPage({
             </a>
           ) : null}
         </form>
-        {error ? (
-          <p
-            role="status"
-            className="rounded-md border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800"
-          >
-            {error}
-          </p>
-        ) : body.data.length === 0 ? (
-          <p
-            role="status"
-            className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600"
-          >
-            Тегов не найдено.
-          </p>
-        ) : (
-          <table
-            className="w-full table-auto border-collapse text-sm"
-            aria-label="Tags list"
-          >
-            <caption className="sr-only">Tag name and article count</caption>
-            <thead>
-              <tr className="border-b border-gray-300 text-left uppercase text-xs text-gray-500">
-                <th scope="col" className="py-2 pr-3">
-                  Имя
-                </th>
-                <th scope="col" className="py-2 pr-3 text-right">
-                  Статей
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {body.data.map((tag) => (
-                <tr
-                  key={tag.name}
-                  className="border-b border-gray-100 align-top"
-                >
-                  <td className="py-2 pr-3 font-mono">{tag.name}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">
-                    {tag.article_count}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <TagsList data={body.data} error={error} />
       </main>
     </>
   );
