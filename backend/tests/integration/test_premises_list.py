@@ -1,4 +1,4 @@
-"""Integration: end-to-end GET /api/v1/premises с реальным Postgres.
+"""Integration: end-to-end GET /api/v1/premises-cards с реальным Postgres.
 
 Покрывает (#194):
 - Anonymous catalog list — identification subset only (no PII blocks).
@@ -93,7 +93,7 @@ def test_anon_list_returns_published_only(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
     """Catalog visible to anonymous — но только PUBLISHED status."""
-    response = kb_client.get("/api/v1/premises", params={"limit": 100})
+    response = kb_client.get("/api/v1/premises-cards", params={"limit": 100})
     assert response.status_code == 200, response.text
     slugs = _slugs_in_list(response.json())
     assert seed_premises["published"] in slugs
@@ -106,7 +106,7 @@ def test_list_response_omits_pii_blocks(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
     """List response — identification subset, без owner/financial/tenant_info."""
-    response = kb_client.get("/api/v1/premises", params={"limit": 100})
+    response = kb_client.get("/api/v1/premises-cards", params={"limit": 100})
     assert response.status_code == 200
     data = response.json()["data"]
     if data:
@@ -122,14 +122,14 @@ def test_list_response_omits_pii_blocks(
 
 @pytest.mark.integration
 def test_list_invalid_cursor_returns_400(kb_client: httpx.Client) -> None:
-    response = kb_client.get("/api/v1/premises", params={"cursor": "not-base64-cursor"})
+    response = kb_client.get("/api/v1/premises-cards", params={"cursor": "not-base64-cursor"})
     assert response.status_code == 400
 
 
 @pytest.mark.integration
 def test_list_invalid_limit_returns_422(kb_client: httpx.Client) -> None:
-    assert kb_client.get("/api/v1/premises", params={"limit": 0}).status_code == 422
-    assert kb_client.get("/api/v1/premises", params={"limit": 101}).status_code == 422
+    assert kb_client.get("/api/v1/premises-cards", params={"limit": 0}).status_code == 422
+    assert kb_client.get("/api/v1/premises-cards", params={"limit": 101}).status_code == 422
 
 
 @pytest.mark.integration
@@ -137,7 +137,7 @@ def test_list_cursor_pagination_works(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
     """limit=1 → has_more=true + cursor_next; следующая страница disjoint."""
-    first = kb_client.get("/api/v1/premises", params={"limit": 1})
+    first = kb_client.get("/api/v1/premises-cards", params={"limit": 1})
     assert first.status_code == 200
     body1 = first.json()
     if not body1["pagination"]["has_more"]:
@@ -145,7 +145,7 @@ def test_list_cursor_pagination_works(
     cursor = body1["pagination"]["cursor_next"]
     assert isinstance(cursor, str)
 
-    second = kb_client.get("/api/v1/premises", params={"limit": 1, "cursor": cursor})
+    second = kb_client.get("/api/v1/premises-cards", params={"limit": 1, "cursor": cursor})
     assert second.status_code == 200
     body2 = second.json()
     assert _slugs_in_list(body1).isdisjoint(_slugs_in_list(body2))
@@ -159,7 +159,7 @@ def test_list_cursor_pagination_works(
 def test_anon_get_published_returns_200(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
-    response = kb_client.get(f"/api/v1/premises/{seed_premises['published']}")
+    response = kb_client.get(f"/api/v1/premises-cards/{seed_premises['published']}")
     assert response.status_code == 200
     body = response.json()
     assert body["slug"] == seed_premises["published"]
@@ -170,7 +170,7 @@ def test_anon_get_draft_returns_404_mask(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
     """ADR-0003 404-mask — DRAFT невидим anon'у."""
-    response = kb_client.get(f"/api/v1/premises/{seed_premises['draft']}")
+    response = kb_client.get(f"/api/v1/premises-cards/{seed_premises['draft']}")
     assert response.status_code == 404
 
 
@@ -178,12 +178,12 @@ def test_anon_get_draft_returns_404_mask(
 def test_anon_get_archived_returns_404_mask(
     kb_client: httpx.Client, seed_premises: dict[str, str]
 ) -> None:
-    response = kb_client.get(f"/api/v1/premises/{seed_premises['archived']}")
+    response = kb_client.get(f"/api/v1/premises-cards/{seed_premises['archived']}")
     assert response.status_code == 404
 
 
 @pytest.mark.integration
 def test_get_invalid_slug_pattern_returns_422(kb_client: httpx.Client) -> None:
     """Slug pattern guard — anti-injection."""
-    response = kb_client.get("/api/v1/premises/!!!invalid!!!")
+    response = kb_client.get("/api/v1/premises-cards/!!!invalid!!!")
     assert response.status_code == 422
