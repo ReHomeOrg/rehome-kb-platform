@@ -63,6 +63,13 @@ ACTION_VAULT_GROUP_CREATED: Final = "vault.group.created"
 ACTION_VAULT_GROUP_MEMBER_ADDED: Final = "vault.group.member.added"
 ACTION_VAULT_GROUP_MEMBER_REMOVED: Final = "vault.group.member.removed"
 
+# Document file actions (#214, ADR-0012). Metadata machine-level only —
+# no filename / no content (анти-leak PII в audit_log JSONB).
+RESOURCE_DOCUMENT: Final = "document"
+ACTION_DOCUMENTS_FILE_DOWNLOADED: Final = "documents.file.downloaded"
+ACTION_DOCUMENTS_FILE_UPLOADED: Final = "documents.file.uploaded"
+ACTION_DOCUMENTS_FILE_ARCHIVED: Final = "documents.file.archived"
+
 # Anon chat actor format: `"anon:" + session_token[:N]`. 8 hex chars = 32 bits
 # of entropy — достаточно для audit uniqueness, минимально раскрывает токен.
 ANON_ACTOR_TOKEN_PREFIX_LEN: Final = 8

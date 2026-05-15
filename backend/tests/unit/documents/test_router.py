@@ -268,24 +268,104 @@ def test_detail_guest_uses_public_only_confidentiality(
 
 
 # ---------------------------------------------------------------------------
-# GET /documents/{id}/files/{format} → 501
+# GET /documents/{id}/files/{format} — 302 redirect (#214, ADR-0012 Phase A)
 
 
-def test_download_returns_501_not_implemented(
+def test_download_anon_returns_401(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock],
 ) -> None:
-    """Download endpoint deferred (architect approved deviation)."""
+    """Download — auth required (ADR-0003 baseline)."""
     resp = client.get(f"/api/v1/documents/{uuid4()}/files/pdf")
-    assert resp.status_code == 501
-    body = resp.json()
-    assert "not yet implemented" in body["detail"].lower()
+    assert resp.status_code == 401
 
 
 def test_download_invalid_format_returns_422(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
 ) -> None:
-    """Path-param `format` ∈ {docx, pdf, html}."""
-    resp = client.get(f"/api/v1/documents/{uuid4()}/files/zip")
+    """Path-param `format` ∈ {docx, pdf, html}. Auth → 422 для bad format."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/documents/{uuid4()}/files/zip",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 422
+
+
+def test_download_doc_not_found_returns_404(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """get_by_id returns None → 404 mask."""
+    _, get_mock = override_repo
+    get_mock.return_value = None
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/documents/{uuid4()}/files/pdf",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_download_format_missing_in_files_returns_404(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Document exists, но files JSONB не содержит requested format → 404."""
+    _, get_mock = override_repo
+    doc = _doc()
+    doc.files = [{"format": "docx", "size_bytes": 1024, "sha256": "x", "storage_key": "k"}]
+    get_mock.return_value = doc
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/documents/{doc.id}/files/pdf",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_download_no_storage_key_returns_404(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Legacy row без storage_key — 404 (анти-leak метаданных)."""
+    _, get_mock = override_repo
+    doc = _doc()
+    doc.files = [{"format": "pdf", "size_bytes": 1024, "sha256": "x"}]  # no storage_key
+    get_mock.return_value = doc
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/documents/{doc.id}/files/pdf",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_download_minio_not_configured_returns_503(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Default MINIO_ENABLED=False → 503."""
+    _, get_mock = override_repo
+    doc = _doc()
+    doc.files = [
+        {
+            "format": "pdf",
+            "size_bytes": 1024,
+            "sha256": "x",
+            "storage_key": "legal/external/d/1/pdf.pdf",
+        }
+    ]
+    get_mock.return_value = doc
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/documents/{doc.id}/files/pdf",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 503

@@ -1,20 +1,30 @@
-"""FastAPI router для `/api/v1/documents/*` (E2.8 #56).
+"""FastAPI router для `/api/v1/documents/*` (E2.8 #56, ADR-0012 #214).
 
 3 эндпоинта:
 - `GET /documents` — список метаданных (DocumentMeta, без PII).
 - `GET /documents/{id}` — detail (Document с signed_by + audit_log).
-- `GET /documents/{id}/files/{format}` → 501 (download deferred до
-  kb-files эпика; @architect approved в Issue #56).
+- `GET /documents/{id}/files/{format}` — 302 Redirect на presigned MinIO
+  URL с TTL 5 минут (TZ §3.4). Audit log пишется на каждый download.
 """
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.cursor import decode_cursor, encode_cursor
-from src.api.auth.dependency import get_current_access_levels
+from src.api.audit import (
+    ACTION_DOCUMENTS_FILE_DOWNLOADED,
+    RESOURCE_DOCUMENT,
+    AuditRepository,
+    get_audit_repository,
+)
+from src.api.auth.dependency import get_current_access_levels, require_authenticated
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings, get_settings
+from src.api.db import get_session
 from src.api.documents.access import compute_allowed_confidentialities
 from src.api.documents.repository import (
     RELATED_ENTITY_PATTERN,
@@ -26,6 +36,11 @@ from src.api.documents.schemas import (
     DocumentResponse,
     DocumentsListResponse,
     PaginationInfo,
+)
+from src.api.documents.storage import (
+    StorageError,
+    StorageNotConfiguredError,
+    presigned_get_url,
 )
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -145,23 +160,78 @@ async def get_document(
     )
 
 
+def _find_file(
+    files: list[dict[str, Any]],
+    file_format: str,
+) -> dict[str, Any] | None:
+    """Найти entry в `documents.files` JSONB array по format."""
+    for f in files:
+        if f.get("format") == file_format:
+            return f
+    return None
+
+
 @router.get(
     "/{document_id}/files/{file_format}",
-    summary="Скачать файл документа (NOT IMPLEMENTED)",
+    summary="Скачать файл документа (302 → MinIO signed URL)",
+    responses={
+        302: {"description": "Redirect на временный signed URL MinIO (TTL 5 мин)"},
+        401: {"description": "Не аутентифицирован"},
+        404: {"description": "Документ или формат не найден (anti-enumeration mask)"},
+        502: {"description": "MinIO returned error"},
+        503: {"description": "MinIO unreachable или не сконфигурирован"},
+    },
 )
 async def download_document_file(
-    document_id: UUID = Path(...),  # noqa: ARG001
-    file_format: FileFormat = Path(...),  # noqa: ARG001
-    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),  # noqa: ARG001
-) -> None:
-    """`GET /api/v1/documents/{id}/files/{format}` → 501.
+    document_id: UUID = Path(...),
+    file_format: FileFormat = Path(...),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: DocumentRepository = Depends(get_document_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    """`GET /api/v1/documents/{id}/files/{format}` → 302.
 
-    Architect approved deviation (Issue #56): полная реализация требует
-    MinIO + signed URL — отдельный kb-files эпик. Возвращаем 501
-    Not Implemented (стандартный HTTP-код для «эндпоинт известен, но
-    не реализован»).
+    Возвращает 302 Redirect на presigned MinIO URL с TTL 300s (TZ §3.4).
+    Сначала ADR-0003 access_level check (scope must see document), затем
+    JSONB lookup по format, затем audit_log row, затем signed URL.
+
+    Анти-enumeration: 404 для (no access | document missing | format
+    missing | files entry без storage_key). Backend не различает причины
+    наружу — лог содержит детали.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Document file download is not yet implemented (kb-files epic, Issue #56)",
+    allowed = compute_allowed_confidentialities(access_levels)
+    doc = await repo.get_by_id(document_id, allowed)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_entry = _find_file(doc.files, file_format)
+    if file_entry is None or not file_entry.get("storage_key"):
+        # Format отсутствует ИЛИ legacy row без storage_key — 404 mask.
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    try:
+        url = presigned_get_url(settings, file_entry["storage_key"])
+    except StorageNotConfiguredError:
+        raise HTTPException(
+            status_code=503,
+            detail="Document storage не сконфигурирован",
+        ) from None
+    except StorageError as exc:
+        status = 503 if exc.transient else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    # Audit на successful URL generation — пользователь физически ещё не
+    # скачал (302 follow client-side), но intent зафиксирован.
+    actor_sub = str(_claims.get("sub", "unknown"))
+    await audit.record(
+        actor_sub=actor_sub,
+        action=ACTION_DOCUMENTS_FILE_DOWNLOADED,
+        resource_type=RESOURCE_DOCUMENT,
+        resource_id=str(document_id),
+        metadata={"format": file_format, "size_bytes": file_entry.get("size_bytes")},
     )
+    await session.commit()
+
+    return RedirectResponse(url=url, status_code=302)

@@ -98,6 +98,20 @@ class Settings(BaseSettings):
     # migration — менять одновременно с model bump.
     embedding_dim: int = Field(default=1024, alias="EMBEDDING_DIM")
 
+    # Documents object storage (ADR-0012, TZ §3.4). MinIO/S3-compatible.
+    # `minio_enabled=False` default: read endpoint возвращает 503 пока ops
+    # не сконфигурируют MinIO; integration tests включают true с docker
+    # compose service.
+    minio_enabled: bool = Field(default=False, alias="MINIO_ENABLED")
+    minio_endpoint: str = Field(default="localhost:9000", alias="MINIO_ENDPOINT")
+    minio_access_key: str = Field(default="", alias="MINIO_ACCESS_KEY")
+    minio_secret_key: str = Field(default="", alias="MINIO_SECRET_KEY")
+    minio_bucket: str = Field(default="rehome-kb-files", alias="MINIO_BUCKET")
+    # `False` для local dev (HTTP); `True` для production (HTTPS).
+    minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
+    # Per TZ §3.4 — TTL подписи 5 минут.
+    signed_url_ttl_seconds: int = Field(default=300, alias="SIGNED_URL_TTL_SECONDS")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
