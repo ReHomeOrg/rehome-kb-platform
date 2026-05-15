@@ -23,7 +23,10 @@ export default function WebhooksTable({
 }: WebhooksTableProps): JSX.Element {
   if (webhooks.length === 0) {
     return (
-      <p className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+      <p
+        role="status"
+        className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600"
+      >
         Нет активных подписок.
       </p>
     );
@@ -31,14 +34,24 @@ export default function WebhooksTable({
 
   return (
     <div className="overflow-x-auto rounded-md border border-gray-200">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm" aria-label="Webhook subscriptions">
         <thead className="bg-gray-50 text-left text-xs uppercase text-gray-600">
           <tr>
-            <th className="px-3 py-2">URL</th>
-            <th className="px-3 py-2">События</th>
-            <th className="px-3 py-2">Last delivery</th>
-            <th className="px-3 py-2">Создан</th>
-            <th className="px-3 py-2 text-right">Действия</th>
+            <th scope="col" className="px-3 py-2">
+              URL
+            </th>
+            <th scope="col" className="px-3 py-2">
+              События
+            </th>
+            <th scope="col" className="px-3 py-2">
+              Last delivery
+            </th>
+            <th scope="col" className="px-3 py-2">
+              Создан
+            </th>
+            <th scope="col" className="px-3 py-2 text-right">
+              Действия
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">

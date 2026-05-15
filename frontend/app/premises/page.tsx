@@ -118,7 +118,10 @@ export default async function PremisesPage({
           </div>
         ) : null}
         {error ? (
-          <p className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <p
+            role="status"
+            className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+          >
             {error}
           </p>
         ) : (
