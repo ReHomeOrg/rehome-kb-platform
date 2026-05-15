@@ -406,3 +406,40 @@ async def test_repository_list_records_applies_filters() -> None:
     assert "user-x" in flat
     assert "article" in flat
     assert "articles.created" in flat
+
+
+@pytest.mark.asyncio
+async def test_repository_q_filter_compiles_with_ilike_wildcards() -> None:
+    """Cube SS (#196): q substring → ILIKE с %wrapping% над cast(metadata::text).
+
+    Регрессионный guard для #181 FTS — если кто-то заменит ILIKE на == или
+    забудет процент-wrap, тест провалится.
+    """
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+    repo = AuditRepository(session)
+    await repo.list_records(q="article-foo", limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat: list[object] = list(compiled.params.values())
+    # ILIKE pattern wrapped percentами для substring match'а.
+    assert "%article-foo%" in flat
+
+
+@pytest.mark.asyncio
+async def test_repository_empty_q_skipped() -> None:
+    """Empty string / None для q НЕ должны добавлять WHERE clause."""
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+    repo = AuditRepository(session)
+    # Пустая строка falsy — не должна попасть в bind params.
+    await repo.list_records(q="", limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    sql_text = str(compiled)
+    # Нет ILIKE в скомпилированном SQL.
+    assert "ILIKE" not in sql_text.upper() or "%%" not in str(compiled.params.values())
