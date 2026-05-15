@@ -58,4 +58,13 @@ describe("audit API", () => {
     await listAudit({ actor_sub: "", resource_type: undefined });
     expect(apiFetchMock.mock.calls[0][0]).toBe("/api/v1/audit-log");
   });
+
+  it("encodes q substring (#183)", async () => {
+    apiFetchMock.mockResolvedValueOnce({
+      data: [],
+      pagination: { limit: 50, offset: 0, count: 0 },
+    });
+    await listAudit({ q: "article-foo" });
+    expect(apiFetchMock.mock.calls[0][0]).toContain("q=article-foo");
+  });
 });

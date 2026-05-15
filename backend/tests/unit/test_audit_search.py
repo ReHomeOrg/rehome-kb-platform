@@ -159,6 +159,62 @@ def test_audit_date_filters(
     assert kwargs["until"] is not None
 
 
+def test_audit_q_filter_passed_to_repo(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Cube FF (#183) — `q` substring search метадаты."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log?q=article-foo",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert list_mock.call_args.kwargs["q"] == "article-foo"
+
+
+def test_audit_q_default_none(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get("/api/v1/audit-log", headers={"Authorization": f"Bearer {token}"})
+    assert list_mock.call_args.kwargs["q"] is None
+
+
+def test_audit_q_too_long_returns_422(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """`q` clamp на 200 chars — anti-DoS на long ILIKE pattern."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/audit-log?q={'x' * 201}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+def test_csv_export_q_passthrough(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """`q` also wired в CSV endpoint."""
+    list_mock.return_value = []
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log/export.csv?q=needle",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert list_mock.call_args.kwargs["q"] == "needle"
+
+
 def test_audit_invalid_limit_returns_422(
     client: TestClient,
     override_audit_repo: AsyncMock,
