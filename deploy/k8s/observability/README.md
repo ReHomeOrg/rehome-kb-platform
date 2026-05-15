@@ -10,6 +10,7 @@ Pin'аются по schema version для reproducibility.
 | `kb-api-dashboard.json` | Grafana dashboard для kb-api gateway (Cube AA, #178) |
 | `kb-chat-rag-dashboard.json` | Grafana dashboard для chat + RAG retrieval (Cube BB, #179) |
 | `kb-indexer-dashboard.json` | Grafana dashboard для kb-indexer worker (Cube N, #165) |
+| `kb-services-up-dashboard.json` | Grafana dashboard для liveness rollup (Cube EE, #182) |
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 | `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
 | `kb-vault-audit-dashboard.json` | Grafana dashboard для vault security/audit (Cube CC, #180) |
@@ -340,6 +341,49 @@ groups:
           description: "Либо bruteforce, либо backend хеш-validator broken"
 ```
 
+## kb-services-up dashboard
+
+**Назначение**: liveness rollup всех scrape targets `rehome-kb`
+namespace. Использует built-in Prometheus метрики (`up`,
+`scrape_duration_seconds`) — no app-level instrumentation нужно.
+Job filter — `job=~"kb-.*"`.
+
+### Panels
+
+1. **Service status (live)** — `up` value mapping 0→DOWN / 1→UP.
+   Big horizontal stat для at-a-glance overview.
+2. **Service up/down over time** — timeline по каждому target'у
+   (fillOpacity 30%). Discriminates flapping от sustained outage.
+3. **Uptime ratio (24h SLO)** — `avg_over_time(up[24h])`. Thresholds
+   red <99% / yellow 99-99.9% / green ≥99.9%.
+4. **Scrape duration per target** — `scrape_duration_seconds`.
+   Sustained >1s → target slow / overloaded.
+
+### Suggested alerts
+
+```yaml
+groups:
+  - name: kb-services-up
+    interval: 30s
+    rules:
+      - alert: KbServiceDown
+        expr: up{job=~"kb-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "kb service {{$labels.job}} ({{$labels.instance}}) DOWN"
+          description: "Prometheus scrape failed за >2 минут"
+
+      - alert: KbServiceSloBurn
+        expr: avg_over_time(up{job=~"kb-.*"}[1h]) < 0.99
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "kb service {{$labels.job}} uptime <99% за час"
+```
+
 ## Backlog
 
-- **Service blackbox** — `up` / `probe_success` для liveness rollup.
+_(empty — Stage 1 observability coverage complete.)_
