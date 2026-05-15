@@ -3114,6 +3114,14 @@ paths:
         schema:
           type: string
           format: date-time
+      - name: q
+        in: query
+        description: 'Substring search over metadata JSONB (forensic discovery,
+          #183). ILIKE on serialized JSON — bounded; combine with `since` for
+          large audit log.'
+        schema:
+          type: string
+          maxLength: 200
       - name: limit
         in: query
         schema:
