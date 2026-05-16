@@ -21,7 +21,8 @@ from collections.abc import Callable
 
 from src.api.chat.llm.base import LLMMessage, LLMProvider
 from src.eval.dataset import EvalPair
-from src.eval.metrics import EvalScores, citation_accuracy, estimate_cost_rub
+from src.eval.judge import Judge, JudgeInput
+from src.eval.metrics import EvalScores, composite_score, estimate_cost_rub
 from src.eval.report import PairResult
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ async def run_one(
     provider: LLMProvider,
     *,
     provider_name: str,
+    judge: Judge | None = None,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     extract_citations: CitationExtractor = _no_citations,
 ) -> PairResult:
@@ -92,17 +94,22 @@ async def run_one(
     latency = time.perf_counter() - started
     cost = estimate_cost_rub(provider_name, prompt_tokens, completion_tokens)
 
-    # MVP: только citation_accuracy computable; остальные None (LLMJudge backlog).
-    cit_score: float | None = None
-    if error is None:
-        cit_score = citation_accuracy(actual_citations, pair.expected_citations)
-
+    # Scoring через Judge если передан. Errored pair — все None (без output'а
+    # нечего оценивать).
     scores = EvalScores(
         answer_correctness=None,
         faithfulness=None,
-        citation_accuracy=cit_score,
+        citation_accuracy=None,
         refusal_correctness=None,
     )
+    if error is None and judge is not None:
+        scores = await judge.score(
+            JudgeInput(
+                pair=pair,
+                actual_answer=actual_answer,
+                actual_citations=actual_citations,
+            )
+        )
 
     return PairResult(
         pair_id=pair.id,
@@ -113,7 +120,7 @@ async def run_one(
         actual_answer=actual_answer,
         actual_citations=actual_citations,
         scores=scores,
-        composite=None,  # MVP: None пока LLMJudge не активен
+        composite=composite_score(scores),
         error=error,
     )
 
@@ -123,6 +130,7 @@ async def run_dataset(
     provider: LLMProvider,
     *,
     provider_name: str,
+    judge: Judge | None = None,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     extract_citations: CitationExtractor = _no_citations,
 ) -> list[PairResult]:
@@ -143,6 +151,7 @@ async def run_dataset(
             pair,
             provider,
             provider_name=provider_name,
+            judge=judge,
             system_prompt=system_prompt,
             extract_citations=extract_citations,
         )

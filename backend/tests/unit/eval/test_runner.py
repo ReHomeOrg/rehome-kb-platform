@@ -6,6 +6,7 @@ import pytest
 
 from src.api.chat.llm.base import LLMMessage, LLMProvider, LLMResponse
 from src.eval.dataset import EvalPair
+from src.eval.judge import MockJudge
 from src.eval.runner import run_dataset, run_one
 
 
@@ -47,7 +48,8 @@ def _pair(id_: str = "p1") -> EvalPair:
 
 
 @pytest.mark.asyncio
-async def test_run_one_happy_path() -> None:
+async def test_run_one_happy_path_without_judge() -> None:
+    """Без judge: все scores=None, composite=None."""
     provider = _FakeProvider(content="Залога нет", token_count=200)
     result = await run_one(_pair(), provider, provider_name="mock")
     assert result.pair_id == "p1"
@@ -55,10 +57,20 @@ async def test_run_one_happy_path() -> None:
     assert result.actual_answer == "Залога нет"
     assert result.prompt_tokens + result.completion_tokens == 200
     assert result.latency_seconds > 0
-    # MVP: только citation_accuracy computable.
-    assert result.scores.citation_accuracy is not None
+    # Без judge — все scores None.
+    assert result.scores.citation_accuracy is None
     assert result.scores.answer_correctness is None
-    # composite = None в MVP.
+    assert result.composite is None
+
+
+@pytest.mark.asyncio
+async def test_run_one_with_mock_judge_populates_scores() -> None:
+    """С MockJudge — citation_accuracy + answer_correctness computed."""
+    provider = _FakeProvider(content="Залога нет, сервисный платёж", token_count=200)
+    result = await run_one(_pair(), provider, provider_name="mock", judge=MockJudge())
+    assert result.scores.citation_accuracy is not None  # MockJudge computes
+    assert result.scores.answer_correctness is not None
+    # MVP: composite остаётся None потому что faithfulness/refusal None.
     assert result.composite is None
 
 
@@ -83,6 +95,7 @@ async def test_run_one_uses_custom_citation_extractor() -> None:
         _pair(),
         provider,
         provider_name="mock",
+        judge=MockJudge(),
         extract_citations=extract,
     )
     assert result.actual_citations == ["article:rental-service-fee-policy"]
