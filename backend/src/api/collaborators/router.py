@@ -23,8 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.audit import (
+    ACTION_COLLABORATOR_ACTIVATED,
     ACTION_COLLABORATOR_ARCHIVED,
     ACTION_COLLABORATOR_CREATED,
+    ACTION_COLLABORATOR_SUSPENDED,
     ACTION_COLLABORATOR_UPDATED,
     RESOURCE_COLLABORATOR,
     AuditRepository,
@@ -33,6 +35,7 @@ from src.api.audit import (
 from src.api.auth.dependency import get_current_access_levels, require_access_level
 from src.api.auth.scope import AccessLevel
 from src.api.collaborators.access import compute_visible_groups
+from src.api.collaborators.lifecycle import validate_activation, validate_suspension
 from src.api.collaborators.models import Collaborator
 from src.api.collaborators.repository import (
     CollaboratorRepository,
@@ -46,6 +49,7 @@ from src.api.collaborators.schemas import (
     CollaboratorPublic,
     CollaboratorsListResponse,
     PaginationInfo,
+    SuspendRequest,
 )
 from src.api.db import get_session
 
@@ -306,3 +310,128 @@ async def archive_collaborator(
         metadata={"previous_status": previous_status},
     )
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle (Slice 2, ADR-0014 §5, ТЗ §3.10.2)
+
+
+@router.post(
+    "/{collaborator_id}/activate",
+    summary="Активация коллаборанта (STAFF+)",
+    responses={
+        200: {"description": "Активирован (status=ACTIVE)"},
+        403: {"description": "Требуется STAFF scope"},
+        404: {"description": "Не найден"},
+        422: {"description": "Не выполнены invariants активации"},
+    },
+)
+async def activate_collaborator(
+    collaborator_id: UUID = Path(...),
+    _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: CollaboratorRepository = Depends(get_collaborator_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
+    """`POST /api/v1/collaborators/{id}/activate` (ТЗ §3.10.2).
+
+    Транзишн: DRAFT / PENDING_REVIEW / SUSPENDED → ACTIVE.
+
+    Invariants (ADR-0014 §5):
+    - `counterparty_check.result = "CLEAN"` (для групп A/B/C)
+    - `contract_document_id != null` (для A/B/C)
+    - `responsible_internal != null` (для всех, кроме D)
+
+    Нарушения → 422 со списком violations в `detail`.
+    """
+    allowed_groups = compute_visible_groups(access_levels)
+    c = await repo.get_by_id(collaborator_id, allowed_groups)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Collaborator not found")
+
+    violations = validate_activation(
+        current_status=c.status,
+        financial_group=c.financial_group,
+        counterparty_check=c.counterparty_check,
+        contract_document_id=c.contract_document_id,
+        responsible_internal=c.responsible_internal,
+    )
+    if violations:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "title": "Activation invariants not satisfied",
+                "violations": [v.as_dict() for v in violations],
+            },
+        )
+
+    previous_status = c.status
+    await repo.update_fields(c, {"status": "ACTIVE"})
+
+    await audit.record(
+        actor_sub="staff",
+        action=ACTION_COLLABORATOR_ACTIVATED,
+        resource_type=RESOURCE_COLLABORATOR,
+        resource_id=str(c.id),
+        metadata={"previous_status": previous_status},
+    )
+    await session.commit()
+    return _serialize_for_scope(c, access_levels)
+
+
+@router.post(
+    "/{collaborator_id}/suspend",
+    summary="Приостановка коллаборанта (STAFF+)",
+    responses={
+        200: {"description": "Приостановлен (status=SUSPENDED)"},
+        403: {"description": "Требуется STAFF scope"},
+        404: {"description": "Не найден"},
+        422: {"description": "Невалидный transition (только из ACTIVE)"},
+    },
+)
+async def suspend_collaborator(
+    payload: SuspendRequest,
+    collaborator_id: UUID = Path(...),
+    _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: CollaboratorRepository = Depends(get_collaborator_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
+    """`POST /api/v1/collaborators/{id}/suspend` (ТЗ §3.10.2).
+
+    Транзишн: ACTIVE → SUSPENDED. Требует `reason` в body
+    (свободный текст для compliance trail).
+    """
+    allowed_groups = compute_visible_groups(access_levels)
+    c = await repo.get_by_id(collaborator_id, allowed_groups)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Collaborator not found")
+
+    violations = validate_suspension(c.status)
+    if violations:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "title": "Suspend transition not allowed",
+                "violations": [v.as_dict() for v in violations],
+            },
+        )
+
+    previous_status = c.status
+    await repo.update_fields(c, {"status": "SUSPENDED"})
+
+    await audit.record(
+        actor_sub="staff",
+        action=ACTION_COLLABORATOR_SUSPENDED,
+        resource_type=RESOURCE_COLLABORATOR,
+        resource_id=str(c.id),
+        metadata={
+            "previous_status": previous_status,
+            "reason": payload.reason,
+            "until": payload.until,
+        },
+    )
+    await session.commit()
+    return _serialize_for_scope(c, access_levels)

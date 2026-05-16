@@ -174,6 +174,18 @@ class CollaboratorCreate(BaseModel):
         return self
 
 
+class SuspendRequest(BaseModel):
+    """POST /collaborators/{id}/suspend body (ТЗ §3.10.2)."""
+
+    reason: str = Field(min_length=1, max_length=500)
+    until: str | None = Field(
+        default=None,
+        max_length=20,
+        description="ISO-8601 дата восстановления (опционально). Caller-managed; "
+        "не enforced на стороне БД в Slice 2.",
+    )
+
+
 class CollaboratorPatch(BaseModel):
     """PATCH body — все поля optional. NB: `type` и `financial_group`
     можно менять, но проверяем invariant (как в Create).
@@ -247,4 +259,5 @@ __all__ = [
     "FinancialGroup",
     "LegalEntityType",
     "PaginationInfo",
+    "SuspendRequest",
 ]
