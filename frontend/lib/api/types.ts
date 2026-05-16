@@ -394,6 +394,88 @@ export interface PremisesSearchResponse {
 }
 
 // ============================================================================
+// Collaborators (ADR-0014, ТЗ §10)
+
+export type CollaboratorType =
+  | "management_company"
+  | "emergency_service"
+  | "repair_handyman"
+  | "cleaning"
+  | "moving"
+  | "key_delivery"
+  | "insurance"
+  | "payment_partner"
+  | "kyc_provider"
+  | "edo_provider"
+  | "sms_voice"
+  | "it_infrastructure"
+  | "legal_consultant"
+  | "other";
+
+export type CollaboratorFinancialGroup = "A" | "B" | "C" | "D";
+
+export type CollaboratorStatus =
+  | "DRAFT"
+  | "PENDING_REVIEW"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "ARCHIVED";
+
+export type CollaboratorLegalEntityType =
+  | "individual"
+  | "self_employed"
+  | "ip"
+  | "legal_entity";
+
+export interface CollaboratorPublic {
+  id: string;
+  type: CollaboratorType;
+  brand_name: string | null;
+  financial_group: CollaboratorFinancialGroup;
+  status: CollaboratorStatus;
+  service_area: string;
+  working_hours: string | null;
+  website: string | null;
+  rating: number | null;
+}
+
+export interface CollaboratorContact {
+  phone: string | null;
+  email: string | null;
+  messenger: string | null;
+  emergency_channel: boolean;
+  person_name: string | null;
+  person_role: string | null;
+}
+
+export interface CollaboratorInternal extends CollaboratorPublic {
+  name: string;
+  legal_entity_type: CollaboratorLegalEntityType | null;
+  inn: string | null;
+  ogrn: string | null;
+  kpp: string | null;
+  responsible_internal: string | null;
+  contract_document_id: string | null;
+  fallback_collaborator_id: string | null;
+  contacts: CollaboratorContact[];
+  financial_terms: Record<string, unknown>;
+  api_integration: Record<string, unknown>;
+  sla: Record<string, unknown>;
+  counterparty_check: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollaboratorAdmin extends CollaboratorInternal {
+  audit_log: Array<Record<string, unknown>>;
+}
+
+export interface CollaboratorsListResponse {
+  data: Array<CollaboratorPublic | CollaboratorInternal>;
+  pagination: PaginationInfo;
+}
+
+// ============================================================================
 // Audit log (#166, backend #161)
 
 export interface AuditRecord {
