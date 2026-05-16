@@ -443,3 +443,64 @@ async def test_repository_empty_q_skipped() -> None:
     sql_text = str(compiled)
     # Нет ILIKE в скомпилированном SQL.
     assert "ILIKE" not in sql_text.upper() or "%%" not in str(compiled.params.values())
+
+
+@pytest.mark.asyncio
+async def test_repository_resource_id_filter_applied() -> None:
+    """resource_id фильтр оборачивается в WHERE clause (line 101)."""
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+    repo = AuditRepository(session)
+    await repo.list_records(resource_id="doc-123", limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat = list(compiled.params.values())
+    assert "doc-123" in flat
+
+
+@pytest.mark.asyncio
+async def test_repository_since_filter_applied() -> None:
+    """since (datetime lower bound) → WHERE created_at >= :since (line 105)."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+    repo = AuditRepository(session)
+    since = datetime(2026, 5, 1, tzinfo=UTC)
+    await repo.list_records(since=since, limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat = list(compiled.params.values())
+    assert since in flat
+
+
+@pytest.mark.asyncio
+async def test_repository_until_filter_applied() -> None:
+    """until (datetime upper bound) → WHERE created_at < :until (line 107)."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
+    repo = AuditRepository(session)
+    until = datetime(2026, 5, 31, tzinfo=UTC)
+    await repo.list_records(until=until, limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat = list(compiled.params.values())
+    assert until in flat
+
+
+def test_get_audit_repository_factory_returns_repo_with_session() -> None:
+    """`get_audit_repository(session)` → AuditRepository(session) wrapper."""
+    from unittest.mock import MagicMock
+
+    from src.api.audit.repository import get_audit_repository
+
+    fake_session = MagicMock()
+    repo = get_audit_repository(fake_session)
+    assert isinstance(repo, AuditRepository)
+    assert repo._session is fake_session
