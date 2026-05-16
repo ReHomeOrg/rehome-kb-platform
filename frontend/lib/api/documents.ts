@@ -2,14 +2,16 @@
  * Documents API methods (UI.1 #75) — typed wrappers.
  *
  * Maps to backend `/api/v1/documents` (E2.8 #56).
- * NB: `/files/{format}` endpoint возвращает 501 в этом эпике
- * (architect approved deferral до kb-files эпика).
+ * Phase A (#214, ADR-0012): `/files/{format}` возвращает 302 на signed
+ * MinIO URL. Frontend использует `documentFileDownloadHref` для
+ * generation browser-side ссылки через proxy `/api/kb/...`.
  */
 
 import { apiFetch } from "./client";
 import type {
   Document,
   DocumentCategory,
+  DocumentFileFormat,
   DocumentsListResponse,
   DocumentStatus,
 } from "./types";
@@ -39,4 +41,19 @@ export async function listDocuments(
 
 export async function getDocument(id: string): Promise<Document> {
   return apiFetch<Document>(`/api/v1/documents/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Browser-side href для download endpoint'а — клик по `<a href>`
+ * триггерит full navigation в proxy `/api/kb/...`, который форвардит
+ * 302 от backend на signed MinIO URL.
+ *
+ * Используется только в client-компонентах. SSR не имеет смысла —
+ * download происходит по клику пользователя.
+ */
+export function documentFileDownloadHref(
+  documentId: string,
+  format: DocumentFileFormat,
+): string {
+  return `/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files/${encodeURIComponent(format)}`;
 }

@@ -143,6 +143,7 @@ export interface DocumentFile {
   format: DocumentFileFormat;
   size_bytes: number;
   sha256: string;
+  storage_key?: string | null;
 }
 
 export interface SignedBy {
