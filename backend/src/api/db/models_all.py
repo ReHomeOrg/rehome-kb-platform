@@ -9,6 +9,7 @@ from src.api.articles.models import Article, ArticleVersion
 from src.api.audit.models import AuditLog
 from src.api.categories.models import Category
 from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
+from src.api.collaborators.models import Collaborator
 from src.api.documents.models import Document
 from src.api.idempotency.models import IdempotencyKey
 from src.api.search.models import ArticleEmbedding
@@ -23,6 +24,7 @@ __all__ = [
     "ChatEscalation",
     "ChatMessage",
     "ChatSession",
+    "Collaborator",
     "Document",
     "IdempotencyKey",
     "Webhook",
