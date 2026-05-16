@@ -41,9 +41,7 @@ from src.api.db import get_session
 
 # Используем отдельный prefix — `/premises/{premises_id}/collaborators`
 # (не относится к /collaborators namespace).
-router = APIRouter(
-    prefix="/premises/{premises_id}/collaborators", tags=["Collaborators"]
-)
+router = APIRouter(prefix="/premises/{premises_id}/collaborators", tags=["Collaborators"])
 
 
 # Audit actions for junction (определены здесь чтобы не раздувать
