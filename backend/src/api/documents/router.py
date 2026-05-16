@@ -45,6 +45,15 @@ from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
 from src.api.db import get_session
 from src.api.documents.access import compute_allowed_confidentialities
+from src.api.documents.metrics import (
+    DOWNLOADED_TOTAL,
+    OUTCOME_NOT_FOUND,
+    OUTCOME_OVERSIZED,
+    OUTCOME_STORAGE_ERROR,
+    OUTCOME_STORAGE_UNAVAILABLE,
+    OUTCOME_SUCCESS,
+    UPLOADED_TOTAL,
+)
 from src.api.documents.repository import (
     RELATED_ENTITY_PATTERN,
     DocumentRepository,
@@ -226,20 +235,25 @@ async def download_document_file(
     allowed = compute_allowed_confidentialities(access_levels)
     doc = await repo.get_by_id(document_id, allowed)
     if doc is None:
+        DOWNLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_NOT_FOUND).inc()
         raise HTTPException(status_code=404, detail="Document not found")
     file_entry = _find_file(doc.files, file_format)
     if file_entry is None or not file_entry.get("storage_key"):
         # Format отсутствует ИЛИ legacy row без storage_key — 404 mask.
+        DOWNLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_NOT_FOUND).inc()
         raise HTTPException(status_code=404, detail="Document file not found")
 
     try:
         url = presigned_get_url(settings, file_entry["storage_key"])
     except StorageNotConfiguredError:
+        DOWNLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_STORAGE_UNAVAILABLE).inc()
         raise HTTPException(
             status_code=503,
             detail="Document storage не сконфигурирован",
         ) from None
     except StorageError as exc:
+        outcome = OUTCOME_STORAGE_UNAVAILABLE if exc.transient else OUTCOME_STORAGE_ERROR
+        DOWNLOADED_TOTAL.labels(format=file_format, outcome=outcome).inc()
         http_status = 503 if exc.transient else 502
         raise HTTPException(status_code=http_status, detail=str(exc)) from exc
 
@@ -255,6 +269,7 @@ async def download_document_file(
     )
     await session.commit()
 
+    DOWNLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_SUCCESS).inc()
     return RedirectResponse(url=url, status_code=302)
 
 
@@ -305,11 +320,13 @@ async def upload_document_file(
     allowed = compute_allowed_confidentialities(access_levels)
     doc = await repo.get_by_id(document_id, allowed)
     if doc is None:
+        UPLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_NOT_FOUND).inc()
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Read body с size check'ом (anti-DoS).
     body = await file.read()
     if len(body) > settings.document_max_upload_bytes:
+        UPLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_OVERSIZED).inc()
         raise HTTPException(
             status_code=413,
             detail=(
@@ -335,11 +352,14 @@ async def upload_document_file(
             content_type=file.content_type or "application/octet-stream",
         )
     except StorageNotConfiguredError:
+        UPLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_STORAGE_UNAVAILABLE).inc()
         raise HTTPException(
             status_code=503,
             detail="Document storage не сконфигурирован",
         ) from None
     except StorageError as exc:
+        outcome = OUTCOME_STORAGE_UNAVAILABLE if exc.transient else OUTCOME_STORAGE_ERROR
+        UPLOADED_TOTAL.labels(format=file_format, outcome=outcome).inc()
         http_status = 503 if exc.transient else 502
         raise HTTPException(status_code=http_status, detail=str(exc)) from exc
 
@@ -365,6 +385,7 @@ async def upload_document_file(
         },
     )
     await session.commit()
+    UPLOADED_TOTAL.labels(format=file_format, outcome=OUTCOME_SUCCESS).inc()
 
     return {
         "format": file_format,
