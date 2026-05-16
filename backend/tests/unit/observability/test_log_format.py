@@ -220,3 +220,64 @@ def test_filter_and_formatter_chain_surfaces_request_id_e2e() -> None:
         for f in saved_filters:
             root.addFilter(f)
         root.setLevel(saved_level)
+
+
+# ---------------------------------------------------------------------------
+# install_request_id_filter idempotency (#106, see logging.py:42-57)
+
+
+def test_install_filter_no_handlers_idempotent_skip() -> None:
+    """Root без handlers → filter ставится на root.filters. Повторный
+    install должен skip'нуть (RequestIdLogFilter уже в root.filters)."""
+    from src.api.observability import RequestIdLogFilter, install_request_id_filter
+
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_filters = list(root.filters)
+    try:
+        root.handlers.clear()
+        root.filters.clear()
+
+        install_request_id_filter()
+        first_count = sum(1 for f in root.filters if isinstance(f, RequestIdLogFilter))
+        assert first_count == 1
+
+        install_request_id_filter()  # idempotent — не должен добавить второй
+        second_count = sum(1 for f in root.filters if isinstance(f, RequestIdLogFilter))
+        assert second_count == 1, "RequestIdLogFilter дублирован в root.filters"
+    finally:
+        root.handlers.clear()
+        root.filters.clear()
+        for h in saved_handlers:
+            root.addHandler(h)
+        for f in saved_filters:
+            root.addFilter(f)
+
+
+def test_install_filter_handler_already_has_filter_skip() -> None:
+    """Handler с filter'ом уже стоящим → install skip'ает его без duplicate."""
+    from src.api.observability import RequestIdLogFilter, install_request_id_filter
+
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_filters = list(root.filters)
+    try:
+        root.handlers.clear()
+        root.filters.clear()
+        handler = logging.StreamHandler(StringIO())
+        root.addHandler(handler)
+
+        install_request_id_filter()
+        first_count = sum(1 for f in handler.filters if isinstance(f, RequestIdLogFilter))
+        assert first_count == 1
+
+        install_request_id_filter()  # second call must skip
+        second_count = sum(1 for f in handler.filters if isinstance(f, RequestIdLogFilter))
+        assert second_count == 1, "Filter дублирован на handler.filters"
+    finally:
+        root.handlers.clear()
+        root.filters.clear()
+        for h in saved_handlers:
+            root.addHandler(h)
+        for f in saved_filters:
+            root.addFilter(f)
