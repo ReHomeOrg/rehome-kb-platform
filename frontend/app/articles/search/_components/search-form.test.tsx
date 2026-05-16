@@ -38,4 +38,16 @@ describe("SearchForm", () => {
     fireEvent.click(screen.getByText("Найти"));
     expect(pushMock).toHaveBeenCalledWith("/articles/search");
   });
+
+  it("input onChange обновляет внутреннее состояние", () => {
+    pushMock.mockReset();
+    render(<SearchForm />);
+    const input = screen.getByPlaceholderText(/сервисный платёж/) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "ипотека" } });
+    expect(input.value).toBe("ипотека");
+    fireEvent.click(screen.getByText("Найти"));
+    expect(pushMock).toHaveBeenCalledWith(
+      `/articles/search?q=${encodeURIComponent("ипотека")}`,
+    );
+  });
 });

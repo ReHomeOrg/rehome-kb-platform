@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getArticle, listArticles, searchArticles } from "./articles";
+import {
+  getArticle,
+  getArticleHistory,
+  listArticles,
+  searchArticles,
+} from "./articles";
 
 vi.mock("next/headers", () => ({
   cookies: vi.fn(async () => ({ get: () => undefined })),
@@ -50,6 +55,17 @@ describe("articles API", () => {
     await getArticle("сервисный-платёж");
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain(encodeURIComponent("сервисный-платёж"));
+  });
+
+  it("getArticleHistory URL-encodes slug + hits /history endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [] })),
+    );
+    await getArticleHistory("сервисный-платёж");
+    const [url] = fetchMock.mock.calls[0];
+    const s = String(url);
+    expect(s).toContain(encodeURIComponent("сервисный-платёж"));
+    expect(s).toContain("/history");
   });
 
   it("searchArticles POSTs JSON body", async () => {
