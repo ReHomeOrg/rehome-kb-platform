@@ -8,6 +8,8 @@ from src.api.auth.scope import AccessLevel
 from src.api.collaborators.access import (
     COLLABORATOR_TYPES,
     FINANCIAL_GROUPS,
+    ONBOARDING_SOURCES,
+    PORTAL_ACCESS_LEVELS,
     STATUSES,
     TYPE_TO_FINANCIAL_GROUP,
     compute_visible_groups,
@@ -31,6 +33,16 @@ def test_4_financial_groups_per_tz() -> None:
 def test_5_statuses_per_tz() -> None:
     """ТЗ §10.5 фиксирует 5 статусов lifecycle."""
     assert set(STATUSES) == {"DRAFT", "PENDING_REVIEW", "ACTIVE", "SUSPENDED", "ARCHIVED"}
+
+
+def test_3_portal_access_levels_per_tz() -> None:
+    """ТЗ §10.8: NONE / LIGHT / FULL."""
+    assert set(PORTAL_ACCESS_LEVELS) == {"NONE", "LIGHT", "FULL"}
+
+
+def test_4_onboarding_sources() -> None:
+    """ADR-0015 §4: form / staff_invite / api / migration."""
+    assert set(ONBOARDING_SOURCES) == {"form", "staff_invite", "api", "migration"}
 
 
 def test_type_to_group_covers_13_of_14_types() -> None:

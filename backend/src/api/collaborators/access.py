@@ -54,6 +54,17 @@ LEGAL_ENTITY_TYPES: Final[tuple[str, ...]] = (
     "legal_entity",
 )
 
+# ТЗ §10.8 — уровни кабинета коллаборанта (Slice 3, ADR-0015).
+PORTAL_ACCESS_LEVELS: Final[tuple[str, ...]] = ("NONE", "LIGHT", "FULL")
+
+# ADR-0015 §4 — как коллаборант появился в системе.
+ONBOARDING_SOURCES: Final[tuple[str, ...]] = (
+    "form",  # self-form через /onboarding
+    "staff_invite",  # staff создал через POST /collaborators
+    "api",  # automated bulk import
+    "migration",  # backfilled from legacy
+)
+
 # ТЗ §10.3 invariant: pair (type, financial_group). 'other' — wildcard
 # (не в map'е, поэтому derive_financial_group raise'ит ValueError).
 TYPE_TO_FINANCIAL_GROUP: Final[dict[str, str]] = {
@@ -123,6 +134,8 @@ __all__ = [
     "COLLABORATOR_TYPES",
     "FINANCIAL_GROUPS",
     "LEGAL_ENTITY_TYPES",
+    "ONBOARDING_SOURCES",
+    "PORTAL_ACCESS_LEVELS",
     "STATUSES",
     "TYPE_TO_FINANCIAL_GROUP",
     "compute_visible_groups",

@@ -15,16 +15,15 @@ from src.api.collaborators.access import (
     COLLABORATOR_TYPES,
     FINANCIAL_GROUPS,
     LEGAL_ENTITY_TYPES,
+    ONBOARDING_SOURCES,
+    PORTAL_ACCESS_LEVELS,
     STATUSES,
     TYPE_TO_FINANCIAL_GROUP,
 )
 
-_MIGRATION = (
-    Path(__file__).resolve().parents[3]
-    / "alembic"
-    / "versions"
-    / "20260516_010000_collaborators_foundation.py"
-)
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "alembic" / "versions"
+_MIGRATION = _MIGRATIONS_DIR / "20260516_010000_collaborators_foundation.py"
+_MIGRATION_SLICE3 = _MIGRATIONS_DIR / "20260517_010000_collaborators_portal_access.py"
 
 
 def _extract_tuple(source: str, name: str) -> set[str]:
@@ -83,3 +82,19 @@ def test_migration_type_group_pairs_match_access() -> None:
         f"  access only: {set(TYPE_TO_FINANCIAL_GROUP.items()) - set(migration_pairs.items())}\n"
         f"  migration only: {set(migration_pairs.items()) - set(TYPE_TO_FINANCIAL_GROUP.items())}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 migration drift (portal_access + onboarding_source)
+
+
+def test_migration_portal_access_levels_match_access() -> None:
+    src = _MIGRATION_SLICE3.read_text(encoding="utf-8")
+    migration_levels = _extract_tuple(src, "_PORTAL_ACCESS_LEVELS")
+    assert migration_levels == set(PORTAL_ACCESS_LEVELS)
+
+
+def test_migration_onboarding_sources_match_access() -> None:
+    src = _MIGRATION_SLICE3.read_text(encoding="utf-8")
+    migration_sources = _extract_tuple(src, "_ONBOARDING_SOURCES")
+    assert migration_sources == set(ONBOARDING_SOURCES)

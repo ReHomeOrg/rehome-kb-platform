@@ -87,6 +87,17 @@ class Collaborator(Base):
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
 
+    # Slice 3 (ADR-0015) — portal access tier + onboarding metadata.
+    portal_access_level: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="NONE", server_default="NONE"
+    )
+    portal_access_history: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    onboarding_source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="staff_invite", server_default="staff_invite"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
