@@ -20,3 +20,13 @@
 # Real-world impact: zero — код enforce'ил это с E4.1; клиенты без
 #   `access_level` уже получали 422. Спека догоняет реальность.
 property access_level became required
+
+# ============================================================
+# 2026-05-16 — Documents download: убираем 501 в пользу 302 (ADR-0012).
+# Architect approve: ADR-0012 (Принято 2026-05-15) + Issue #211 PR #211.
+# Backend изменение: PR #212 (Phase A landed) — 501 deferral заменён
+#   на реальный 302 + signed MinIO URL. Spec catch-up в этом PR.
+# Real-world impact: zero — клиенты не строили логику на 501; download
+#   был помечен `x-deferred-to-epic`.
+response 501 removed
+removed the success response with the status

@@ -669,21 +669,141 @@ paths:
                       $ref: '#/components/schemas/Document'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{id}/files:
+    post:
+      tags:
+      - Documents
+      summary: Загрузить файл документа
+      description: |
+        Multipart upload файла, ассоциированного с документом.
+        Только для staff-ролей (STAFF access_level и выше).
+
+        Pipeline:
+        1. Auth + scope-aware document lookup (404 mask для не-staff).
+        2. Read body с size limit `DOCUMENT_MAX_UPLOAD_BYTES`
+           (default 50 МБ).
+        3. Compute sha256.
+        4. Put в MinIO по пути `legal/<category_subdir>/<doc_id>/<version>/<format>.<ext>`
+           (TZ §3.2 hierarchy).
+        5. Upsert (replace by format) entry в `documents.files` JSONB.
+        6. Audit `documents.file.uploaded` с
+           `metadata={format, version, size_bytes, sha256}`.
+
+        Реализация ADR-0012 Phase B (#215).
+      operationId: uploadDocumentFile
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              - format
+              - version
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Содержимое файла (max `DOCUMENT_MAX_UPLOAD_BYTES`).
+                format:
+                  type: string
+                  enum:
+                  - docx
+                  - pdf
+                  - html
+                version:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                  description: Caller-controlled version label (например, "1.0").
+      responses:
+        '201':
+          description: Файл загружен, entry в `documents.files` upsert'нут.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - format
+                - version
+                - size_bytes
+                - sha256
+                - storage_key
+                properties:
+                  format:
+                    type: string
+                    enum:
+                    - docx
+                    - pdf
+                    - html
+                  version:
+                    type: string
+                  size_bytes:
+                    type: integer
+                    minimum: 0
+                  sha256:
+                    type: string
+                    description: Hex sha256 загруженного содержимого.
+                  storage_key:
+                    type: string
+                    description: MinIO object key (TZ §3.2 hierarchy).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Файл превышает `DOCUMENT_MAX_UPLOAD_BYTES`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Невалидный format / отсутствующие поля.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: MinIO вернул ошибку (не transient).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: MinIO не сконфигурирован или недоступен.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/documents/{id}/files/{format}:
     get:
       tags:
       - Documents
       summary: Скачать файл документа
       description: |
-        Возвращает 302 redirect на signed URL в MinIO с TTL 5 минут.
+        Возвращает 302 redirect на pre-signed MinIO URL c TTL 5 минут.
+        Authn обязателен (любой scope, видимость по ADR-0003).
 
-        ⚠️ ВРЕМЕННОЕ СОСТОЯНИЕ (Issue #56 / #59): текущая реализация
-        возвращает HTTP 501 Not Implemented — MinIO infrastructure
-        будет поднят в kb-files эпике. Architect approved deviation
-        (см. Issue #56 body). После завершения kb-files эпика
-        вернёмся к описанной здесь 302-семантике.
+        Audit: каждое успешное генерирование URL пишет запись
+        `documents.file.downloaded` в audit_log с
+        `metadata.format` и `metadata.size_bytes`.
+
+        Anti-enumeration: 404 в трёх случаях (нет доступа, документ
+        отсутствует, файл с таким format'ом не загружен) —
+        пользователь не различает причины.
+
+        Реализация ADR-0012 Phase A (#214).
       operationId: downloadDocumentFile
-      x-deferred-to-epic: kb-files
       parameters:
       - name: id
         in: path
@@ -702,19 +822,32 @@ paths:
           - html
       responses:
         '302':
-          description: Redirect на signed URL (target-поведение после kb-files).
+          description: Redirect на signed MinIO URL.
           headers:
             Location:
               schema:
                 type: string
                 format: uri
-        '501':
-          description: |
-            Not Implemented — kb-files epic не landed. Текущее состояние
-            backend'а до завершения epic'а (Issue #56 / #59). Полное
-            обоснование — в `description` operation'а выше.
+              description: Pre-signed URL с TTL `SIGNED_URL_TTL_SECONDS` (default 300с).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '502':
+          description: MinIO вернул ошибку (не transient).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            MinIO не сконфигурирован (`MINIO_ENABLED=false`) или
+            недоступен (network / transient 5xx). Клиент может
+            повторить запрос с backoff.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/premises-cards/{premises_id}:
     parameters:
     - name: premises_id
@@ -3611,6 +3744,12 @@ components:
                 type: integer
               sha256:
                 type: string
+              storage_key:
+                type: [string, 'null']
+                description: |
+                  MinIO object key (TZ §3.2). `null` для legacy rows
+                  без загруженного файла — download endpoint вернёт
+                  404. ADR-0012 Phase A (#214).
     Document:
       allOf:
       - $ref: '#/components/schemas/DocumentMeta'
