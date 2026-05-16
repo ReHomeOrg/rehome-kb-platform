@@ -43,7 +43,9 @@ ignore = [
 # Tests: pytest fixtures pass via argument-name dependency injection;
 # pytest "uses" them by virtue of being in the signature, even if not
 # referenced in the body. ARG001 (unused argument) is not meaningful here.
-"tests/**" = ["S101", "ARG001"]
+# ARG002: mock implementations of ABC interfaces часто не используют все
+# параметры (signature dictated by base class, не call site).
+"tests/**" = ["S101", "ARG001", "ARG002"]
 
 [tool.mypy]
 python_version = "3.12"
