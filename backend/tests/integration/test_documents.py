@@ -337,3 +337,65 @@ def test_download_m2m_minio_disabled_returns_503(
     # (seed не клал) → 404 mask. Допускаем оба: 404 (no file entry)
     # или 503 (если MINIO_ENABLED=true но object missing).
     assert response.status_code in (404, 503)
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/{id}/files — Phase B (#215, ADR-0012)
+
+
+@pytest.mark.integration
+def test_upload_anon_returns_401(kb_client: httpx.Client, seed_documents: dict[str, str]) -> None:
+    """Auth required для multipart upload."""
+    response = kb_client.post(
+        f"/api/v1/documents/{seed_documents['public']}/files",
+        files={"file": ("test.pdf", b"hello", "application/pdf")},
+        data={"format": "pdf", "version": "1.0"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+def test_upload_m2m_minio_disabled_returns_503(
+    kb_client: httpx.Client,
+    seed_documents: dict[str, str],
+    m2m_token: str,
+) -> None:
+    """CI env: MINIO_ENABLED=false → 503 (StorageNotConfigured).
+
+    m2m client has STAFF scope (per realm-export.json) → проходит
+    STAFF gate в require_access_level. Document visible → проходит
+    404-mask. Body OK → проходит size + sha256. upload_object → 503.
+    """
+    response = kb_client.post(
+        f"/api/v1/documents/{seed_documents['public']}/files",
+        files={"file": ("test.pdf", b"hello-pdf-payload", "application/pdf")},
+        data={"format": "pdf", "version": "1.0"},
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    # MINIO_ENABLED=false → 503. Если CI поднимет minio service,
+    # тест должен будет вернуть 201 + проверять upsert в files JSONB —
+    # это backlog когда docker compose добавит minio service.
+    assert response.status_code in (201, 503)
+
+
+@pytest.mark.integration
+def test_upload_m2m_oversized_returns_413(
+    kb_client: httpx.Client,
+    seed_documents: dict[str, str],
+    m2m_token: str,
+) -> None:
+    """50 МБ + 1 байт → 413 (anti-DoS guard).
+
+    Этот тест регрессионный guard на size check — если кто-то уберёт
+    `if len(body) > settings.document_max_upload_bytes`, MinIO будет
+    получать unbounded uploads → DoS vector.
+    """
+    # 50 МБ default + 1 байт. 50 * 1024 * 1024 + 1 = 52_428_801.
+    oversized = b"x" * (50 * 1024 * 1024 + 1)
+    response = kb_client.post(
+        f"/api/v1/documents/{seed_documents['public']}/files",
+        files={"file": ("big.pdf", oversized, "application/pdf")},
+        data={"format": "pdf", "version": "1.0"},
+        headers={"Authorization": f"Bearer {m2m_token}"},
+    )
+    assert response.status_code == 413
