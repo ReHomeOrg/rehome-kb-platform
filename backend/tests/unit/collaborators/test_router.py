@@ -488,3 +488,193 @@ def test_delete_archives_and_audits(
     kwargs = audit_mock.call_args.kwargs
     assert kwargs["action"] == "collaborator.archived"
     assert kwargs["metadata"]["previous_status"] == "ACTIVE"
+
+
+# ---------------------------------------------------------------------------
+# POST /collaborators/{id}/activate (Slice 2)
+
+
+def test_activate_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+    resp = client.post(f"/api/v1/collaborators/{uuid4()}/activate")
+    assert resp.status_code == 403
+
+
+def test_activate_d_group_from_draft_succeeds(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    c = _make_collab(group="D", status="DRAFT")
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/activate",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "collaborator.activated"
+    assert kwargs["metadata"]["previous_status"] == "DRAFT"
+
+
+def test_activate_a_group_without_clean_check_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """A-группа без CLEAN counterparty_check → 422 со списком violations."""
+    c = _make_collab(group="A", type_="payment_partner", status="DRAFT")
+    c.counterparty_check = {"result": "YELLOW"}
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/activate",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    violations = body["detail"]["violations"]
+    fields = {v["field"] for v in violations}
+    assert "counterparty_check.result" in fields
+    audit_mock.assert_not_awaited()
+
+
+def test_activate_already_active_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    c = _make_collab(group="D", status="ACTIVE")
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/activate",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+def test_activate_not_found_returns_404(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    override_repo["get"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{uuid4()}/activate",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /collaborators/{id}/suspend (Slice 2)
+
+
+def test_suspend_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+    resp = client.post(
+        f"/api/v1/collaborators/{uuid4()}/suspend",
+        json={"reason": "просрочка проверки"},
+    )
+    assert resp.status_code == 403
+
+
+def test_suspend_active_succeeds_with_reason(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    c = _make_collab(group="A", status="ACTIVE")
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/suspend",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"reason": "просрочка проверки контрагента"},
+    )
+    assert resp.status_code == 200, resp.text
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "collaborator.suspended"
+    assert kwargs["metadata"]["reason"] == "просрочка проверки контрагента"
+    assert kwargs["metadata"]["previous_status"] == "ACTIVE"
+
+
+def test_suspend_with_until_passed_to_audit(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    c = _make_collab(group="A", status="ACTIVE")
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/suspend",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"reason": "тех. работы партнёра", "until": "2026-06-01"},
+    )
+    assert resp.status_code == 200
+    assert audit_mock.call_args.kwargs["metadata"]["until"] == "2026-06-01"
+
+
+def test_suspend_missing_reason_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{uuid4()}/suspend",
+        headers={"Authorization": f"Bearer {token}"},
+        json={},
+    )
+    assert resp.status_code == 422  # Pydantic validation fail
+
+
+def test_suspend_non_active_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Suspend из DRAFT — 422 (transition не разрешён)."""
+    c = _make_collab(group="D", status="DRAFT")
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{c.id}/suspend",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"reason": "x"},
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    fields = {v["field"] for v in body["detail"]["violations"]}
+    assert "status" in fields
+
+
+def test_suspend_not_found_returns_404(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    override_repo["get"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/collaborators/{uuid4()}/suspend",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"reason": "x"},
+    )
+    assert resp.status_code == 404

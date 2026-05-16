@@ -82,3 +82,7 @@ RESOURCE_COLLABORATOR: Final = "collaborator"
 ACTION_COLLABORATOR_CREATED: Final = "collaborator.created"
 ACTION_COLLABORATOR_UPDATED: Final = "collaborator.updated"
 ACTION_COLLABORATOR_ARCHIVED: Final = "collaborator.archived"
+# Slice 2 lifecycle (ADR-0014 §5). Transition events отдельно от updated
+# для удобства аудита и compliance reporting.
+ACTION_COLLABORATOR_ACTIVATED: Final = "collaborator.activated"
+ACTION_COLLABORATOR_SUSPENDED: Final = "collaborator.suspended"

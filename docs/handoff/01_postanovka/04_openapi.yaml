@@ -2405,8 +2405,9 @@ paths:
 
         '
       operationId: activateCollaborator
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 2
+      x-adr: ADR-0014
       parameters:
       - name: collaborator_id
         in: path
@@ -2435,8 +2436,9 @@ paths:
 
         '
       operationId: suspendCollaborator
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 2
+      x-adr: ADR-0014
       parameters:
       - name: collaborator_id
         in: path
