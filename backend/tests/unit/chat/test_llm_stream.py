@@ -48,9 +48,9 @@ async def test_default_stream_fallback_yields_single_chunk() -> None:
     class _NonStreamingProvider(LLMProvider):
         async def complete(
             self,
-            messages: list[LLMMessage],  # noqa: ARG002
-            system_prompt: str,  # noqa: ARG002
-            max_tokens: int = 1024,  # noqa: ARG002
+            messages: list[LLMMessage],
+            system_prompt: str,
+            max_tokens: int = 1024,
         ) -> LLMResponse:
             return LLMResponse(content="single", token_count=1, duration_ms=10)
 

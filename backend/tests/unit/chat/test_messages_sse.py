@@ -65,18 +65,18 @@ class _ScriptedStreamProvider(LLMProvider):
 
     async def complete(
         self,
-        messages: list,  # type: ignore[type-arg] # noqa: ARG002
-        system_prompt: str,  # noqa: ARG002
-        max_tokens: int = 1024,  # noqa: ARG002
+        messages: list,  # type: ignore[type-arg]
+        system_prompt: str,
+        max_tokens: int = 1024,
     ) -> LLMResponse:
         text = "".join(self._chunks)
         return LLMResponse(content=text, token_count=len(text) // 4, duration_ms=42)
 
     async def stream(
         self,
-        messages: list,  # type: ignore[type-arg] # noqa: ARG002
-        system_prompt: str,  # noqa: ARG002
-        max_tokens: int = 1024,  # noqa: ARG002
+        messages: list,  # type: ignore[type-arg]
+        system_prompt: str,
+        max_tokens: int = 1024,
     ) -> AsyncIterator[str]:
         for i, chunk in enumerate(self._chunks):
             if self._raise_at == i:
