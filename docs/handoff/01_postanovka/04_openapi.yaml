@@ -2794,8 +2794,9 @@ paths:
         LIGHT → FULL) можно только после выполнения первой успешной операции через платформу или одобрения оператором reHome.
         Изменения логируются в audit_log карточки.
       operationId: changeCollaboratorPortalAccess
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 3
+      x-adr: ADR-0015
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2838,8 +2839,9 @@ paths:
         тип, желаемый portal_access_level (по умолчанию LIGHT), реквизиты. Создаётся карточка в статусе PENDING_REVIEW, оператор
         reHome проверяет и активирует.
       operationId: submitCollaboratorOnboarding
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 3
+      x-adr: ADR-0015
       security:
       - {}
       - BearerAuth: []

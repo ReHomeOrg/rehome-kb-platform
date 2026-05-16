@@ -53,6 +53,8 @@ CollaboratorType = Literal[
 FinancialGroup = Literal["A", "B", "C", "D"]
 CollaboratorStatus = Literal["DRAFT", "PENDING_REVIEW", "ACTIVE", "SUSPENDED", "ARCHIVED"]
 LegalEntityType = Literal["individual", "self_employed", "ip", "legal_entity"]
+PortalAccessLevel = Literal["NONE", "LIGHT", "FULL"]
+OnboardingSource = Literal["form", "staff_invite", "api", "migration"]
 
 
 class ContactEntry(BaseModel):
@@ -186,6 +188,68 @@ class SuspendRequest(BaseModel):
     )
 
 
+class OnboardingRequest(BaseModel):
+    """POST /collaborators/onboarding body (ADR-0015 §6, ТЗ §10.8).
+
+    Public endpoint без auth — payload минимальный, staff'у всё равно
+    проверять Dadata + activation. `type='other'` запрещён через
+    self-form (требует staff_invite per ADR-0015 §6).
+    """
+
+    name: str = Field(min_length=2, max_length=500)
+    brand_name: str | None = Field(default=None, max_length=200)
+    type: CollaboratorType
+    legal_entity_type: LegalEntityType | None = None
+    inn: str | None = Field(
+        default=None,
+        pattern=r"^\d{10}$|^\d{12}$",
+        description="ИНН (10 цифр юрлицо, 12 цифр ИП/физлицо).",
+    )
+    service_area: str = Field(min_length=3, max_length=500)
+    contact: ContactEntry
+    portal_access_level_requested: PortalAccessLevel = Field(
+        default="LIGHT",
+        description=(
+            "Желаемый tier кабинета. Staff может override при activation "
+            "(ТЗ §10.8.1). NONE / LIGHT / FULL — описание в ТЗ §10.8."
+        ),
+    )
+    message: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_self_form_constraints(self) -> OnboardingRequest:
+        """ADR-0015 §6: self-form запрещает 'other' (требует staff review)."""
+        if self.type == "other":
+            raise ValueError(
+                "type='other' требует staff_invite (POST /collaborators), "
+                "не self-form (ADR-0015 §6)"
+            )
+        # ContactEntry — хотя бы один из phone/email/messenger обязателен.
+        c = self.contact
+        if not (c.phone or c.email or c.messenger):
+            raise ValueError("contact должен содержать хотя бы один из phone/email/messenger")
+        return self
+
+
+class OnboardingResponse(BaseModel):
+    """ADR-0015 §6: anti-enumeration response — только id+status+message."""
+
+    id: UUID
+    status: CollaboratorStatus
+    message: str
+
+
+class PortalAccessChangeRequest(BaseModel):
+    """PUT /collaborators/{id}/portal-access body (ADR-0015 §5)."""
+
+    portal_access_level: PortalAccessLevel
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Required для повышения tier'а (ТЗ §10.8.1), optional для понижения.",
+    )
+
+
 class CollaboratorPatch(BaseModel):
     """PATCH body — все поля optional. NB: `type` и `financial_group`
     можно менять, но проверяем invariant (как в Create).
@@ -258,6 +322,11 @@ __all__ = [
     "ContactEntry",
     "FinancialGroup",
     "LegalEntityType",
+    "OnboardingRequest",
+    "OnboardingResponse",
+    "OnboardingSource",
     "PaginationInfo",
+    "PortalAccessChangeRequest",
+    "PortalAccessLevel",
     "SuspendRequest",
 ]

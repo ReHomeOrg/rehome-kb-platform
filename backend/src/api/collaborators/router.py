@@ -15,10 +15,11 @@ Backlog (отдельные slices):
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.cursor import decode_cursor, encode_cursor
@@ -26,6 +27,8 @@ from src.api.audit import (
     ACTION_COLLABORATOR_ACTIVATED,
     ACTION_COLLABORATOR_ARCHIVED,
     ACTION_COLLABORATOR_CREATED,
+    ACTION_COLLABORATOR_ONBOARDED,
+    ACTION_COLLABORATOR_PORTAL_ACCESS_CHANGED,
     ACTION_COLLABORATOR_SUSPENDED,
     ACTION_COLLABORATOR_UPDATED,
     RESOURCE_COLLABORATOR,
@@ -34,9 +37,10 @@ from src.api.audit import (
 )
 from src.api.auth.dependency import get_current_access_levels, require_access_level
 from src.api.auth.scope import AccessLevel
-from src.api.collaborators.access import compute_visible_groups
+from src.api.collaborators.access import compute_visible_groups, derive_financial_group
 from src.api.collaborators.lifecycle import validate_activation, validate_suspension
 from src.api.collaborators.models import Collaborator
+from src.api.collaborators.ratelimit import enforce_onboarding_rate_limit
 from src.api.collaborators.repository import (
     CollaboratorRepository,
     get_collaborator_repository,
@@ -48,7 +52,10 @@ from src.api.collaborators.schemas import (
     CollaboratorPatch,
     CollaboratorPublic,
     CollaboratorsListResponse,
+    OnboardingRequest,
+    OnboardingResponse,
     PaginationInfo,
+    PortalAccessChangeRequest,
     SuspendRequest,
 )
 from src.api.db import get_session
@@ -432,6 +439,184 @@ async def suspend_collaborator(
             "reason": payload.reason,
             "until": payload.until,
         },
+    )
+    await session.commit()
+    return _serialize_for_scope(c, access_levels)
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 — public onboarding + portal-access (ADR-0015, ТЗ §10.8)
+
+
+@router.post(
+    "/onboarding",
+    status_code=status.HTTP_201_CREATED,
+    response_model=OnboardingResponse,
+    summary="Самозаявка коллаборанта (public, без auth)",
+    responses={
+        201: {"description": "Заявка принята (status=PENDING_REVIEW)"},
+        422: {"description": "Невалидный type / contact / payload"},
+        429: {"description": "Превышен rate-limit (5 заявок/час/IP)"},
+    },
+)
+async def onboard_collaborator(
+    payload: OnboardingRequest,
+    request: Request,
+    repo: CollaboratorRepository = Depends(get_collaborator_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> OnboardingResponse:
+    """`POST /api/v1/collaborators/onboarding` — public form (ADR-0015 §6).
+
+    Создаёт коллаборанта в статусе PENDING_REVIEW. Активация — через
+    POST /activate (Slice 2) после staff review + Dadata check.
+
+    Защита:
+    - Rate-limit by IP (ADR-0015 §7): 5 заявок/час, in-memory.
+    - type='other' → 422 (требует staff_invite).
+    - Anti-enumeration: response только {id, status, message} —
+      не возвращаем поля payload'а (защита от probing типа
+      "проверь, существует ли уже ИНН в системе").
+    """
+    # Rate-limit + IP hash для audit.
+    ip_hash = enforce_onboarding_rate_limit(request)
+
+    # Derive financial_group (other уже отсечён в model_validator).
+    financial_group = derive_financial_group(payload.type)
+
+    c = Collaborator(
+        name=payload.name,
+        brand_name=payload.brand_name,
+        type=payload.type,
+        financial_group=financial_group,
+        status="PENDING_REVIEW",
+        legal_entity_type=payload.legal_entity_type,
+        inn=payload.inn,
+        service_area=payload.service_area,
+        contacts=[payload.contact.model_dump()],
+        portal_access_level="NONE",  # ставим default; staff апгрейдит при activate
+        portal_access_history=[
+            {
+                "from": None,
+                "to": "NONE",
+                "by": "onboarding-form",
+                "ts": datetime.now(UTC).isoformat(),
+                "reason": "initial",
+                "requested": payload.portal_access_level_requested,
+            }
+        ],
+        onboarding_source="form",
+        financial_terms={},
+        api_integration={},
+        sla={},
+        counterparty_check={},
+        audit_log=[],
+    )
+    await repo.create(c)
+
+    await audit.record(
+        actor_sub=f"anon:{ip_hash}",
+        action=ACTION_COLLABORATOR_ONBOARDED,
+        resource_type=RESOURCE_COLLABORATOR,
+        resource_id=str(c.id),
+        metadata={
+            "type": c.type,
+            "financial_group": c.financial_group,
+            "source": "form",
+            "ip_hash": ip_hash,
+            "portal_access_requested": payload.portal_access_level_requested,
+            "message_provided": payload.message is not None,
+        },
+    )
+    await session.commit()
+
+    return OnboardingResponse(
+        id=c.id,
+        status="PENDING_REVIEW",
+        message=(
+            "Заявка получена. Оператор reHome рассмотрит её и свяжется "
+            "по указанным контактам в течение 3 рабочих дней."
+        ),
+    )
+
+
+# Portal-access transitions (ADR-0015 §5).
+_LEVEL_ORDER = {"NONE": 0, "LIGHT": 1, "FULL": 2}
+
+
+@router.put(
+    "/{collaborator_id}/portal-access",
+    summary="Изменить уровень кабинета коллаборанта (STAFF+)",
+    responses={
+        200: {"description": "Уровень изменён"},
+        403: {"description": "Требуется STAFF scope"},
+        404: {"description": "Не найден"},
+        422: {"description": "Повышение требует reason (ТЗ §10.8.1)"},
+    },
+)
+async def change_portal_access(
+    payload: PortalAccessChangeRequest,
+    collaborator_id: UUID = Path(...),
+    _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
+    repo: CollaboratorRepository = Depends(get_collaborator_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
+    """`PUT /api/v1/collaborators/{id}/portal-access` (ТЗ §10.8.1).
+
+    Slice 3 — STAFF-only (Slice 4 добавит owner-flow когда landит
+    collaborator user account). Понижение свободно; повышение требует
+    `reason` (audit trail per ADR-0015 §5).
+
+    History append: запись в `portal_access_history` JSONB.
+    """
+    allowed_groups = compute_visible_groups(access_levels)
+    c = await repo.get_by_id(collaborator_id, allowed_groups)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Collaborator not found")
+
+    current = c.portal_access_level
+    target = payload.portal_access_level
+
+    # No-op — не пишем history, не raise (idempotent).
+    if current == target:
+        return _serialize_for_scope(c, access_levels)
+
+    is_promotion = _LEVEL_ORDER[target] > _LEVEL_ORDER[current]
+    if is_promotion and not payload.reason:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "field": "reason",
+                "message": ("Повышение tier'а требует reason " "(ТЗ §10.8.1 + ADR-0015 §5)"),
+            },
+        )
+
+    history_entry = {
+        "from": current,
+        "to": target,
+        "by": "staff",
+        "ts": datetime.now(UTC).isoformat(),
+        "reason": payload.reason,
+    }
+    new_history = [*c.portal_access_history, history_entry]
+
+    await repo.update_fields(
+        c,
+        {
+            "portal_access_level": target,
+            "portal_access_history": new_history,
+        },
+        jsonb_fields=("portal_access_history",),
+    )
+
+    await audit.record(
+        actor_sub="staff",
+        action=ACTION_COLLABORATOR_PORTAL_ACCESS_CHANGED,
+        resource_type=RESOURCE_COLLABORATOR,
+        resource_id=str(c.id),
+        metadata={"from": current, "to": target, "reason": payload.reason},
     )
     await session.commit()
     return _serialize_for_scope(c, access_levels)

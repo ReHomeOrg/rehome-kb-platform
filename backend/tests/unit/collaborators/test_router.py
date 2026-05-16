@@ -86,7 +86,13 @@ def create_mock() -> AsyncMock:
 
 @pytest.fixture
 def update_mock() -> AsyncMock:
-    async def _passthrough(c: Collaborator, updates: dict[str, Any]) -> Collaborator:
+    async def _passthrough(
+        c: Collaborator,
+        updates: dict[str, Any],
+        **_kwargs: Any,
+    ) -> Collaborator:
+        # **_kwargs swallows `jsonb_fields` and similar repository kwargs —
+        # они не имеют side effect в моке.
         for k, v in updates.items():
             setattr(c, k, v)
         return c
@@ -676,5 +682,251 @@ def test_suspend_not_found_returns_404(
         f"/api/v1/collaborators/{uuid4()}/suspend",
         headers={"Authorization": f"Bearer {token}"},
         json={"reason": "x"},
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /collaborators/onboarding (Slice 3 — public, rate-limit)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rl() -> None:
+    """Reset rate-limiter между tests'ами чтобы они не влияли друг на друга."""
+    from src.api.collaborators.ratelimit import reset_global_limiter
+
+    reset_global_limiter()
+
+
+def _onboard_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "name": "ООО Новый партнёр",
+        "type": "cleaning",
+        "service_area": "Москва",
+        "contact": {"phone": "+7 (495) 123-45-67"},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_onboarding_creates_pending_review(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+) -> None:
+    """Public endpoint без auth → PENDING_REVIEW, financial_group auto-derived."""
+    resp = client.post("/api/v1/collaborators/onboarding", json=_onboard_payload())
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "PENDING_REVIEW"
+    assert "id" in body
+    assert "получена" in body["message"].lower()
+    # Anti-enumeration: response не возвращает payload поля.
+    assert "name" not in body
+    assert "inn" not in body
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "collaborator.onboarded"
+    assert kwargs["metadata"]["source"] == "form"
+    assert "ip_hash" in kwargs["metadata"]
+    # actor_sub starts with anon: (no auth).
+    assert kwargs["actor_sub"].startswith("anon:")
+
+
+def test_onboarding_other_type_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+) -> None:
+    """ADR-0015 §6: type='other' через self-form запрещён."""
+    resp = client.post(
+        "/api/v1/collaborators/onboarding",
+        json=_onboard_payload(type="other"),
+    )
+    assert resp.status_code == 422
+
+
+def test_onboarding_missing_contact_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+) -> None:
+    """ContactEntry без phone/email/messenger → 422."""
+    payload = _onboard_payload(contact={"emergency_channel": False})
+    resp = client.post("/api/v1/collaborators/onboarding", json=payload)
+    assert resp.status_code == 422
+
+
+def test_onboarding_invalid_inn_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+) -> None:
+    """INN regex — 10 или 12 цифр."""
+    resp = client.post(
+        "/api/v1/collaborators/onboarding",
+        json=_onboard_payload(inn="not-a-number"),
+    )
+    assert resp.status_code == 422
+
+
+def test_onboarding_rate_limit_429(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+) -> None:
+    """5 запросов проходят, 6-й — 429."""
+    for _ in range(5):
+        resp = client.post("/api/v1/collaborators/onboarding", json=_onboard_payload())
+        assert resp.status_code == 201
+    # 6th — should be 429.
+    resp = client.post("/api/v1/collaborators/onboarding", json=_onboard_payload())
+    assert resp.status_code == 429
+    assert "Retry-After" in resp.headers
+
+
+def test_onboarding_persists_portal_access_history(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+) -> None:
+    """Initial history entry с reason='initial' + requested level."""
+    resp = client.post(
+        "/api/v1/collaborators/onboarding",
+        json=_onboard_payload(portal_access_level_requested="FULL"),
+    )
+    assert resp.status_code == 201
+    # Captured collaborator object из create_mock side_effect.
+    created_collab = override_repo["create"].call_args.args[0]
+    assert created_collab.portal_access_level == "NONE"
+    history = created_collab.portal_access_history
+    assert len(history) == 1
+    assert history[0]["from"] is None
+    assert history[0]["to"] == "NONE"
+    assert history[0]["requested"] == "FULL"
+    assert history[0]["reason"] == "initial"
+
+
+# ---------------------------------------------------------------------------
+# PUT /collaborators/{id}/portal-access (Slice 3)
+
+
+def test_portal_access_anon_returns_403(
+    client: TestClient, override_repo: dict[str, AsyncMock]
+) -> None:
+    resp = client.put(
+        f"/api/v1/collaborators/{uuid4()}/portal-access",
+        json={"portal_access_level": "LIGHT"},
+    )
+    assert resp.status_code == 403
+
+
+def test_portal_access_demote_no_reason_ok(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Понижение (LIGHT → NONE) — reason необязателен."""
+    c = _make_collab(group="B", type_="cleaning", status="ACTIVE")
+    c.portal_access_level = "LIGHT"
+    c.portal_access_history = []
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.put(
+        f"/api/v1/collaborators/{c.id}/portal-access",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"portal_access_level": "NONE"},
+    )
+    assert resp.status_code == 200, resp.text
+    audit_mock.assert_awaited_once()
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["action"] == "collaborator.portal_access.changed"
+    assert kwargs["metadata"]["from"] == "LIGHT"
+    assert kwargs["metadata"]["to"] == "NONE"
+
+
+def test_portal_access_promote_without_reason_returns_422(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Повышение (NONE → LIGHT) — reason обязателен (ТЗ §10.8.1)."""
+    c = _make_collab(group="B", type_="cleaning", status="ACTIVE")
+    c.portal_access_level = "NONE"
+    c.portal_access_history = []
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.put(
+        f"/api/v1/collaborators/{c.id}/portal-access",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"portal_access_level": "LIGHT"},
+    )
+    assert resp.status_code == 422
+
+
+def test_portal_access_promote_with_reason_ok(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    c = _make_collab(group="B", type_="cleaning", status="ACTIVE")
+    c.portal_access_level = "NONE"
+    c.portal_access_history = []
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.put(
+        f"/api/v1/collaborators/{c.id}/portal-access",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "portal_access_level": "FULL",
+            "reason": "approved after operator review",
+        },
+    )
+    assert resp.status_code == 200
+    kwargs = audit_mock.call_args.kwargs
+    assert kwargs["metadata"]["reason"] == "approved after operator review"
+
+
+def test_portal_access_no_op_returns_200_no_audit(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Установка того же level — idempotent, history не растёт."""
+    c = _make_collab(group="B", type_="cleaning", status="ACTIVE")
+    c.portal_access_level = "LIGHT"
+    c.portal_access_history = []
+    override_repo["get"].return_value = c
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.put(
+        f"/api/v1/collaborators/{c.id}/portal-access",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"portal_access_level": "LIGHT"},
+    )
+    assert resp.status_code == 200
+    audit_mock.assert_not_awaited()
+
+
+def test_portal_access_not_found_returns_404(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    audit_mock: AsyncMock,
+    session_mock: MagicMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    override_repo["get"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.put(
+        f"/api/v1/collaborators/{uuid4()}/portal-access",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"portal_access_level": "NONE"},
     )
     assert resp.status_code == 404

@@ -86,3 +86,7 @@ ACTION_COLLABORATOR_ARCHIVED: Final = "collaborator.archived"
 # для удобства аудита и compliance reporting.
 ACTION_COLLABORATOR_ACTIVATED: Final = "collaborator.activated"
 ACTION_COLLABORATOR_SUSPENDED: Final = "collaborator.suspended"
+# Slice 3 (ADR-0015, ТЗ §10.8). Public onboarding endpoint + portal-access
+# tier change. IP hashed в metadata (ФЗ-152).
+ACTION_COLLABORATOR_ONBOARDED: Final = "collaborator.onboarded"
+ACTION_COLLABORATOR_PORTAL_ACCESS_CHANGED: Final = "collaborator.portal_access.changed"
