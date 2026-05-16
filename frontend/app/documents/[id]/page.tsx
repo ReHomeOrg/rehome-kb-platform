@@ -9,7 +9,7 @@ import Nav from "@/app/_components/nav";
 import { ApiError } from "@/lib/api/client";
 import { getDocument } from "@/lib/api/documents";
 
-import DownloadDisabled from "../_components/download-disabled";
+import DownloadButton from "../_components/download-button";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -90,10 +90,7 @@ export default async function DocumentDetailPage({
             <ul className="mt-2 flex flex-col gap-2">
               {doc.files.map((file) => (
                 <li key={`${file.format}-${file.sha256}`}>
-                  <DownloadDisabled
-                    format={file.format}
-                    sizeBytes={file.size_bytes}
-                  />
+                  <DownloadButton documentId={doc.id} file={file} />
                 </li>
               ))}
             </ul>
