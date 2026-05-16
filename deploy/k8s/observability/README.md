@@ -14,6 +14,7 @@ Pin'аются по schema version для reproducibility.
 | `kb-webhooks-dashboard.json` | Grafana dashboard для webhook delivery worker (Cube X, #175) |
 | `kb-vault-reminders-dashboard.json` | Grafana dashboard для vault rotation reminders (Cube Z, #177) |
 | `kb-vault-audit-dashboard.json` | Grafana dashboard для vault security/audit (Cube CC, #180) |
+| `kb-documents-dashboard.json` | Grafana dashboard для documents upload/download (Cube VVV, #224) |
 
 ## kb-indexer dashboard
 
@@ -382,6 +383,50 @@ groups:
           severity: warning
         annotations:
           summary: "kb service {{$labels.job}} uptime <99% за час"
+```
+
+## kb-files (documents) dashboard
+
+**Назначение**: monitoring documents upload/download endpoints (ADR-0012).
+Metrics из `src/api/documents/metrics.py` (Cube UUU, #224).
+
+### Panels
+
+1. **Upload rate (last)** — `kb_documents_files_uploaded_total{outcome="success"}` 5m rate.
+2. **Download rate (last)** — `kb_documents_files_downloaded_total{outcome="success"}` 5m rate.
+3. **Storage errors (last)** — combined 502+503 rate. Threshold yellow=0.01/s, red=0.1/s.
+4. **Oversized rejections (last)** — 413 rate. Sustained → раздуть `DOCUMENT_MAX_UPLOAD_BYTES` или multipart-init flow (backlog).
+5. **Upload rate by outcome (5m)** — timeseries split (success / not_found / oversized / storage_*).
+6. **Download rate by outcome (5m)** — timeseries split. `not_found` здесь = ADR-0003 404 mask (нет доступа, нет документа, или нет файла этого format'а).
+7. **Successful traffic by format** — upload+download split by docx/pdf/html. Помогает понять real usage.
+
+### Suggested alerts
+
+```yaml
+groups:
+  - name: kb-files
+    interval: 30s
+    rules:
+      - alert: KbFilesStorageDown
+        expr: |
+          sum(rate(kb_documents_files_uploaded_total{outcome=~"storage_unavailable|storage_error"}[5m]))
+          + sum(rate(kb_documents_files_downloaded_total{outcome=~"storage_unavailable|storage_error"}[5m]))
+          > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO недоступен — >0.1 storage error/s за 5 мин"
+          description: "Проверить minio pod liveness + MINIO_ENABLED config"
+
+      - alert: KbFilesOversizedSurge
+        expr: sum(rate(kb_documents_files_uploaded_total{outcome="oversized"}[10m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий поток 413 на uploads — клиенты ломают лимит"
+          description: "Либо клиент-bug, либо требуется multipart-init flow для legitimate больших файлов"
 ```
 
 ## Backlog
