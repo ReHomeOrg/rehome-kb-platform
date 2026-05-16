@@ -2602,8 +2602,9 @@ paths:
       - Collaborators
       summary: Отзывы пользователей о коллаборанте
       operationId: listCollaboratorReviews
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 6
+      x-adr: ADR-0014
       parameters:
       - name: cursor
         in: query
@@ -2631,8 +2632,9 @@ paths:
       summary: Оставить отзыв
       description: Доступно tenant/landlord, оставлявшим заказ через этого коллаборанта
       operationId: createCollaboratorReview
-      x-implementation-status: planned
+      x-implementation-status: implemented
       x-implementation-slice: 6
+      x-adr: ADR-0014
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
