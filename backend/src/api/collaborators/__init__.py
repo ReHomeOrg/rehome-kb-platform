@@ -16,6 +16,7 @@ from src.api.collaborators.repository import (
     CollaboratorRepository,
     get_collaborator_repository,
 )
+from src.api.collaborators.router import router
 
 __all__ = [
     "COLLABORATOR_TYPES",
@@ -27,4 +28,5 @@ __all__ = [
     "compute_visible_groups",
     "derive_financial_group",
     "get_collaborator_repository",
+    "router",
 ]
