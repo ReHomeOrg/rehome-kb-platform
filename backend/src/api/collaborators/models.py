@@ -120,6 +120,42 @@ class Collaborator(Base):
     )
 
 
+class CollaboratorReview(Base):
+    """Отзыв пользователя о коллаборанте (Slice 6, ТЗ §3.10.5).
+
+    `author_sub` — JWT sub автора (для audit + UNIQUE per pair).
+    `author_display_name` — опциональное имя для публичного маскинга
+    (показываем только первую букву + "***"). Если None — "Аноним".
+
+    Backlog: FK на service_orders для проверки completion (ТЗ §3.10.5).
+    """
+
+    __tablename__ = "collaborator_reviews"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    collaborator_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("collaborators.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_sub: Mapped[str] = mapped_column(String(255), nullable=False)
+    author_display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+
+    __table_args__ = (
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_reviews_rating_range"),
+        UniqueConstraint("collaborator_id", "author_sub", name="uq_reviews_collaborator_author"),
+    )
+
+
 class PremisesCollaborator(Base):
     """Junction premises ↔ collaborator (Slice 5, ТЗ §10.6).
 
