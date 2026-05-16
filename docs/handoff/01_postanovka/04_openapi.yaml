@@ -2169,23 +2169,24 @@ paths:
       tags:
       - Collaborators
       summary: Список коллаборантов
-      description: 'Возвращает список внешних коллаборантов (УК/ТСЖ, аварийные службы, клининг,
-
-        переезды, ремонт, страховые и т.д.). Подробно — в ПЗ «База знаний v1.3»
-
+      description: |
+        Возвращает список внешних коллаборантов (УК/ТСЖ, аварийные службы, клининг,
+        переезды, ремонт, страховые и т.д.). Подробно — в ПЗ «База знаний v1.4»
         раздел 10.
 
+        Фильтрация по типу, статусу, географии. Видимость зависит от scope
+        (ADR-0014 §3):
+        - guest / tenant / landlord / agent: только D-группа (management_company,
+          emergency_service) — публичные контакты
+        - staff_*: все группы (A/B/C/D)
 
-        Фильтрация по типу, статусу, географии. Видимость зависит от scope:
-
-        - guest / tenant / landlord: только ACTIVE с публичными контактами
-
-        - staff_support: все ACTIVE
-
-        - staff_admin: все включая ARCHIVED
-
-        '
+        **Slice 1 (#231-232 landed):** реализованы фильтры по `type`, `status`,
+        `service_area` (ILIKE substring). Фильтры `financial_group`, `city`,
+        `district`, `premises_id` — Slice 5 (PremisesCollaborator junction).
       operationId: listCollaborators
+      x-implementation-status: implemented
+      x-implementation-slice: 1
+      x-adr: ADR-0014
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - name: type
@@ -2255,8 +2256,18 @@ paths:
       tags:
       - Collaborators
       summary: Создать коллаборанта
-      description: Требует scope = staff_support+
+      description: |
+        Создаёт коллаборанта в статусе DRAFT по умолчанию. D-группа
+        (management_company, emergency_service) — auto-ACTIVE (ТЗ §3.10.1).
+        `financial_group` auto-derive из `type` (кроме `type='other'` —
+        обязательно указывать explicitly). Инвариант (type, financial_group)
+        per ТЗ §10.3 enforced через CHECK constraint в БД (ADR-0014 §2).
+
+        Требует scope = staff_support+.
       operationId: createCollaborator
+      x-implementation-status: implemented
+      x-implementation-slice: 1
+      x-adr: ADR-0014
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -2295,16 +2306,20 @@ paths:
       tags:
       - Collaborators
       summary: Карточка коллаборанта
-      description: 'Состав возвращаемых полей зависит от scope:
+      description: |
+        Состав возвращаемых полей зависит от scope (ADR-0014 §7):
+        - guest / tenant / landlord / agent: CollaboratorPublic — type, brand_name,
+          financial_group, status, service_area, working_hours, website, rating
+          (БЕЗ юр.реквизитов / contacts.person_name / financial_terms)
+        - staff_*: CollaboratorInternal — + name, inn/ogrn/kpp, contacts (полные),
+          financial_terms, api_integration, sla, counterparty_check
+        - staff_admin (STAFF + LEGAL): + audit_log
 
-        - guest / tenant / landlord: name, type, public contacts, working_hours, rating
-
-        - staff_*: + financial_terms, sla, metrics, contract_document_id
-
-        - staff_admin: + audit_log, counterparty_check
-
-        '
+        404 при out-of-scope (anti-enumeration mask, ADR-0003).
       operationId: getCollaborator
+      x-implementation-status: implemented
+      x-implementation-slice: 1
+      x-adr: ADR-0014
       responses:
         '200':
           description: OK
@@ -2323,7 +2338,17 @@ paths:
       tags:
       - Collaborators
       summary: Обновить карточку коллаборанта
+      description: |
+        Partial update. `type` и `financial_group` могут меняться, но pair
+        invariant (ТЗ §10.3, ADR-0014 §2) валидируется в Pydantic — несовпадение
+        → 422. Status можно менять в любую сторону (transition validation отложен
+        до Slice 2: `/activate`, `/suspend`).
+
+        Требует STAFF+ scope.
       operationId: patchCollaborator
+      x-implementation-status: implemented
+      x-implementation-slice: 1
+      x-adr: ADR-0014
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2352,7 +2377,16 @@ paths:
       tags:
       - Collaborators
       summary: Архивировать коллаборанта (soft delete)
+      description: |
+        Soft delete — status → ARCHIVED. Привязки к объектам сохраняются
+        (Slice 5 PremisesCollaborator). Audit row пишется с
+        `metadata.previous_status`.
+
+        Требует STAFF+ scope.
       operationId: archiveCollaborator
+      x-implementation-status: implemented
+      x-implementation-slice: 1
+      x-adr: ADR-0014
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       responses:
@@ -2371,6 +2405,8 @@ paths:
 
         '
       operationId: activateCollaborator
+      x-implementation-status: planned
+      x-implementation-slice: 2
       parameters:
       - name: collaborator_id
         in: path
@@ -2399,6 +2435,8 @@ paths:
 
         '
       operationId: suspendCollaborator
+      x-implementation-status: planned
+      x-implementation-slice: 2
       parameters:
       - name: collaborator_id
         in: path
@@ -2435,6 +2473,8 @@ paths:
 
         '
       operationId: getCollaboratorMetrics
+      x-implementation-status: planned
+      x-implementation-slice: 4
       parameters:
       - name: collaborator_id
         in: path
@@ -2560,6 +2600,8 @@ paths:
       - Collaborators
       summary: Отзывы пользователей о коллаборанте
       operationId: listCollaboratorReviews
+      x-implementation-status: planned
+      x-implementation-slice: 6
       parameters:
       - name: cursor
         in: query
@@ -2587,6 +2629,8 @@ paths:
       summary: Оставить отзыв
       description: Доступно tenant/landlord, оставлявшим заказ через этого коллаборанта
       operationId: createCollaboratorReview
+      x-implementation-status: planned
+      x-implementation-slice: 6
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2748,6 +2792,8 @@ paths:
         LIGHT → FULL) можно только после выполнения первой успешной операции через платформу или одобрения оператором reHome.
         Изменения логируются в audit_log карточки.
       operationId: changeCollaboratorPortalAccess
+      x-implementation-status: planned
+      x-implementation-slice: 3
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2790,6 +2836,8 @@ paths:
         тип, желаемый portal_access_level (по умолчанию LIGHT), реквизиты. Создаётся карточка в статусе PENDING_REVIEW, оператор
         reHome проверяет и активирует.
       operationId: submitCollaboratorOnboarding
+      x-implementation-status: planned
+      x-implementation-slice: 3
       security:
       - {}
       - BearerAuth: []
