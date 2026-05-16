@@ -7,7 +7,7 @@
  * generation browser-side ссылки через proxy `/api/kb/...`.
  */
 
-import { apiFetch } from "./client";
+import { ApiError, apiFetch } from "./client";
 import type {
   Document,
   DocumentCategory,
@@ -56,4 +56,46 @@ export function documentFileDownloadHref(
   format: DocumentFileFormat,
 ): string {
   return `/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files/${encodeURIComponent(format)}`;
+}
+
+export interface UploadedDocumentFile {
+  format: DocumentFileFormat;
+  version: string;
+  size_bytes: number;
+  sha256: string;
+  storage_key: string;
+}
+
+/**
+ * Multipart POST на `/api/v1/documents/{id}/files` (Phase B, #215, STAFF+).
+ *
+ * Используем `fetch()` напрямую (не `apiFetch`), потому что `apiFetch`
+ * принудительно ставит `Content-Type: application/json` — для multipart
+ * нужно дать браузеру выставить boundary самому.
+ *
+ * Browser-only: форма — client component, SSR upload бессмысленен.
+ */
+export async function uploadDocumentFile(
+  documentId: string,
+  file: File,
+  format: DocumentFileFormat,
+  version: string,
+): Promise<UploadedDocumentFile> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("format", format);
+  body.append("version", version);
+
+  const url = `/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files`;
+  const response = await fetch(url, { method: "POST", body });
+  if (!response.ok) {
+    let parsedBody: unknown;
+    try {
+      parsedBody = await response.json();
+    } catch {
+      parsedBody = await response.text().catch(() => null);
+    }
+    throw new ApiError(response.status, parsedBody);
+  }
+  return (await response.json()) as UploadedDocumentFile;
 }

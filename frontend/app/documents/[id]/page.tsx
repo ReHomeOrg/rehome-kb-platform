@@ -10,6 +10,7 @@ import { ApiError } from "@/lib/api/client";
 import { getDocument } from "@/lib/api/documents";
 
 import DownloadButton from "../_components/download-button";
+import UploadForm from "../_components/upload-form";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -96,6 +97,8 @@ export default async function DocumentDetailPage({
             </ul>
           </section>
         ) : null}
+
+        <UploadForm documentId={doc.id} />
 
         {doc.signed_by.length > 0 ? (
           <section className="rounded-md border border-gray-200 p-4">
