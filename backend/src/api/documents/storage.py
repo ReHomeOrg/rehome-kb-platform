@@ -156,11 +156,86 @@ def presigned_get_url(
     return str(url)
 
 
+_FORMAT_EXT: Final[dict[str, str]] = {
+    "docx": "docx",
+    "pdf": "pdf",
+    "html": "html",
+}
+
+
+def compute_storage_key(
+    *,
+    category: str,
+    document_id: str,
+    version: str | int,
+    file_format: str,
+) -> str:
+    """Construct MinIO object key per TZ §3.2 hierarchy.
+
+        legal/<category_subdir>/<document_id>/<version>/<format>.<ext>
+
+    `version` can be DB string column (e.g. "1.0") or integer counter —
+    string-coerced как-есть. Format must быть docx/pdf/html.
+    """
+    subdir = category_subdir(category)
+    if file_format not in _FORMAT_EXT:
+        raise ValueError(f"Unknown file_format {file_format!r}")
+    ext = _FORMAT_EXT[file_format]
+    return f"legal/{subdir}/{document_id}/{version}/{file_format}.{ext}"
+
+
+def upload_object(
+    settings: Settings,
+    storage_key: str,
+    data: bytes,
+    *,
+    content_type: str = "application/octet-stream",
+) -> None:
+    """Stream `data` в MinIO bucket по `storage_key`.
+
+    `data` — bytes (caller буферизировал). Для совсем больших файлов
+    multipart-init flow — backlog. Сейчас single-shot put_object с
+    Content-Length известным заранее.
+
+    Raises:
+        StorageNotConfiguredError: `MINIO_ENABLED=False`.
+        StorageError(transient=True): MinIO unreachable / 5xx.
+    """
+    import io
+
+    client = get_minio_client(settings)
+    from minio.error import S3Error
+
+    try:
+        client.put_object(
+            bucket_name=settings.minio_bucket,
+            object_name=storage_key,
+            data=io.BytesIO(data),
+            length=len(data),
+            content_type=content_type,
+        )
+    except S3Error as exc:
+        transient = exc.code in ("InternalError", "SlowDown", "ServiceUnavailable")
+        logger.warning(
+            "documents.storage.put_s3_error",
+            extra={"code": exc.code, "key": storage_key, "transient": transient},
+        )
+        raise StorageError(f"MinIO error: {exc.code}", transient=transient) from exc
+    except Exception as exc:
+        logger.warning(
+            "documents.storage.put_network_error",
+            extra={"key": storage_key, "error": str(exc)},
+        )
+        raise StorageError(f"MinIO unreachable: {exc!s}", transient=True) from exc
+
+
 __all__ = [
     "StorageError",
     "StorageNotConfiguredError",
     "category_subdir",
+    "compute_storage_key",
     "get_minio_client",
     "presigned_get_url",
     "reset_client_cache",
+    "upload_object",
 ]

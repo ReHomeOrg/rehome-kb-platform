@@ -1,27 +1,46 @@
-"""FastAPI router для `/api/v1/documents/*` (E2.8 #56, ADR-0012 #214).
+"""FastAPI router для `/api/v1/documents/*` (E2.8 #56, ADR-0012 #214, #215).
 
-3 эндпоинта:
+Endpoints:
 - `GET /documents` — список метаданных (DocumentMeta, без PII).
 - `GET /documents/{id}` — detail (Document с signed_by + audit_log).
-- `GET /documents/{id}/files/{format}` — 302 Redirect на presigned MinIO
-  URL с TTL 5 минут (TZ §3.4). Audit log пишется на каждый download.
+- `GET /documents/{id}/files/{format}` — 302 на presigned MinIO URL
+  (TTL 5 минут, TZ §3.4). Audit log на download.
+- `POST /documents/{id}/files` — multipart upload файла (Phase B #215).
+  Stream'ит в MinIO, upsert'ит entry в `documents.files` JSONB, audit
+  log на upload. Size limit `DOCUMENT_MAX_UPLOAD_BYTES=50MB`.
 """
 
+import hashlib
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.audit import (
     ACTION_DOCUMENTS_FILE_DOWNLOADED,
+    ACTION_DOCUMENTS_FILE_UPLOADED,
     RESOURCE_DOCUMENT,
     AuditRepository,
     get_audit_repository,
 )
-from src.api.auth.dependency import get_current_access_levels, require_authenticated
+from src.api.auth.dependency import (
+    get_current_access_levels,
+    require_access_level,
+    require_authenticated,
+)
 from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
 from src.api.db import get_session
@@ -40,7 +59,9 @@ from src.api.documents.schemas import (
 from src.api.documents.storage import (
     StorageError,
     StorageNotConfiguredError,
+    compute_storage_key,
     presigned_get_url,
+    upload_object,
 )
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -219,8 +240,8 @@ async def download_document_file(
             detail="Document storage не сконфигурирован",
         ) from None
     except StorageError as exc:
-        status = 503 if exc.transient else 502
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
+        http_status = 503 if exc.transient else 502
+        raise HTTPException(status_code=http_status, detail=str(exc)) from exc
 
     # Audit на successful URL generation — пользователь физически ещё не
     # скачал (302 follow client-side), но intent зафиксирован.
@@ -235,3 +256,120 @@ async def download_document_file(
     await session.commit()
 
     return RedirectResponse(url=url, status_code=302)
+
+
+@router.post(
+    "/{document_id}/files",
+    summary="Загрузить файл документа (multipart, STAFF+)",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {"description": "Файл загружен, entry в documents.files обновлён"},
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется STAFF scope (write-side)"},
+        404: {"description": "Document not found (anti-enumeration mask)"},
+        413: {"description": "Файл превышает DOCUMENT_MAX_UPLOAD_BYTES"},
+        422: {"description": "Невалидный format / version / отсутствует file"},
+        502: {"description": "MinIO returned error"},
+        503: {"description": "MinIO unreachable или не сконфигурирован"},
+    },
+)
+async def upload_document_file(
+    document_id: UUID = Path(...),
+    file: UploadFile = File(...),
+    file_format: FileFormat = Form(..., alias="format"),
+    version: str = Form(..., min_length=1, max_length=50),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: DocumentRepository = Depends(get_document_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """`POST /api/v1/documents/{id}/files` — multipart upload.
+
+    Form fields:
+    - `file` — bytes payload (UploadFile).
+    - `format` — 'docx' | 'pdf' | 'html'.
+    - `version` — caller-controlled string (e.g. '1.0').
+
+    Pipeline:
+    1. STAFF gate + scope-aware document lookup (404 mask).
+    2. Read full body (size-limit guard на DOCUMENT_MAX_UPLOAD_BYTES).
+    3. Compute sha256.
+    4. compute_storage_key из document.category + id + version + format.
+    5. upload_object в MinIO.
+    6. repo.upsert_file — JSONB entry с format/size/sha256/storage_key.
+    7. audit_log row + commit.
+    """
+    allowed = compute_allowed_confidentialities(access_levels)
+    doc = await repo.get_by_id(document_id, allowed)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Read body с size check'ом (anti-DoS).
+    body = await file.read()
+    if len(body) > settings.document_max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File exceeds {settings.document_max_upload_bytes} bytes " f"(got {len(body)})"
+            ),
+        )
+    if not body:
+        raise HTTPException(status_code=422, detail="Empty upload payload")
+
+    sha256_hex = hashlib.sha256(body).hexdigest()
+    storage_key = compute_storage_key(
+        category=doc.category,
+        document_id=str(doc.id),
+        version=version,
+        file_format=file_format,
+    )
+
+    try:
+        upload_object(
+            settings,
+            storage_key,
+            body,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except StorageNotConfiguredError:
+        raise HTTPException(
+            status_code=503,
+            detail="Document storage не сконфигурирован",
+        ) from None
+    except StorageError as exc:
+        http_status = 503 if exc.transient else 502
+        raise HTTPException(status_code=http_status, detail=str(exc)) from exc
+
+    file_entry: dict[str, Any] = {
+        "format": file_format,
+        "size_bytes": len(body),
+        "sha256": sha256_hex,
+        "storage_key": storage_key,
+    }
+    await repo.upsert_file(doc, file_entry)
+
+    actor_sub = str(_claims.get("sub", "unknown"))
+    await audit.record(
+        actor_sub=actor_sub,
+        action=ACTION_DOCUMENTS_FILE_UPLOADED,
+        resource_type=RESOURCE_DOCUMENT,
+        resource_id=str(document_id),
+        metadata={
+            "format": file_format,
+            "version": version,
+            "size_bytes": len(body),
+            "sha256": sha256_hex,
+        },
+    )
+    await session.commit()
+
+    return {
+        "format": file_format,
+        "version": version,
+        "size_bytes": len(body),
+        "sha256": sha256_hex,
+        "storage_key": storage_key,
+    }
