@@ -31,4 +31,16 @@ describe("TagFilter", () => {
     fireEvent.click(screen.getByText("Найти"));
     expect(pushMock).toHaveBeenCalledWith("/tags");
   });
+
+  it("input onChange обновляет controlled-value", () => {
+    pushMock.mockReset();
+    render(<TagFilter />);
+    const input = screen.getByPlaceholderText(
+      /фильтр по подстроке/,
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "rental" } });
+    expect(input.value).toBe("rental");
+    fireEvent.click(screen.getByText("Найти"));
+    expect(pushMock).toHaveBeenCalledWith("/tags?q=rental");
+  });
 });
