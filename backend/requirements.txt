@@ -18,6 +18,7 @@ pgvector==0.4.0
 # если MINIO_ENABLED=False (CI default).
 minio==7.2.10
 # Multipart parsing для UploadFile (ADR-0012 Phase B). FastAPI runtime
-# requirement когда роутер использует File/Form.
-python-multipart==0.0.20
+# requirement когда роутер использует File/Form. Pin 0.0.27 — фикс
+# CVE-2026-24486 / -40347 / -42561 (DoS на malformed multipart).
+python-multipart==0.0.27
 
