@@ -73,3 +73,12 @@ ACTION_DOCUMENTS_FILE_ARCHIVED: Final = "documents.file.archived"
 # Anon chat actor format: `"anon:" + session_token[:N]`. 8 hex chars = 32 bits
 # of entropy — достаточно для audit uniqueness, минимально раскрывает токен.
 ANON_ACTOR_TOKEN_PREFIX_LEN: Final = 8
+
+# Collaborators actions (ADR-0014, ТЗ §10). Metadata содержит type/group
+# — для audit поиска по типам коллаборантов. ПДн (контактные ФИО,
+# юр.реквизиты) в audit НЕ пишем (есть в `collaborators.audit_log`
+# JSONB колонке, но только для staff_admin).
+RESOURCE_COLLABORATOR: Final = "collaborator"
+ACTION_COLLABORATOR_CREATED: Final = "collaborator.created"
+ACTION_COLLABORATOR_UPDATED: Final = "collaborator.updated"
+ACTION_COLLABORATOR_ARCHIVED: Final = "collaborator.archived"
