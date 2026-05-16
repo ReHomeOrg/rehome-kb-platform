@@ -239,6 +239,40 @@ class OnboardingResponse(BaseModel):
     message: str
 
 
+class PremisesCollaboratorAssignment(BaseModel):
+    """POST /premises/{id}/collaborators body (ТЗ §10.6, Slice 5)."""
+
+    collaborator_id: UUID
+    role: str = Field(
+        min_length=1,
+        max_length=50,
+        description="Назначение, e.g. 'default_uk', 'emergency_water', 'plumber'. "
+        "Freeform — slice 5 без enum (ТЗ §10.6 только примеры).",
+    )
+    priority: int = Field(default=1, ge=1, le=99)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class PremisesCollaboratorRow(BaseModel):
+    """Один row в GET /premises/{id}/collaborators response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    collaborator_id: UUID
+    role: str
+    priority: int
+    notes: str | None
+    assigned_at: datetime
+    assigned_by: str
+    # Inline-developed collaborator card (Public variant: безопасно для guest).
+    collaborator: CollaboratorPublic
+
+
+class PremisesCollaboratorsListResponse(BaseModel):
+    data: list[PremisesCollaboratorRow]
+
+
 class PortalAccessChangeRequest(BaseModel):
     """PUT /collaborators/{id}/portal-access body (ADR-0015 §5)."""
 
@@ -328,5 +362,8 @@ __all__ = [
     "PaginationInfo",
     "PortalAccessChangeRequest",
     "PortalAccessLevel",
+    "PremisesCollaboratorAssignment",
+    "PremisesCollaboratorRow",
+    "PremisesCollaboratorsListResponse",
     "SuspendRequest",
 ]

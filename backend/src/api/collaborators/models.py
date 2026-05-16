@@ -16,7 +16,18 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Numeric, String, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -106,4 +117,49 @@ class Collaborator(Base):
         nullable=False,
         server_default=func.current_timestamp(),
         onupdate=func.current_timestamp(),
+    )
+
+
+class PremisesCollaborator(Base):
+    """Junction premises ↔ collaborator (Slice 5, ТЗ §10.6).
+
+    Один коллаборант обслуживает множество объектов; один объект —
+    множество коллаборантов разных ролей. CASCADE на parent deletion;
+    archive collaborator оставляет junction для исторического контекста
+    (ТЗ §3.10.1).
+    """
+
+    __tablename__ = "premises_collaborators"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    premises_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("premises_cards.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    collaborator_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("collaborators.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+    assigned_by: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "premises_id",
+            "collaborator_id",
+            "role",
+            name="uq_premises_collaborators_triplet",
+        ),
+        CheckConstraint("priority >= 1", name="ck_premises_collaborators_priority"),
     )
