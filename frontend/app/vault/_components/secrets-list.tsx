@@ -148,9 +148,9 @@ export default function SecretsList({
                 <p className="text-xs text-gray-500">
                   {r.category} · обновлено{" "}
                   {new Date(r.updated_at).toLocaleDateString("ru-RU")}
-                  {r.expires_at
-                    ? ` · истекает ${new Date(r.expires_at).toLocaleDateString("ru-RU")}`
-                    : ""}
+                  {r.expires_at ? (
+                    <ExpiryHint expiresAt={r.expires_at} />
+                  ) : null}
                 </p>
                 {r.decryptError ? (
                   <p className="mt-1 text-xs text-red-700">
@@ -164,4 +164,36 @@ export default function SecretsList({
       )}
     </div>
   );
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function ExpiryHint({ expiresAt }: { expiresAt: string }): JSX.Element {
+  const ms = new Date(expiresAt).getTime();
+  const now = Date.now();
+  const dateStr = new Date(expiresAt).toLocaleDateString("ru-RU");
+  if (Number.isNaN(ms)) {
+    return <span> · истекает {dateStr}</span>;
+  }
+  if (ms < now) {
+    return (
+      <span
+        data-testid="expiry-expired"
+        className="text-red-700"
+      >
+        {" "}· истёк {dateStr}
+      </span>
+    );
+  }
+  if (ms - now < 30 * MS_PER_DAY) {
+    return (
+      <span
+        data-testid="expiry-soon"
+        className="text-amber-700"
+      >
+        {" "}· истекает {dateStr}
+      </span>
+    );
+  }
+  return <span> · истекает {dateStr}</span>;
 }
