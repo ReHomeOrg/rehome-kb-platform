@@ -19,6 +19,7 @@ import type {
 
 import CollaboratorForm from "../_components/collaborator-form";
 import LifecycleActions from "../_components/lifecycle-actions";
+import PortalAccessControl from "../_components/portal-access-control";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -74,7 +75,13 @@ export default async function CollaboratorDetailPage({
         </header>
 
         {internal ? (
-          <CollaboratorForm initial={internal} />
+          <>
+            <PortalAccessControl
+              id={internal.id}
+              current={internal.portal_access_level}
+            />
+            <CollaboratorForm initial={internal} />
+          </>
         ) : (
           <section className="rounded-md border border-gray-200 p-4">
             <p className="text-sm text-gray-700">

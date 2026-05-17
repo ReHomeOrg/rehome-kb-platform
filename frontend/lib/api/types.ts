@@ -433,6 +433,8 @@ export type CollaboratorOnboardingSource =
   | "api"
   | "migration";
 
+export type CollaboratorPortalAccessLevel = "NONE" | "LIGHT" | "FULL";
+
 export interface CollaboratorPublic {
   id: string;
   type: CollaboratorType;
@@ -469,6 +471,7 @@ export interface CollaboratorInternal extends CollaboratorPublic {
   sla: Record<string, unknown>;
   counterparty_check: Record<string, unknown>;
   onboarding_source: CollaboratorOnboardingSource;
+  portal_access_level: CollaboratorPortalAccessLevel;
   created_at: string;
   updated_at: string;
 }

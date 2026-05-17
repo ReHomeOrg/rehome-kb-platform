@@ -14,6 +14,7 @@ import type {
   CollaboratorAdmin,
   CollaboratorFinancialGroup,
   CollaboratorInternal,
+  CollaboratorPortalAccessLevel,
   CollaboratorPublic,
   CollaboratorStatus,
   CollaboratorType,
@@ -147,7 +148,8 @@ export async function suspendCollaborator(
 // ---------------------------------------------------------------------------
 // Public onboarding form (ADR-0015 §6, ТЗ §10.8) — anonymous endpoint.
 
-export type PortalAccessLevel = "NONE" | "LIGHT" | "FULL";
+/** Alias to keep API consistent — same union as CollaboratorPortalAccessLevel. */
+export type PortalAccessLevel = CollaboratorPortalAccessLevel;
 
 export interface OnboardingContact {
   phone?: string | null;
@@ -184,4 +186,27 @@ export async function submitOnboarding(
     body: JSON.stringify(input),
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Portal-access (ADR-0015 §5, ТЗ §10.8) — STAFF+.
+
+export interface PortalAccessChangeInput {
+  portal_access_level: CollaboratorPortalAccessLevel;
+  /** Required для повышения tier'а (NONE→LIGHT/FULL, LIGHT→FULL). */
+  reason?: string | null;
+}
+
+export async function changePortalAccess(
+  id: string,
+  input: PortalAccessChangeInput,
+): Promise<CollaboratorInternal | CollaboratorAdmin> {
+  return apiFetch<CollaboratorInternal | CollaboratorAdmin>(
+    `/api/v1/collaborators/${encodeURIComponent(id)}/portal-access`,
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
 }

@@ -51,6 +51,7 @@ def _make_collab(
     c.sla = {}
     c.counterparty_check = {}
     c.onboarding_source = "staff_invite"
+    c.portal_access_level = "NONE"
     c.audit_log = []
     c.created_at = datetime(2026, 5, 16, tzinfo=UTC)
     c.updated_at = datetime(2026, 5, 16, tzinfo=UTC)
@@ -82,6 +83,8 @@ def create_mock() -> AsyncMock:
             c.audit_log = []
         if c.onboarding_source is None:
             c.onboarding_source = "staff_invite"
+        if c.portal_access_level is None:
+            c.portal_access_level = "NONE"
         return c
 
     return AsyncMock(side_effect=_populate_defaults)
