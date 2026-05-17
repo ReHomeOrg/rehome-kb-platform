@@ -36,6 +36,7 @@ function fixture(
     sla: {},
     counterparty_check: {},
     onboarding_source: "form",
+    portal_access_level: "NONE",
     created_at: "2026-05-16T12:00:00Z",
     updated_at: "2026-05-16T12:00:00Z",
     ...override,

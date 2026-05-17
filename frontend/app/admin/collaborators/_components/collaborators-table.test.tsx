@@ -41,6 +41,7 @@ function internalFixture(
     sla: {},
     counterparty_check: {},
     onboarding_source: "staff_invite",
+    portal_access_level: "NONE",
     created_at: "2026-05-16T00:00:00Z",
     updated_at: "2026-05-16T00:00:00Z",
     ...override,

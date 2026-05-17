@@ -109,6 +109,7 @@ class CollaboratorInternal(CollaboratorPublic):
     sla: dict[str, Any]
     counterparty_check: dict[str, Any]
     onboarding_source: OnboardingSource
+    portal_access_level: PortalAccessLevel
     created_at: datetime
     updated_at: datetime
 
