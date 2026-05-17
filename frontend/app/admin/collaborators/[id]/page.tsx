@@ -18,6 +18,7 @@ import type {
 } from "@/lib/api/types";
 
 import CollaboratorForm from "../_components/collaborator-form";
+import LifecycleActions from "../_components/lifecycle-actions";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -58,7 +59,7 @@ export default async function CollaboratorDetailPage({
         >
           ← К списку
         </Link>
-        <header className="flex items-start justify-between">
+        <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               {internal?.name ?? collaborator.brand_name ?? "Коллаборант"}
@@ -67,6 +68,9 @@ export default async function CollaboratorDetailPage({
               {collaborator.type} · {collaborator.financial_group} · {collaborator.status}
             </p>
           </div>
+          {internal ? (
+            <LifecycleActions id={collaborator.id} status={collaborator.status} />
+          ) : null}
         </header>
 
         {internal ? (
