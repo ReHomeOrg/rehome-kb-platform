@@ -143,3 +143,45 @@ export async function suspendCollaborator(
     },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Public onboarding form (ADR-0015 §6, ТЗ §10.8) — anonymous endpoint.
+
+export type PortalAccessLevel = "NONE" | "LIGHT" | "FULL";
+
+export interface OnboardingContact {
+  phone?: string | null;
+  email?: string | null;
+  messenger?: string | null;
+  emergency_channel?: boolean;
+  person_name?: string | null;
+  person_role?: string | null;
+}
+
+export interface OnboardingRequest {
+  name: string;
+  brand_name?: string | null;
+  type: CollaboratorType;
+  legal_entity_type?: "individual" | "self_employed" | "ip" | "legal_entity" | null;
+  inn?: string | null;
+  service_area: string;
+  contact: OnboardingContact;
+  portal_access_level_requested?: PortalAccessLevel;
+  message?: string | null;
+}
+
+export interface OnboardingResponse {
+  id: string;
+  status: CollaboratorStatus;
+  message: string;
+}
+
+export async function submitOnboarding(
+  input: OnboardingRequest,
+): Promise<OnboardingResponse> {
+  return apiFetch<OnboardingResponse>("/api/v1/collaborators/onboarding", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
