@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 
 import Nav from "@/app/_components/nav";
 import { ApiError } from "@/lib/api/client";
-import { getVaultMe } from "@/lib/api/vault";
+import { getCurrentUserId, getVaultMe } from "@/lib/api/vault";
 
 import VaultShell from "./_components/vault-shell";
 
@@ -17,8 +17,9 @@ export const dynamic = "force-dynamic";
 
 export default async function VaultPage(): Promise<JSX.Element> {
   let me;
+  let userId: string;
   try {
-    me = await getVaultMe();
+    [me, userId] = await Promise.all([getVaultMe(), getCurrentUserId()]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       redirect("/login");
@@ -40,7 +41,7 @@ export default async function VaultPage(): Promise<JSX.Element> {
             покидает браузер (ADR-0011).
           </p>
         </header>
-        <VaultShell me={me} />
+        <VaultShell me={me} userId={userId} />
       </main>
     </>
   );

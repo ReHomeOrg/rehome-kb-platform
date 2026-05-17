@@ -14,16 +14,18 @@
 import { useEffect, useState } from "react";
 
 import type { VaultMeView } from "@/lib/api/vault";
-import { isUnlocked, lock, subscribe } from "@/lib/vault/session";
+import { isUnlocked, subscribe } from "@/lib/vault/session";
 
 import SetupForm from "./setup-form";
+import UnlockedView from "./unlocked-view";
 import UnlockForm from "./unlock-form";
 
 interface Props {
   me: VaultMeView;
+  userId: string;
 }
 
-export default function VaultShell({ me }: Props): JSX.Element {
+export default function VaultShell({ me, userId }: Props): JSX.Element {
   const [unlocked, setUnlocked] = useState(isUnlocked());
 
   useEffect(() => {
@@ -63,22 +65,5 @@ export default function VaultShell({ me }: Props): JSX.Element {
     );
   }
 
-  return (
-    <section className="rounded-md border border-green-300 bg-green-50 p-6">
-      <h2 className="text-lg font-semibold text-green-900">
-        Vault разблокирован
-      </h2>
-      <p className="mt-1 text-xs text-green-800">
-        Auto-lock через 15 минут бездействия. Список секретов и CRUD —
-        Slice 2 (этот PR разблокировал foundation: crypto + setup/unlock).
-      </p>
-      <button
-        type="button"
-        onClick={() => lock()}
-        className="mt-4 rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm font-medium text-green-800 hover:bg-green-100"
-      >
-        Заблокировать
-      </button>
-    </section>
-  );
+  return <UnlockedView userId={userId} />;
 }
