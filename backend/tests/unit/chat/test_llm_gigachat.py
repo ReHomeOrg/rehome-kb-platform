@@ -12,6 +12,7 @@
 """
 
 import json
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -20,6 +21,9 @@ from src.api.chat.llm import LLMMessage
 from src.api.chat.llm.factory import get_llm_provider
 from src.api.chat.llm.gigachat import GigaChatProvider
 from src.api.config import Settings
+
+# httpx.MockTransport handler signature.
+_Handler = Callable[[httpx.Request], httpx.Response]
 
 
 def _oauth_response(token: str = "tk-1", expires_at_ms: int | None = None) -> dict[str, object]:
@@ -62,8 +66,8 @@ def _stream_body(chunks: list[str]) -> bytes:
 
 def _make_provider_with_transports(
     *,
-    oauth_handler,
-    api_handler,
+    oauth_handler: _Handler,
+    api_handler: _Handler,
 ) -> GigaChatProvider:
     provider = GigaChatProvider(
         client_id="cid",
