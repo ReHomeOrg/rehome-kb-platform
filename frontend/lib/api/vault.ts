@@ -146,3 +146,86 @@ export async function deleteVaultSecret(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+// ---------------------------------------------------------------------------
+// Groups (ADR-0016 Slice 3 — management only; secret sharing flow требует
+// backend additions: group keypair + pubkey discovery + add-wrap endpoint).
+
+export interface VaultGroupView {
+  id: string;
+  name: string;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface VaultGroupCreateInput {
+  name: string;
+  description?: string | null;
+}
+
+export interface VaultGroupListResponse {
+  data: VaultGroupView[];
+}
+
+export interface VaultGroupMemberView {
+  group_id: string;
+  user_id: string;
+  role: "owner" | "member";
+  added_at: string;
+}
+
+export interface VaultGroupMemberAddInput {
+  user_id: string;
+  role?: "owner" | "member";
+}
+
+export interface VaultGroupMemberListResponse {
+  data: VaultGroupMemberView[];
+}
+
+export async function listVaultGroups(): Promise<VaultGroupListResponse> {
+  return apiFetch<VaultGroupListResponse>("/api/v1/vault/groups");
+}
+
+export async function createVaultGroup(
+  input: VaultGroupCreateInput,
+): Promise<VaultGroupView> {
+  return apiFetch<VaultGroupView>("/api/v1/vault/groups", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function listGroupMembers(
+  groupId: string,
+): Promise<VaultGroupMemberListResponse> {
+  return apiFetch<VaultGroupMemberListResponse>(
+    `/api/v1/vault/groups/${encodeURIComponent(groupId)}/members`,
+  );
+}
+
+export async function addGroupMember(
+  groupId: string,
+  input: VaultGroupMemberAddInput,
+): Promise<VaultGroupMemberView> {
+  return apiFetch<VaultGroupMemberView>(
+    `/api/v1/vault/groups/${encodeURIComponent(groupId)}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function removeGroupMember(
+  groupId: string,
+  userId: string,
+): Promise<void> {
+  await apiFetch<void>(
+    `/api/v1/vault/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+}
