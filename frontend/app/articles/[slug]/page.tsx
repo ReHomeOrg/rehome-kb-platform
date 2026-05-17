@@ -13,6 +13,7 @@ import { getArticle } from "@/lib/api/articles";
 import { ApiError } from "@/lib/api/client";
 
 import ArticleMarkdown from "../_components/article-markdown";
+import DeleteArticleButton from "../_components/delete-button";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -36,9 +37,20 @@ export default async function ArticleDetailPage({
     <>
       <Nav />
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-8">
-        <Link href="/articles" className="text-sm text-gray-600 hover:underline">
-          ← Назад к списку
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/articles" className="text-sm text-gray-600 hover:underline">
+            ← Назад к списку
+          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/articles/${encodeURIComponent(article.slug)}/edit`}
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+            >
+              Редактировать
+            </Link>
+            <DeleteArticleButton slug={article.slug} />
+          </div>
+        </div>
         <header>
           <h1 className="text-3xl font-semibold tracking-tight">
             {article.title}
