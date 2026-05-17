@@ -4,7 +4,7 @@ from base64 import b64encode
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -83,6 +83,10 @@ def repo_mocks() -> dict[str, AsyncMock]:
         "can_user_access_secret": AsyncMock(return_value=False),
         "update_secret_blob": AsyncMock(return_value=None),
         "archive_secret": AsyncMock(return_value=False),
+        # ADR-0017 sharing
+        "get_user_pubkey": AsyncMock(return_value=None),
+        "add_secret_wraps": AsyncMock(return_value=0),
+        "remove_secret_wrap": AsyncMock(return_value=False),
     }
 
 
@@ -354,43 +358,27 @@ def test_create_secret_rejects_wrap_without_user_or_group(
     assert resp.status_code == 422
 
 
-def test_create_secret_rejects_wrap_with_both_user_and_group(
+def test_create_secret_group_lineage_requires_membership(
     client: TestClient,
     override_deps: dict[str, AsyncMock],
     make_jwt: Callable[..., str],
 ) -> None:
+    """ADR-0017: wrap с group_id lineage для группы, где caller — не member,
+    должен быть отклонён 403 (можно «помечать» только свои группы)."""
     uid = uuid4()
-    token = make_jwt(roles=["staff_admin"], sub=str(uid))
-    payload = _secret_create_payload(
-        uid,
-        wraps=[
-            {
-                "user_id": str(uid),
-                "group_id": str(uuid4()),
-                "wrapped_key_b64": _b64(b"\xaa" * 48),
-            }
-        ],
-    )
-    resp = client.post(
-        "/api/v1/vault/secrets",
-        json=payload,
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 422
-
-
-def test_create_secret_group_wrap_requires_membership(
-    client: TestClient,
-    override_deps: dict[str, AsyncMock],
-    make_jwt: Callable[..., str],
-) -> None:
-    """Group wrap создаётся для группы которой caller не member → 403."""
-    uid = uuid4()
+    other_uid = uuid4()
     gid = uuid4()
     override_deps["is_group_member"].return_value = False  # not member
     token = make_jwt(roles=["staff_admin"], sub=str(uid))
     payload = _secret_create_payload(uid)
-    payload["wraps"].append({"group_id": str(gid), "wrapped_key_b64": _b64(b"\xbb" * 48)})
+    # ADR-0017 wraps require user_id; group_id — optional lineage.
+    payload["wraps"].append(
+        {
+            "user_id": str(other_uid),
+            "group_id": str(gid),
+            "wrapped_key_b64": _b64(b"\xbb" * 48),
+        }
+    )
     resp = client.post(
         "/api/v1/vault/secrets",
         json=payload,
@@ -489,3 +477,184 @@ def test_list_groups_empty(
     )
     assert resp.status_code == 200
     assert resp.json() == {"data": []}
+
+
+# ---------------------------------------------------------------------------
+# Sharing (ADR-0017)
+
+
+def test_get_user_pubkey_returns_pubkey(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """GET /vault/users/{id}/pubkey — любой authenticated user."""
+    target_uid = uuid4()
+    override_deps["get_user_pubkey"].return_value = b"\x01" * 32
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/vault/users/{target_uid}/pubkey",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["user_id"] == str(target_uid)
+    assert len(body["x25519_pubkey_b64"]) > 0
+
+
+def test_get_user_pubkey_404_when_vault_not_setup(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    override_deps["get_user_pubkey"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/vault/users/{uuid4()}/pubkey",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_get_user_pubkey_requires_auth(client: TestClient) -> None:
+    resp = client.get(f"/api/v1/vault/users/{uuid4()}/pubkey")
+    assert resp.status_code == 401
+
+
+def test_add_wraps_success(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """POST /vault/secrets/{id}/wraps — каллер имеет access → 204 + audit."""
+    sid = uuid4()
+    actor = uuid4()
+    new_recipient = uuid4()
+    secret_mock = MagicMock(archived_at=None, owner_id=actor, category="infra")
+    override_deps["get_secret"].return_value = secret_mock
+    override_deps["can_user_access_secret"].return_value = True
+    override_deps["add_secret_wraps"].return_value = 1
+    token = make_jwt(roles=["staff_admin"], sub=str(actor))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{sid}/wraps",
+        json={
+            "wraps": [
+                {
+                    "user_id": str(new_recipient),
+                    "wrapped_key_b64": _b64(b"\xaa" * 48),
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 204
+    audit_record_mock.assert_awaited()
+    audit_args = audit_record_mock.call_args.kwargs
+    assert audit_args["action"] == "vault.share.added"
+    assert audit_args["metadata"]["added_count"] == 1
+
+
+def test_add_wraps_404_no_access(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Caller без access → 404 (anti-enumeration)."""
+    sid = uuid4()
+    secret_mock = MagicMock(archived_at=None, owner_id=uuid4(), category="x")
+    override_deps["get_secret"].return_value = secret_mock
+    override_deps["can_user_access_secret"].return_value = False
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{sid}/wraps",
+        json={
+            "wraps": [
+                {
+                    "user_id": str(uuid4()),
+                    "wrapped_key_b64": _b64(b"\xaa" * 48),
+                }
+            ]
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_add_wraps_404_secret_missing(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    override_deps["get_secret"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{uuid4()}/wraps",
+        json={"wraps": [{"user_id": str(uuid4()), "wrapped_key_b64": _b64(b"\xaa" * 48)}]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_remove_wrap_success(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """DELETE wrap — owner-only."""
+    sid = uuid4()
+    owner = uuid4()
+    target = uuid4()
+    override_deps["get_secret"].return_value = MagicMock(
+        archived_at=None, owner_id=owner, category="x"
+    )
+    override_deps["remove_secret_wrap"].return_value = True
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.delete(
+        f"/api/v1/vault/secrets/{sid}/wraps/{target}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 204
+    audit_args = audit_record_mock.call_args.kwargs
+    assert audit_args["action"] == "vault.share.revoked"
+
+
+def test_remove_wrap_403_non_owner(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Non-owner попытка revoke → 403."""
+    sid = uuid4()
+    owner = uuid4()
+    actor = uuid4()
+    override_deps["get_secret"].return_value = MagicMock(
+        archived_at=None, owner_id=owner, category="x"
+    )
+    token = make_jwt(roles=["staff_admin"], sub=str(actor))
+    resp = client.delete(
+        f"/api/v1/vault/secrets/{sid}/wraps/{uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_remove_wrap_404_no_wrap(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Owner, но wrap не существует → 404."""
+    sid = uuid4()
+    owner = uuid4()
+    override_deps["get_secret"].return_value = MagicMock(
+        archived_at=None, owner_id=owner, category="x"
+    )
+    override_deps["remove_secret_wrap"].return_value = False
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.delete(
+        f"/api/v1/vault/secrets/{sid}/wraps/{uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404

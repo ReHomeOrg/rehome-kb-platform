@@ -58,8 +58,9 @@ async def test_get_wraps_for_recipient_user_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_wraps_for_recipient_with_groups() -> None:
-    """С group_ids — query содержит OR (user или groups)."""
+async def test_get_wraps_for_recipient_ignores_groups_post_adr_0017() -> None:
+    """ADR-0017: group_ids — pure metadata, не authorization. Query
+    содержит только user_id, без OR-branch на groups."""
     session = MagicMock()
     session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = VaultRepository(session)
@@ -74,8 +75,9 @@ async def test_get_wraps_for_recipient_with_groups() -> None:
         else:
             flat.append(v)
     assert uid in flat
-    assert gid in flat
     assert sid in flat
+    # group_id больше не входит в access query (lineage only).
+    assert gid not in flat
 
 
 @pytest.mark.asyncio

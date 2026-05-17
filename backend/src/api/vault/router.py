@@ -35,6 +35,8 @@ from src.api.audit import (
     ACTION_VAULT_SECRET_DELETED,
     ACTION_VAULT_SECRET_READ,
     ACTION_VAULT_SECRET_UPDATED,
+    ACTION_VAULT_SHARE_ADDED,
+    ACTION_VAULT_SHARE_REVOKED,
     ACTION_VAULT_UNLOCK_FAILED,
     ACTION_VAULT_UNLOCK_SUCCESS,
     RESOURCE_VAULT_GROUP,
@@ -56,6 +58,7 @@ from src.api.vault.schemas import (
     VaultGroupMemberView,
     VaultGroupView,
     VaultMeView,
+    VaultSecretAddWrapsInput,
     VaultSecretCreateInput,
     VaultSecretListResponse,
     VaultSecretUpdateInput,
@@ -64,6 +67,7 @@ from src.api.vault.schemas import (
     VaultTotpSetupInput,
     VaultUnlockInput,
     VaultUnlockResponse,
+    VaultUserPubkeyView,
     group_view,
     me_view_from_user,
     secret_detail_view,
@@ -215,27 +219,23 @@ async def create_secret(
     """Create secret + initial wraps в одной транзакции.
 
     Validation:
-    - Каждый wrap должен иметь EXACTLY ONE of (user_id, group_id).
+    - Каждый wrap содержит user_id (обязательно) + опциональный group_id
+      lineage (ADR-0017).
     - Creator должен быть среди wraps (иначе создатель сам не сможет
       открыть свой секрет — defensive нарушение invariant).
     """
     user_id = _user_id_from_claims(claims)
     # Verify creator has at least one wrap addressed к ним.
-    has_self_wrap = any((w.user_id == user_id) for w in payload.wraps if w.user_id is not None)
+    has_self_wrap = any(w.user_id == user_id for w in payload.wraps)
     if not has_self_wrap:
         raise HTTPException(
             status_code=422,
             detail="At least one wrap must address creator's user_id",
         )
-    # Each wrap — XOR (user_id, group_id).
+    # Group lineage — creator должен быть member группы, которой он
+    # «помечает» wrap.
     wrap_models: list[VaultSecretWrap] = []
     for w in payload.wraps:
-        if (w.user_id is None) == (w.group_id is None):
-            raise HTTPException(
-                status_code=422,
-                detail="Each wrap must specify exactly one of user_id or group_id",
-            )
-        # Group wraps — creator должен быть member.
         if w.group_id is not None:
             is_member = await repo.is_group_member(w.group_id, user_id)
             if not is_member:
@@ -458,6 +458,154 @@ async def delete_secret(
     )
     await session.commit()
     SECRET_ACCESS_TOTAL.labels(action="deleted", category=secret.category).inc()
+
+
+# ---------------------------------------------------------------------------
+# sharing (ADR-0017)
+
+
+@router.get(
+    "/users/{user_id}/pubkey",
+    response_model=VaultUserPubkeyView,
+    summary="X25519 pubkey lookup (ADR-0017)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        404: {"description": "User не setup'нул vault"},
+    },
+)
+async def get_user_pubkey(
+    user_id: UUID = Path(...),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+) -> VaultUserPubkeyView:
+    """Public pubkey по user_id.
+
+    ADR-0011 §«Group keypair»: x25519_pubkey marked как «public по design»
+    — server-visible, не secret. Возвращается любому authenticated user'у
+    для wrap-for-user flow (ADR-0017 §C).
+    """
+    from base64 import b64encode
+
+    pubkey = await repo.get_user_pubkey(user_id)
+    if pubkey is None:
+        raise HTTPException(status_code=404, detail="User vault not set up")
+    return VaultUserPubkeyView(
+        user_id=user_id,
+        x25519_pubkey_b64=b64encode(pubkey).decode("ascii"),
+    )
+
+
+@router.post(
+    "/secrets/{secret_id}/wraps",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Add wraps to existing secret (ADR-0017 sharing)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Caller не имеет access к secret'у"},
+        404: {"description": "Secret не существует или archived"},
+    },
+)
+async def add_secret_wraps(
+    secret_id: UUID = Path(...),
+    payload: VaultSecretAddWrapsInput = Body(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Add wraps batch для existing secret (share with users / group).
+
+    Caller должен иметь access к secret'у (own wrap exists). Каждый
+    wrap addresses user_id; group_id optional lineage.
+    """
+    actor_id = _user_id_from_claims(claims)
+    secret = await repo.get_secret(secret_id)
+    if secret is None or secret.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+
+    # ADR-0017: access checked through user_id wraps only (group_id —
+    # lineage metadata, не authorization). Avoid _user_group_ids session
+    # call here — pass empty list (ignored downstream).
+    if not await repo.can_user_access_secret(
+        secret_id=secret_id, user_id=actor_id, user_group_ids=[]
+    ):
+        # 404 не 403 — anti-enumeration (см. delete_secret pattern).
+        raise HTTPException(status_code=404, detail="Secret not found")
+
+    new_wraps: list[VaultSecretWrap] = []
+    for w in payload.wraps:
+        new_wraps.append(
+            VaultSecretWrap(
+                user_id=w.user_id,
+                group_id=w.group_id,
+                wrapped_key=b64decode(w.wrapped_key_b64),
+            )
+        )
+    added = await repo.add_secret_wraps(secret_id=secret_id, wraps=new_wraps)
+
+    await audit.record(
+        actor_sub=str(actor_id),
+        action=ACTION_VAULT_SHARE_ADDED,
+        resource_type=RESOURCE_VAULT_SECRET,
+        resource_id=str(secret_id),
+        metadata={
+            "added_user_ids": [str(w.user_id) for w in payload.wraps],
+            "group_id": (
+                str(payload.wraps[0].group_id)
+                if payload.wraps and payload.wraps[0].group_id
+                else None
+            ),
+            "added_count": added,
+        },
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/secrets/{secret_id}/wraps/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove wrap (unshare, ADR-0017 — owner-only)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Caller — не owner secret'а"},
+        404: {"description": "Secret или wrap не найдены"},
+    },
+)
+async def remove_secret_wrap(
+    secret_id: UUID = Path(...),
+    user_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Remove wrap. Только owner может unshare.
+
+    Caveat (ADR-0017 §E): revoke не делает старые secret_keys forgotten
+    — removed user мог cache'ить в browser memory. True revoke = rotate
+    secret_key (backlog Stage 2).
+    """
+    actor_id = _user_id_from_claims(claims)
+    secret = await repo.get_secret(secret_id)
+    if secret is None or secret.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if secret.owner_id != actor_id:
+        raise HTTPException(status_code=403, detail="Only owner can revoke wraps")
+
+    removed = await repo.remove_secret_wrap(secret_id=secret_id, user_id=user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Wrap not found")
+
+    await audit.record(
+        actor_sub=str(actor_id),
+        action=ACTION_VAULT_SHARE_REVOKED,
+        resource_type=RESOURCE_VAULT_SECRET,
+        resource_id=str(secret_id),
+        metadata={"removed_user_id": str(user_id)},
+    )
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
