@@ -163,14 +163,12 @@ class VaultUnlockResponse(BaseModel):
 
 
 class VaultSecretWrapInput(BaseModel):
-    """Per-recipient wrap при создании / share секрета.
-
-    EXACTLY ONE of (user_id, group_id) указан.
-    """
+    """Per-recipient wrap (ADR-0017): user_id обязателен; group_id —
+    optional lineage."""
 
     model_config = ConfigDict(extra="forbid")
 
-    user_id: UUID | None = None
+    user_id: UUID
     group_id: UUID | None = None
     wrapped_key_b64: str
 
@@ -320,6 +318,25 @@ class VaultSecretListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Sharing (ADR-0017)
+
+
+class VaultUserPubkeyView(BaseModel):
+    """Public pubkey lookup для wrap-for-user flow (ADR-0017 §C)."""
+
+    user_id: UUID
+    x25519_pubkey_b64: str
+
+
+class VaultSecretAddWrapsInput(BaseModel):
+    """POST /vault/secrets/{id}/wraps — add wraps batch (ADR-0017)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wraps: list[VaultSecretWrapInput] = Field(min_length=1, max_length=1000)
+
+
+# ---------------------------------------------------------------------------
 # View builders
 
 
@@ -394,11 +411,13 @@ __all__ = [
     "VaultGroupView",
     "VaultMeView",
     "VaultSecretCreateInput",
+    "VaultSecretAddWrapsInput",
     "VaultSecretListResponse",
     "VaultSecretMetadataView",
     "VaultSecretUpdateInput",
     "VaultSecretView",
     "VaultSecretWrapInput",
+    "VaultUserPubkeyView",
     "VaultSetupInput",
     "VaultUnlockInput",
     "VaultUnlockResponse",

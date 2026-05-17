@@ -129,11 +129,17 @@ class VaultSecret(Base):
 
 
 class VaultSecretWrap(Base):
-    """Per-recipient wrapped secret key.
+    """Per-recipient wrapped secret key (ADR-0017).
 
-    EXACTLY ONE of (user_id, group_id) is non-NULL. CHECK constraint
-    enforce'ит это в DB; mypy strict не может — поэтому Python код
-    должен быть defensive (валидируется repository / endpoint layer).
+    `user_id` — recipient (всегда NOT NULL после migration 0023). Wrap
+    зашифрован под user.x25519_pubkey.
+
+    `group_id` — **lineage metadata**: «этот wrap был создан в рамках
+    шаринга с группой G». Не используется для authorization (только
+    user_id). Может быть NULL (personal wrap либо direct share).
+
+    Sharing с группой ⇒ N rows (по одной на каждого member'а), всех
+    с одинаковым `group_id` lineage.
     """
 
     __tablename__ = "vault_secret_wraps"
@@ -143,7 +149,7 @@ class VaultSecretWrap(Base):
         ForeignKey("vault_secrets.id", ondelete="CASCADE"),
         nullable=False,
     )
-    user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     group_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("vault_groups.id", ondelete="CASCADE"),
@@ -155,12 +161,7 @@ class VaultSecretWrap(Base):
     )
 
     __table_args__ = (
-        PrimaryKeyConstraint("secret_id", "user_id", "group_id", name="pk_vault_secret_wraps"),
-        CheckConstraint(
-            "(user_id IS NOT NULL AND group_id IS NULL) "
-            "OR (user_id IS NULL AND group_id IS NOT NULL)",
-            name="ck_vault_secret_wraps_xor",
-        ),
+        PrimaryKeyConstraint("secret_id", "user_id", name="pk_vault_secret_wraps"),
     )
 
 

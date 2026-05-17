@@ -227,25 +227,19 @@ class VaultRepository:
         *,
         secret_id: UUID,
         user_id: UUID,
-        user_group_ids: list[UUID],
+        user_group_ids: list[UUID],  # noqa: ARG002 — kept для API compat, ADR-0017
     ) -> list[VaultSecretWrap]:
-        """Wraps доступные данному user через personal или group sharing.
+        """Wraps доступные данному user (ADR-0017).
 
-        Каждый recipient (user или member группы) имеет свой wrapped_key,
-        зашифрованный соответствующим pubkey. Возвращаем все wraps, под
-        которые user имеет ключ для разворачивания.
+        После ADR-0017 group_id — pure lineage metadata, не authorization.
+        Access определяется только через `wrap.user_id == user_id`.
+        `user_group_ids` параметр сохранён для backwards-compat caller'ов
+        (router calls), но игнорируется.
         """
-        if user_group_ids:
-            stmt = select(VaultSecretWrap).where(
-                VaultSecretWrap.secret_id == secret_id,
-                (VaultSecretWrap.user_id == user_id)
-                | (VaultSecretWrap.group_id.in_(user_group_ids)),
-            )
-        else:
-            stmt = select(VaultSecretWrap).where(
-                VaultSecretWrap.secret_id == secret_id,
-                VaultSecretWrap.user_id == user_id,
-            )
+        stmt = select(VaultSecretWrap).where(
+            VaultSecretWrap.secret_id == secret_id,
+            VaultSecretWrap.user_id == user_id,
+        )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
@@ -256,13 +250,75 @@ class VaultRepository:
         user_id: UUID,
         user_group_ids: list[UUID],
     ) -> bool:
-        """User имеет access если есть wrap на user_id или один из его group_id."""
+        """User имеет access если есть wrap на user_id (ADR-0017).
+
+        Group membership самой по себе НЕ даёт доступа — для доступа
+        требуется personal wrap (которые добавляются client'ом при
+        share-with-group flow).
+        """
         wraps = await self.get_wraps_for_recipient(
             secret_id=secret_id,
             user_id=user_id,
             user_group_ids=user_group_ids,
         )
         return len(wraps) > 0
+
+    # -----------------------------------------------------------------
+    # Sharing (ADR-0017)
+
+    async def get_user_pubkey(self, user_id: UUID) -> bytes | None:
+        """Public x25519_pubkey lookup. Returns None если user не setup'нул vault."""
+        user = await self.get_user(user_id)
+        return None if user is None else user.x25519_pubkey
+
+    async def add_secret_wraps(
+        self,
+        *,
+        secret_id: UUID,
+        wraps: list[VaultSecretWrap],
+    ) -> int:
+        """Add wraps batch. Idempotent на (secret_id, user_id) PK:
+        existing wrap'ы пропускаются (skip-on-conflict ON CONFLICT DO NOTHING).
+
+        Returns актуально добавленное число (некоторые могли быть skipped).
+        """
+        from sqlalchemy.dialects.postgresql import insert
+
+        added = 0
+        for w in wraps:
+            w.secret_id = secret_id
+            stmt = (
+                insert(VaultSecretWrap)
+                .values(
+                    secret_id=secret_id,
+                    user_id=w.user_id,
+                    group_id=w.group_id,
+                    wrapped_key=w.wrapped_key,
+                )
+                .on_conflict_do_nothing(constraint="pk_vault_secret_wraps")
+            )
+            result = await self._session.execute(stmt)
+            if result.rowcount and result.rowcount > 0:
+                added += 1
+        await self._session.flush()
+        return added
+
+    async def remove_secret_wrap(
+        self,
+        *,
+        secret_id: UUID,
+        user_id: UUID,
+    ) -> bool:
+        """Remove wrap (unshare). Returns True если row была deleted."""
+        from sqlalchemy import delete
+
+        stmt = delete(VaultSecretWrap).where(
+            VaultSecretWrap.secret_id == secret_id,
+            VaultSecretWrap.user_id == user_id,
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return bool(result.rowcount and result.rowcount > 0)
 
     async def update_secret_blob(
         self,
