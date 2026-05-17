@@ -590,11 +590,7 @@ def test_add_wraps_404_secret_missing(
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.post(
         f"/api/v1/vault/secrets/{uuid4()}/wraps",
-        json={
-            "wraps": [
-                {"user_id": str(uuid4()), "wrapped_key_b64": _b64(b"\xaa" * 48)}
-            ]
-        },
+        json={"wraps": [{"user_id": str(uuid4()), "wrapped_key_b64": _b64(b"\xaa" * 48)}]},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
