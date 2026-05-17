@@ -50,6 +50,26 @@ class Settings(BaseSettings):
     llm_vllm_timeout_seconds: int = Field(default=60, alias="LLM_VLLM_TIMEOUT_SECONDS")
     llm_vllm_api_key: str | None = Field(default=None, alias="LLM_VLLM_API_KEY")
 
+    # GigaChat adapter settings (RU LLM провайдер от Сбера). Использует
+    # OAuth client_credentials → access_token caching → chat completions.
+    # ТЗ §1.2 — Russian sovereignty (ФЗ-152: данные не покидают РФ).
+    llm_gigachat_client_id: str | None = Field(default=None, alias="LLM_GIGACHAT_CLIENT_ID")
+    llm_gigachat_client_secret: str | None = Field(default=None, alias="LLM_GIGACHAT_CLIENT_SECRET")
+    llm_gigachat_oauth_url: str = Field(
+        default="https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+        alias="LLM_GIGACHAT_OAUTH_URL",
+    )
+    llm_gigachat_base_url: str = Field(
+        default="https://gigachat.devices.sberbank.ru", alias="LLM_GIGACHAT_BASE_URL"
+    )
+    llm_gigachat_model: str = Field(default="GigaChat", alias="LLM_GIGACHAT_MODEL")
+    llm_gigachat_scope: str = Field(default="GIGACHAT_API_PERS", alias="LLM_GIGACHAT_SCOPE")
+    llm_gigachat_timeout_seconds: int = Field(default=60, alias="LLM_GIGACHAT_TIMEOUT_SECONDS")
+    # TLS verify: production использует Russian Trusted CA bundle (path
+    # на disk). В dev/test можно отключить через verify=False (НЕ
+    # рекомендуется production).
+    llm_gigachat_verify_ssl: bool = Field(default=True, alias="LLM_GIGACHAT_VERIFY_SSL")
+
     # Webhook delivery worker (E5.2 #89). Worker запускается в FastAPI
     # lifespan если enabled=True. В test environment (pytest) — flag
     # должен быть False (default), чтобы asyncio loops не мешали.
