@@ -73,11 +73,19 @@ export default async function HrPage({
     <>
       <Nav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Кадры</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Карточки сотрудников. Все просмотры аудитуются.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Кадры</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Карточки сотрудников. Все просмотры аудитуются.
+            </p>
+          </div>
+          <Link
+            href="/hr/new"
+            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            + Создать
+          </Link>
         </header>
         <div className="flex items-center justify-between">
           <p className="text-xs text-gray-500">
