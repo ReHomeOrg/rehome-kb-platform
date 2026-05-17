@@ -32,3 +32,51 @@ export async function listEmployees(
 export async function getEmployee(id: string): Promise<HrEmployee> {
   return apiFetch<HrEmployee>(`/api/v1/hr/employees/${encodeURIComponent(id)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Write side — HR_RESTRICTED. Mirror backend `HrEmployeeInput`/`HrEmployeePatch`.
+
+export interface HrEmployeeCreateInput {
+  user_id?: string | null;
+  personnel_number?: string | null;
+  full_name: string;
+  position: string;
+  department?: string | null;
+  hire_date: string; // ISO date (YYYY-MM-DD)
+  termination_date?: string | null;
+  status?: "ACTIVE" | "ON_LEAVE" | "TERMINATED";
+  contact_info?: Record<string, unknown>;
+  notes?: Record<string, unknown>;
+}
+
+export type HrEmployeePatchInput = Partial<HrEmployeeCreateInput>;
+
+export async function createEmployee(
+  input: HrEmployeeCreateInput,
+): Promise<HrEmployee> {
+  return apiFetch<HrEmployee>("/api/v1/hr/employees", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function patchEmployee(
+  id: string,
+  input: HrEmployeePatchInput,
+): Promise<HrEmployee> {
+  return apiFetch<HrEmployee>(
+    `/api/v1/hr/employees/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function archiveEmployee(id: string): Promise<void> {
+  await apiFetch<void>(`/api/v1/hr/employees/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
