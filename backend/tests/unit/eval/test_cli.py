@@ -63,10 +63,19 @@ def test_build_judge_mock() -> None:
     assert isinstance(judge, MockJudge)
 
 
-def test_build_judge_llm_raises_not_implemented() -> None:
-    """LLMJudge raise'ит в конструкторе — propagate'ится наверх."""
-    with pytest.raises(NotImplementedError, match="ADR-0013"):
+def test_build_judge_llm_requires_judge_provider() -> None:
+    """`--judge llm` без `--judge-provider` → ValueError."""
+    with pytest.raises(ValueError, match="judge-provider"):
         build_judge("llm")
+
+
+def test_build_judge_llm_with_mock_provider() -> None:
+    """`--judge llm --judge-provider mock` строит LLMJudge."""
+    from src.eval.judge import LLMJudge
+
+    judge = build_judge("llm", judge_provider="mock")
+    assert isinstance(judge, LLMJudge)
+    assert judge.name == "mock"
 
 
 # ---------------------------------------------------------------------------
