@@ -3,7 +3,8 @@
 `Settings.llm_provider` (env `LLM_PROVIDER`, default 'mock'):
 - `mock` → `MockProvider` (тесты, dev).
 - `vllm` → `VLLMProvider` (self-hosted OpenAI-compatible).
-- `gigachat` → `GigaChatProvider` (Sber RU sovereign LLM).
+- `gigachat` → `GigaChatProvider` (Sber RU sovereign).
+- `yandex_gpt` → `YandexGptProvider` (Yandex Cloud RU sovereign).
 - любое другое → ValueError.
 """
 
@@ -13,6 +14,7 @@ from src.api.chat.llm.base import LLMProvider
 from src.api.chat.llm.gigachat import GigaChatProvider
 from src.api.chat.llm.mock import MockProvider
 from src.api.chat.llm.vllm import VLLMProvider
+from src.api.chat.llm.yandex_gpt import YandexGptProvider
 from src.api.config import Settings, get_settings
 
 
@@ -22,9 +24,9 @@ def get_llm_provider(
     """Возвращает LLMProvider instance согласно settings.llm_provider.
 
     MockProvider stateless и cheap — создаётся на каждый запрос.
-    VLLMProvider / GigaChatProvider держат httpx.AsyncClient instance
-    attribute; пока тоже создаются per-request. Для production latency —
-    backlog: lru_cache / singleton client через Lifespan.
+    VLLMProvider / GigaChatProvider / YandexGptProvider держат
+    httpx.AsyncClient — пока тоже создаются per-request. Для production
+    latency — backlog: lru_cache / singleton client через Lifespan.
     """
     provider = settings.llm_provider.lower()
     if provider == "mock":
@@ -51,5 +53,19 @@ def get_llm_provider(
             scope=settings.llm_gigachat_scope,
             timeout_seconds=settings.llm_gigachat_timeout_seconds,
             verify_ssl=settings.llm_gigachat_verify_ssl,
+        )
+    if provider == "yandex_gpt":
+        if not settings.llm_yandex_api_key or not settings.llm_yandex_folder_id:
+            raise ValueError(
+                "LLM_PROVIDER=yandex_gpt requires LLM_YANDEX_API_KEY "
+                "and LLM_YANDEX_FOLDER_ID to be set"
+            )
+        return YandexGptProvider(
+            api_key=settings.llm_yandex_api_key,
+            folder_id=settings.llm_yandex_folder_id,
+            base_url=settings.llm_yandex_base_url,
+            model=settings.llm_yandex_model,
+            model_version=settings.llm_yandex_model_version,
+            timeout_seconds=settings.llm_yandex_timeout_seconds,
         )
     raise ValueError(f"Unknown LLM_PROVIDER: {settings.llm_provider!r}")

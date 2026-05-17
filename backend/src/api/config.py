@@ -70,6 +70,19 @@ class Settings(BaseSettings):
     # рекомендуется production).
     llm_gigachat_verify_ssl: bool = Field(default=True, alias="LLM_GIGACHAT_VERIFY_SSL")
 
+    # YandexGPT adapter settings (Yandex Cloud, RU sovereign). Использует
+    # OpenAI-compatible endpoint /v1/chat/completions. Auth — Api-Key из
+    # service account (Yandex Cloud Console). `model` resolves в
+    # `gpt://<folder_id>/<model>/<version>` через factory.
+    llm_yandex_api_key: str | None = Field(default=None, alias="LLM_YANDEX_API_KEY")
+    llm_yandex_folder_id: str | None = Field(default=None, alias="LLM_YANDEX_FOLDER_ID")
+    llm_yandex_base_url: str = Field(
+        default="https://llm.api.cloud.yandex.net", alias="LLM_YANDEX_BASE_URL"
+    )
+    llm_yandex_model: str = Field(default="yandexgpt-lite", alias="LLM_YANDEX_MODEL")
+    llm_yandex_model_version: str = Field(default="latest", alias="LLM_YANDEX_MODEL_VERSION")
+    llm_yandex_timeout_seconds: int = Field(default=60, alias="LLM_YANDEX_TIMEOUT_SECONDS")
+
     # Webhook delivery worker (E5.2 #89). Worker запускается в FastAPI
     # lifespan если enabled=True. В test environment (pytest) — flag
     # должен быть False (default), чтобы asyncio loops не мешали.

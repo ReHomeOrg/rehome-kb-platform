@@ -11,6 +11,7 @@ from src.api.chat.llm.factory import get_llm_provider
 from src.api.chat.llm.gigachat import GigaChatProvider
 from src.api.chat.llm.mock import MockProvider
 from src.api.chat.llm.vllm import VLLMProvider
+from src.api.chat.llm.yandex_gpt import YandexGptProvider
 
 __all__ = [
     "GigaChatProvider",
@@ -19,5 +20,6 @@ __all__ = [
     "LLMResponse",
     "MockProvider",
     "VLLMProvider",
+    "YandexGptProvider",
     "get_llm_provider",
 ]
