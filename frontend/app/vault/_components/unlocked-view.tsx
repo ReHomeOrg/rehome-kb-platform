@@ -16,13 +16,17 @@ import { useState } from "react";
 import { lock, touch } from "@/lib/vault/session";
 
 import CreateSecretForm from "./create-secret-form";
+import GroupsPanel from "./groups-panel";
 import SecretsList from "./secrets-list";
+
+type Tab = "secrets" | "groups";
 
 interface Props {
   userId: string;
 }
 
 export default function UnlockedView({ userId }: Props): JSX.Element {
+  const [tab, setTab] = useState<Tab>("secrets");
   const [showCreate, setShowCreate] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -50,21 +54,52 @@ export default function UnlockedView({ userId }: Props): JSX.Element {
         </button>
       </header>
 
+      <nav className="flex gap-2 border-b border-green-300">
+        <button
+          type="button"
+          onClick={() => setTab("secrets")}
+          className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${
+            tab === "secrets"
+              ? "border-gray-900 text-gray-900"
+              : "border-transparent text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          Секреты
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("groups")}
+          className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${
+            tab === "groups"
+              ? "border-gray-900 text-gray-900"
+              : "border-transparent text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          Группы
+        </button>
+      </nav>
+
       <div className="rounded-md bg-white p-4">
-        {showCreate ? (
-          <CreateSecretForm
-            userId={userId}
-            onCancel={() => setShowCreate(false)}
-            onSuccess={() => {
-              setShowCreate(false);
-              setReloadToken((n) => n + 1);
-            }}
-          />
-        ) : null}
-        <SecretsList
-          onCreateClick={() => setShowCreate(true)}
-          reloadToken={reloadToken}
-        />
+        {tab === "secrets" ? (
+          <>
+            {showCreate ? (
+              <CreateSecretForm
+                userId={userId}
+                onCancel={() => setShowCreate(false)}
+                onSuccess={() => {
+                  setShowCreate(false);
+                  setReloadToken((n) => n + 1);
+                }}
+              />
+            ) : null}
+            <SecretsList
+              onCreateClick={() => setShowCreate(true)}
+              reloadToken={reloadToken}
+            />
+          </>
+        ) : (
+          <GroupsPanel currentUserId={userId} />
+        )}
       </div>
     </section>
   );
