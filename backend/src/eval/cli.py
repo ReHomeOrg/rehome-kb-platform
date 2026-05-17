@@ -8,16 +8,24 @@ Usage:
         --dataset tests/eval/golden.jsonl \\
         --out reports/eval-$(date +%Y%m%d-%H%M%S).json
 
-Поддерживаемые providers/judges в MVP:
-- `provider=mock` — MockProvider (echo, для smoke testing pipeline'а)
-- `provider=vllm` — VLLMProvider (требует LLM_VLLM_URL env)
-- `judge=mock` — MockJudge (heuristic, для smoke)
-- `judge=llm` — LLMJudge (NotImplementedError — backlog)
+Поддерживаемые providers:
+- `mock` — MockProvider (echo, для smoke testing pipeline'а)
+- `vllm` — VLLMProvider (требует LLM_VLLM_URL env)
+- `gigachat` — GigaChatProvider (требует LLM_GIGACHAT_CLIENT_ID / _SECRET)
+- `yandex_gpt` — YandexGptProvider (требует LLM_YANDEX_API_KEY / _FOLDER_ID)
+
+Поддерживаемые judges:
+- `mock` — MockJudge (heuristic-based, deterministic)
+- `llm` — LLMJudge (использует --judge-provider для оценки)
+
+Для `--judge llm` нужен **отдельный** provider (рекомендуется сильнее
+системного — например, gigachat-judge оценивает yandex_gpt-system).
+Указывается через `--judge-provider`.
 
 Exit codes:
 - 0 — run завершён успешно, отчёт записан
 - 1 — invalid arguments / dataset не найден / Pydantic validation fail
-- 2 — provider/judge construction fail (например, vllm без URL)
+- 2 — provider/judge construction fail
 """
 
 from __future__ import annotations
@@ -41,41 +49,87 @@ logger = logging.getLogger(__name__)
 
 _PROVIDERS: dict[str, str] = {
     "mock": "MockProvider — echo, для smoke testing",
-    "vllm": "VLLMProvider — production vLLM endpoint",
+    "vllm": "VLLMProvider — self-hosted vLLM endpoint",
+    "gigachat": "GigaChatProvider — Sber RU sovereign",
+    "yandex_gpt": "YandexGptProvider — Yandex Cloud RU sovereign",
 }
 
 _JUDGES: dict[str, str] = {
     "mock": "MockJudge — heuristic-based, deterministic",
-    "llm": "LLMJudge — backlog (ADR-0013 §4)",
+    "llm": "LLMJudge — использует --judge-provider для оценки",
 }
 
 
 def build_provider(name: str) -> LLMProvider:
-    """Factory с честным error на unsupported провайдере."""
+    """Factory с честным error на unsupported провайдере.
+
+    Reads config через `get_settings()` для credentials / URLs. Fail-fast
+    если required env vars отсутствуют (см. config.py для list).
+    """
+    settings = get_settings()
     if name == "mock":
         return MockProvider()
     if name == "vllm":
         # Lazy import — vllm depends на httpx настройки в config.
         from src.api.chat.llm.vllm import VLLMProvider
 
-        settings = get_settings()
         return VLLMProvider(
             url=settings.llm_vllm_url,
             model=settings.llm_vllm_model,
             timeout_seconds=settings.llm_vllm_timeout_seconds,
             api_key=settings.llm_vllm_api_key,
         )
+    if name == "gigachat":
+        from src.api.chat.llm.gigachat import GigaChatProvider
+
+        if not settings.llm_gigachat_client_id or not settings.llm_gigachat_client_secret:
+            raise ValueError(
+                "provider=gigachat requires LLM_GIGACHAT_CLIENT_ID "
+                "and LLM_GIGACHAT_CLIENT_SECRET env vars"
+            )
+        return GigaChatProvider(
+            client_id=settings.llm_gigachat_client_id,
+            client_secret=settings.llm_gigachat_client_secret,
+            oauth_url=settings.llm_gigachat_oauth_url,
+            base_url=settings.llm_gigachat_base_url,
+            model=settings.llm_gigachat_model,
+            scope=settings.llm_gigachat_scope,
+            timeout_seconds=settings.llm_gigachat_timeout_seconds,
+            verify_ssl=settings.llm_gigachat_verify_ssl,
+        )
+    if name == "yandex_gpt":
+        from src.api.chat.llm.yandex_gpt import YandexGptProvider
+
+        if not settings.llm_yandex_api_key or not settings.llm_yandex_folder_id:
+            raise ValueError(
+                "provider=yandex_gpt requires LLM_YANDEX_API_KEY "
+                "and LLM_YANDEX_FOLDER_ID env vars"
+            )
+        return YandexGptProvider(
+            api_key=settings.llm_yandex_api_key,
+            folder_id=settings.llm_yandex_folder_id,
+            base_url=settings.llm_yandex_base_url,
+            model=settings.llm_yandex_model,
+            model_version=settings.llm_yandex_model_version,
+            timeout_seconds=settings.llm_yandex_timeout_seconds,
+        )
     raise ValueError(f"Неизвестный provider '{name}'. Поддерживается: {list(_PROVIDERS)}")
 
 
-def build_judge(name: str) -> Judge:
-    """Factory для judge."""
+def build_judge(name: str, *, judge_provider: str | None = None) -> Judge:
+    """Factory для judge.
+
+    `--judge llm` требует `judge_provider` — отдельный LLM-провайдер для
+    оценки (рекомендуется сильнее системного, например gigachat-pro либо
+    yandexgpt-pro).
+    """
     if name == "mock":
         return MockJudge()
     if name == "llm":
-        # LLMJudge() raise'ит NotImplementedError — пробрасываем для honest
-        # сообщения пользователю.
-        return LLMJudge()
+        if judge_provider is None:
+            raise ValueError("--judge llm requires --judge-provider to be specified")
+        provider = build_provider(judge_provider)
+        return LLMJudge(provider=provider, model_name=judge_provider)
     raise ValueError(f"Неизвестный judge '{name}'. Поддерживается: {list(_JUDGES)}")
 
 
@@ -95,6 +149,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         choices=list(_JUDGES),
         help="Judge для scoring'а, " + "; ".join(f"{k}={v}" for k, v in _JUDGES.items()),
+    )
+    parser.add_argument(
+        "--judge-provider",
+        required=False,
+        choices=list(_PROVIDERS),
+        default=None,
+        help="LLM provider для --judge llm (рекомендуется отличный от --provider).",
     )
     parser.add_argument(
         "--dataset",
@@ -122,7 +183,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     try:
         provider = build_provider(args.provider)
-        judge = build_judge(args.judge)
+        judge = build_judge(args.judge, judge_provider=args.judge_provider)
     except (ValueError, NotImplementedError) as exc:
         logger.error("eval.cli.construct_error", extra={"error": str(exc)})
         sys.stderr.write(f"Provider/Judge error: {exc}\n")
@@ -134,6 +195,7 @@ async def _run(args: argparse.Namespace) -> int:
         extra={
             "provider": args.provider,
             "judge": args.judge,
+            "judge_provider": args.judge_provider,
             "dataset": str(args.dataset),
             "dataset_sha256": sha,
             "pair_count": len(pairs),

@@ -125,14 +125,14 @@ async def test_mock_judge_empty_actual_answer() -> None:
 
 
 # ---------------------------------------------------------------------------
-# LLMJudge skeleton — NotImplementedError
+# LLMJudge (full implementation tested в test_llm_judge.py — здесь только
+# constructor smoke)
 
 
-def test_llm_judge_constructor_raises_not_implemented() -> None:
-    """ADR-0013 §4: LLMJudge skeleton присутствует, но активирован будет
-    только после landing'а второго LLM provider'а."""
-    with pytest.raises(NotImplementedError, match="ADR-0013"):
-        LLMJudge()
+def test_llm_judge_requires_provider_kwarg() -> None:
+    """LLMJudge constructor требует provider= keyword-only."""
+    with pytest.raises(TypeError, match="provider"):
+        LLMJudge()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
