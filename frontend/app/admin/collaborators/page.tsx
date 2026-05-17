@@ -108,12 +108,20 @@ export default async function AdminCollaboratorsPage({
           <h1 className="text-2xl font-semibold tracking-tight">
             Коллаборанты
           </h1>
-          <Link
-            href="/admin/collaborators/new"
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            + Создать
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/admin/collaborators/onboarding"
+              className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-1.5 text-sm font-medium text-yellow-800 hover:bg-yellow-100"
+            >
+              Очередь онбординга
+            </Link>
+            <Link
+              href="/admin/collaborators/new"
+              className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              + Создать
+            </Link>
+          </div>
         </header>
 
         <p className="text-xs text-gray-600">

@@ -427,6 +427,12 @@ export type CollaboratorLegalEntityType =
   | "ip"
   | "legal_entity";
 
+export type CollaboratorOnboardingSource =
+  | "form"
+  | "staff_invite"
+  | "api"
+  | "migration";
+
 export interface CollaboratorPublic {
   id: string;
   type: CollaboratorType;
@@ -462,6 +468,7 @@ export interface CollaboratorInternal extends CollaboratorPublic {
   api_integration: Record<string, unknown>;
   sla: Record<string, unknown>;
   counterparty_check: Record<string, unknown>;
+  onboarding_source: CollaboratorOnboardingSource;
   created_at: string;
   updated_at: string;
 }
