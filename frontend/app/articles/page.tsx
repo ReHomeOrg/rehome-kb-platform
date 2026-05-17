@@ -5,6 +5,8 @@
  * → renders ArticleList + ArticleFilters.
  */
 
+import Link from "next/link";
+
 import Nav from "@/app/_components/nav";
 import { listArticles } from "@/lib/api/articles";
 
@@ -48,11 +50,19 @@ export default async function ArticlesPage({
     <>
       <Nav />
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-8">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Статьи</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            База знаний reHome — справочник, политики, FAQ и инструкции.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Статьи</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              База знаний reHome — справочник, политики, FAQ и инструкции.
+            </p>
+          </div>
+          <Link
+            href="/articles/new"
+            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            + Создать
+          </Link>
         </header>
         <ArticleFilters
           initial={{
