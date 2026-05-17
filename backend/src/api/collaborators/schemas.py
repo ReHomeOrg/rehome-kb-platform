@@ -108,6 +108,7 @@ class CollaboratorInternal(CollaboratorPublic):
     api_integration: dict[str, Any]
     sla: dict[str, Any]
     counterparty_check: dict[str, Any]
+    onboarding_source: OnboardingSource
     created_at: datetime
     updated_at: datetime
 

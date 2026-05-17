@@ -50,6 +50,7 @@ def _make_collab(
     c.api_integration = {}
     c.sla = {}
     c.counterparty_check = {}
+    c.onboarding_source = "staff_invite"
     c.audit_log = []
     c.created_at = datetime(2026, 5, 16, tzinfo=UTC)
     c.updated_at = datetime(2026, 5, 16, tzinfo=UTC)
@@ -79,6 +80,8 @@ def create_mock() -> AsyncMock:
             c.updated_at = datetime(2026, 5, 16, tzinfo=UTC)
         if c.audit_log is None:
             c.audit_log = []
+        if c.onboarding_source is None:
+            c.onboarding_source = "staff_invite"
         return c
 
     return AsyncMock(side_effect=_populate_defaults)

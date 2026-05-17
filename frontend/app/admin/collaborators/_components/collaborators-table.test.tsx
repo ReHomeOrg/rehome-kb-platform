@@ -40,6 +40,7 @@ function internalFixture(
     api_integration: {},
     sla: {},
     counterparty_check: {},
+    onboarding_source: "staff_invite",
     created_at: "2026-05-16T00:00:00Z",
     updated_at: "2026-05-16T00:00:00Z",
     ...override,
