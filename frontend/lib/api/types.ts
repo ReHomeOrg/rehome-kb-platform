@@ -485,6 +485,25 @@ export interface CollaboratorsListResponse {
   pagination: PaginationInfo;
 }
 
+/**
+ * Junction row для `GET /api/v1/premises/{id}/collaborators` (ТЗ §10.6, Slice 5).
+ * Inline-developed Collaborator card — Public variant (безопасно для anon).
+ */
+export interface PremisesCollaboratorRow {
+  id: string;
+  collaborator_id: string;
+  role: string;
+  priority: number;
+  notes: string | null;
+  assigned_at: string;
+  assigned_by: string;
+  collaborator: CollaboratorPublic;
+}
+
+export interface PremisesCollaboratorsListResponse {
+  data: PremisesCollaboratorRow[];
+}
+
 // ============================================================================
 // Audit log (#166, backend #161)
 

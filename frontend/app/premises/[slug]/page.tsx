@@ -14,6 +14,8 @@ import { ApiError } from "@/lib/api/client";
 import { getPremisesCard } from "@/lib/api/premises";
 import type { PremisesStatus, PremisesView } from "@/lib/api/types";
 
+import CollaboratorsSection from "./_components/collaborators-section";
+
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
@@ -122,6 +124,8 @@ export default async function PremisesDetailPage({
             </dl>
           </section>
         ) : null}
+
+        <CollaboratorsSection premisesId={card.id} canManage={isStaff} />
 
         {isStaff ? (
           <>
