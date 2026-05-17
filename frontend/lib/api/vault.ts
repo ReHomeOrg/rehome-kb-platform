@@ -229,3 +229,53 @@ export async function removeGroupMember(
     { method: "DELETE" },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Sharing (ADR-0017)
+
+export interface VaultUserPubkeyView {
+  user_id: string;
+  x25519_pubkey_b64: string;
+}
+
+export interface VaultSecretWrapAddInput {
+  user_id: string;
+  group_id?: string | null;
+  wrapped_key_b64: string;
+}
+
+export interface VaultSecretAddWrapsBody {
+  wraps: VaultSecretWrapAddInput[];
+}
+
+export async function getUserPubkey(
+  userId: string,
+): Promise<VaultUserPubkeyView> {
+  return apiFetch<VaultUserPubkeyView>(
+    `/api/v1/vault/users/${encodeURIComponent(userId)}/pubkey`,
+  );
+}
+
+export async function addSecretWraps(
+  secretId: string,
+  body: VaultSecretAddWrapsBody,
+): Promise<void> {
+  await apiFetch<void>(
+    `/api/v1/vault/secrets/${encodeURIComponent(secretId)}/wraps`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function removeSecretWrap(
+  secretId: string,
+  userId: string,
+): Promise<void> {
+  await apiFetch<void>(
+    `/api/v1/vault/secrets/${encodeURIComponent(secretId)}/wraps/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+}

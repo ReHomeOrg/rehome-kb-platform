@@ -6,8 +6,11 @@
  */
 
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import Nav from "@/app/_components/nav";
+import { ApiError } from "@/lib/api/client";
+import { getCurrentUserId } from "@/lib/api/vault";
 
 import SecretDetail from "../_components/secret-detail";
 
@@ -19,6 +22,15 @@ export default async function VaultSecretPage({
   params,
 }: PageProps): Promise<JSX.Element> {
   const { secret_id } = await params;
+  let userId: string;
+  try {
+    userId = await getCurrentUserId();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      redirect("/login");
+    }
+    throw err;
+  }
   return (
     <>
       <Nav />
@@ -26,7 +38,7 @@ export default async function VaultSecretPage({
         <Link href="/vault" className="text-sm text-gray-600 hover:underline">
           ← К vault
         </Link>
-        <SecretDetail secretId={secret_id} />
+        <SecretDetail secretId={secret_id} userId={userId} />
       </main>
     </>
   );

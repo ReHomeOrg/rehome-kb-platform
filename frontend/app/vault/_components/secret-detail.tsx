@@ -30,6 +30,8 @@ import {
 } from "@/lib/vault/crypto";
 import { getVaultKey } from "@/lib/vault/session";
 
+import ShareSecretPanel from "./share-secret-panel";
+
 interface DecryptedSecret {
   raw: VaultSecretView;
   secretKey: CryptoKey;
@@ -39,6 +41,8 @@ interface DecryptedSecret {
 
 interface Props {
   secretId: string;
+  /** Текущий пользователь (исключается из re-wrap при share). */
+  userId: string;
 }
 
 function describeError(err: unknown): string {
@@ -48,7 +52,7 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : "Ошибка";
 }
 
-export default function SecretDetail({ secretId }: Props): JSX.Element {
+export default function SecretDetail({ secretId, userId }: Props): JSX.Element {
   const router = useRouter();
   const [state, setState] = useState<DecryptedSecret | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +67,9 @@ export default function SecretDetail({ secretId }: Props): JSX.Element {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+
+  const [sharing, setSharing] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState<string | null>(null);
 
   async function load(): Promise<void> {
     setLoading(true);
@@ -237,6 +244,18 @@ export default function SecretDetail({ secretId }: Props): JSX.Element {
             >
               Редактировать
             </button>
+            {state.raw.owner_id === userId && !sharing ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSharing(true);
+                  setShareSuccess(null);
+                }}
+                className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-800 hover:bg-blue-100"
+              >
+                Поделиться
+              </button>
+            ) : null}
             {!deleteConfirm ? (
               <button
                 type="button"
@@ -249,7 +268,23 @@ export default function SecretDetail({ secretId }: Props): JSX.Element {
             {copyStatus ? (
               <span className="text-xs text-green-700">{copyStatus}</span>
             ) : null}
+            {shareSuccess ? (
+              <span className="text-xs text-green-700">{shareSuccess}</span>
+            ) : null}
           </div>
+          {sharing ? (
+            <ShareSecretPanel
+              secretId={state.raw.id}
+              ownerId={userId}
+              secretKey={state.secretKey}
+              onCancel={() => setSharing(false)}
+              onSuccess={() => {
+                setSharing(false);
+                setShareSuccess("Расшарено успешно");
+                setTimeout(() => setShareSuccess(null), 3000);
+              }}
+            />
+          ) : null}
           {deleteConfirm ? (
             <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50/40 p-3">
               <p className="text-xs text-red-900">
