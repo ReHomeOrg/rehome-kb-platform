@@ -221,3 +221,118 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 - Архитектор: Evgeniy, 2026-05-11
 
 После утверждения State of Code Report становится baseline. Изменения в нём требуют отдельного ADR (раздел 2.4 ТЗ).
+
+---
+
+# Current State (2026-05-18)
+
+> Snapshot текущего состояния кодовой базы. Phase 0 baseline выше остаётся
+> историческим артефактом — здесь актуальный inventory для онбординга
+> новых участников и audit'а покрытия ТЗ.
+
+**Статус Phase 1:** ✅ Foundation closed, эпики E2-E7 в активной фазе. Большинство модулей foundation-ready или MVP-complete.
+
+**Метрики проекта:**
+- Backend: 143 Python модуля, 136 test files, **1304+ unit tests passing** (mypy strict ✓, ruff ✓).
+- Frontend: **486 Vitest tests** в 83 файлах (Next.js 14 App Router + TypeScript strict).
+- 22+ Alembic миграций (через 0023).
+- 335+ commits since baseline (2026-05-11).
+- 16 ADRs (0001-0017), все принятые.
+
+## CS.1. Backend модули
+
+| Модуль | Статус | Кратко |
+|---|---|---|
+| `articles` | ✅ MVP | CRUD + версионирование + Postgres FTS поиск + tags + categories + frontend admin форма |
+| `audit` | ✅ MVP | Centralized audit_log table + repository + viewer page |
+| `auth` | ✅ MVP | Keycloak JWT verify + scope mapper (ADR-0003 access_levels) + roles/scopes endpoint |
+| `categories` | ✅ MVP | Иерархия + counts |
+| `chat` | ✅ MVP | Sessions + SSE streaming + escalation + 4 LLM providers (mock, vLLM, GigaChat, YandexGPT) |
+| `collaborators` | ✅ Epic | Slices 1-6: CRUD, lifecycle, public onboarding form, portal access, reviews, metrics, premises junction (PR #226-#246) |
+| `documents` | ✅ MVP | MinIO upload + signed URL + audit + frontend upload UI |
+| `hr` | ✅ MVP | Employee CRUD + frontend create/edit/archive (Stage 1 — ПДн encryption deferred) |
+| `idempotency` | ✅ Foundation | Idempotency-Key header support for POST endpoints |
+| `observability` | ✅ Foundation | Prometheus middleware + /metrics endpoint + readiness probe |
+| `premises` | ✅ MVP | Per-scope projection + CRUD + tenant info + collaborators junction UI |
+| `search` (kb-search) | ✅ Stage 1 | Hybrid retrieval (pgvector + BM25 + RRF) + HF embedding provider + cross-encoder rerank (PR #261-#262) |
+| `tags` | ✅ MVP | List with counts |
+| `vault` | ✅ MVP closed | 9 PRs: zero-knowledge crypto, groups, sharing (multi-user wraps per ADR-0017), TOTP 2FA, rotation reminders. Frontend Slices 1-5 (PR #248-#256) |
+| `webhooks` | ✅ MVP | Outbound HMAC-signed delivery с retries + UI |
+| `eval` (kb-eval) | ✅ MVP | LLMJudge unlocked (4 metrics via Likert 1..5 → composite), 45 golden Q&A pairs across 9 categories, CLI с поддержкой всех 4 LLM providers |
+
+## CS.2. Frontend модули
+
+| Route | Статус | Использует |
+|---|---|---|
+| `/admin/*` | Admin panel | Collaborators (queue, lifecycle, portal-access, junction), HR, Audit, Articles |
+| `/articles` | Public + edit | Search, list, detail с markdown, create/edit/delete (STAFF+) |
+| `/categories` | Public | Tree view |
+| `/chat` | Auth | Sessions list + SSE chat + citations + escalation + feedback |
+| `/documents` | Auth+ | List/detail/upload (MinIO) |
+| `/hr` | HR_RESTRICTED | List/detail/edit/archive |
+| `/premises` | Mixed scope | List, search, detail с per-scope projection, edit (STAFF+), collaborators section |
+| `/onboarding/collaborator` | Public | Anonymous landing form для self-service (ADR-0015) |
+| `/vault` | Auth | Zero-knowledge UI: setup, unlock c TOTP, secrets CRUD, groups, share, rotation banner |
+| `/tags`, `/webhooks`, `/login` | Auxiliary | List + management |
+
+## CS.3. ADR Index
+
+| # | Заголовок | Резюме |
+|---|---|---|
+| 0001 | Platform architecture | Стек: FastAPI + Next.js + Postgres + Keycloak + MinIO |
+| 0002 | Financial model | Сервисный платёж (расчётный счёт) + номинальный счёт для аренды + 7% комиссия |
+| 0003 | Knowledge base tiers | Двухконтурный access_level: PUBLIC/LOGGED/AGENT vs STAFF/LEGAL/HR_RESTRICTED |
+| 0004 | Collaborators model | 14 типов × 4 финансовых группы × 3 portal_access уровня |
+| 0005 | API gateway FastAPI | Async-first; alembic migrations; pydantic-settings |
+| 0006 | Slug as canonical | Articles identified slug'ом (URL-friendly) |
+| 0007 | Keycloak realm | Realm 'rehome', m2m + spa clients, audience mapper |
+| 0008 | ORM SQLAlchemy | Async ORM + asyncpg driver |
+| 0009 | Secrets management | SOPS + age + secrets/ dir convention |
+| 0010 | RAG kb-search | Hybrid pgvector + BM25 + RRF; HF embeddings; rerank (follow-up #261); Qdrant — Stage 2 |
+| 0011 | Vault architecture | Zero-knowledge E2EE: Argon2id + AES-GCM + X25519 sealed-box |
+| 0012 | Documents object storage | MinIO S3-compatible с signed URLs |
+| 0013 | Eval-stand LLM providers | Composite score formula: 0.4·correctness + 0.3·faithfulness + 0.2·citation + 0.1·refusal |
+| 0014 | Collaborators foundation | Scope-aware visibility + 404 mask + Slice planning |
+| 0015 | Collaborators onboarding | Public form + portal_access tier flow + rate limit |
+| 0016 | Vault frontend crypto | hash-wasm (Argon2id) + @noble/curves (X25519) + WebCrypto stack |
+| 0017 | Vault sharing | Multi-user wraps (supersedes 0011 §«Group keypair») |
+
+## CS.4. Тех-долг и backlog
+
+**Production blockers (важные):**
+- Real RU LLM credentials — GigaChat / YandexGPT настроены в коде, требуют ops setup для production deployment.
+- Russian Trusted CA bundle для GigaChat TLS (ops task).
+- 200-pair golden dataset (сейчас 45 baseline; content team дозаполнить).
+- LLMJudge validation: 50 manual pairs vs auto ≥80% agreement (content task per ADR-0013 §4).
+
+**Backlog по модулям:**
+- **HR Stage 2**: ПДн encryption (паспорт, ИНН, СНИЛС, банк), 1С:ЗУП интеграция, КЭДО.
+- **Vault Stage 2**: FIDO2 hardware token, emergency access (2-of-2 escrow), true revoke (rotate secret_key + re-wrap), QR-код для TOTP setup, batch pubkey endpoint для groups >50.
+- **kb-search Stage 2**: Qdrant migration при scale; вынос embedding в shared worker через Lifespan.
+- **kb-eval**: smoke run в CI с real provider'ом (требует credentials); composite score baseline measurement и dashboard.
+- **Observability**: Grafana dashboards для каждого hot path; alert rules.
+- **Documentation**: OpenAPI spec drift sync (некоторые operationId'ы помечены `planned` хотя уже реализованы).
+
+## CS.5. CI / CD
+
+**8 CI jobs** в `.github/workflows/ci.yml`:
+1. **Backend (Python)**: ruff lint+format, mypy strict, pytest+coverage, Docker build smoke.
+2. **Frontend (Next.js)**: ESLint, tsc strict, Vitest, build, Docker smoke.
+3. **E2E (Playwright smoke)**: backend-less smoke (login, 404).
+4. **OpenAPI spec validation**: Redocly lint.
+5. **Anti-crutches checks**: detects TODO/HACK/FIXME без issue references.
+6. **Security scan**: dependency vulnerability + secrets leak.
+7. **Integration (Keycloak)**: realm import + JWT verify smoke.
+8. **RAG smoke (HF embeddings + eval CLI)**: installs sentence-transformers MiniLM, прогоняет HF tests + eval CLI smoke против 45-пары dataset'а (PR #260).
+
+## CS.6. Историческая справка
+
+Phase 0 baseline (выше) — артефакт момента запуска проекта 2026-05-11. С тех пор:
+- Завершён E1 Foundation, E2 Articles, E3 Chat MVP + LLM providers, E4 Articles management, E5 Webhooks + idempotency.
+- Vault MVP полностью закрыт (E6 эквивалент).
+- kb-search Stage 1 (hybrid retrieval + rerank).
+- kb-eval MVP с LLMJudge.
+- Все frontend admin pages для основных модулей.
+
+Phase 0 раздел «Что МОЖНО переиспользовать» = «ничего, greenfield» уже не релевантен — теперь reuse — это existing internal modules через FastAPI dependency injection (pattern зафиксирован в ADR-0005/0008).
+
