@@ -5047,13 +5047,16 @@ components:
                 reason:
                   type: string
           onboarding_source:
-            type: [string, 'null']
+            type: string
             enum:
-            - self_service
-            - invited_by_staff
-            - auto_from_dadata
-            - imported
-            description: Как коллаборант появился в системе
+            - form
+            - staff_invite
+            - api
+            - migration
+            description: |
+              Как коллаборант появился в системе (ADR-0015).
+              Backend canonical names (см. src/api/collaborators/schemas.py
+              OnboardingSource Literal). Не nullable — default 'staff_invite'.
     CollaboratorInput:
       type: object
       required:
