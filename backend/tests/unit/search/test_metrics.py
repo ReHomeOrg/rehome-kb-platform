@@ -106,3 +106,95 @@ async def test_hits_histogram_observed_with_count() -> None:
     after = _histogram_sum(RETRIEVAL_HITS)
     # Sum grows by len(hits) (sum aggregator).
     assert after - before == float(len(hits))
+
+
+# ---------------------------------------------------------------------------
+# Rerank metrics (#217)
+
+
+def _make_service_with_mock_reranker() -> RetrievalService:
+    from src.api.search.rerank import MockReranker
+
+    embedding_repo = MagicMock()
+    embedding_repo.search = AsyncMock(return_value=[_hit(uuid4()), _hit(uuid4(), chunk_index=1)])
+    article_repo = MagicMock()
+    article_repo.search = AsyncMock(return_value=([], False))
+    return RetrievalService(
+        embedding_repo,
+        article_repo,
+        MockEmbeddingProvider(),
+        reranker=MockReranker(),
+        rerank_top_n=20,
+    )
+
+
+@pytest.mark.asyncio
+async def test_rerank_increments_provider_counter() -> None:
+    from src.api.search.metrics import RERANK_TOTAL
+
+    svc = _make_service_with_mock_reranker()
+    before = _counter_value(RERANK_TOTAL, provider="mock")
+    await svc.search(query="x", access_levels=frozenset([AccessLevel.PUBLIC]))
+    after = _counter_value(RERANK_TOTAL, provider="mock")
+    assert after - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_rerank_observes_duration() -> None:
+    from src.api.search.metrics import RERANK_DURATION_SECONDS
+
+    svc = _make_service_with_mock_reranker()
+    histogram = RERANK_DURATION_SECONDS.labels(provider="mock")
+    before = float(histogram._sum.get())
+    await svc.search(query="x", access_levels=frozenset([AccessLevel.PUBLIC]))
+    after = float(histogram._sum.get())
+    assert after >= before
+
+
+@pytest.mark.asyncio
+async def test_rerank_observes_input_hits_count() -> None:
+    """Histogram counts hits passed TO reranker (input)."""
+    from src.api.search.metrics import RERANK_HITS
+
+    svc = _make_service_with_mock_reranker()
+    before = _histogram_sum(RERANK_HITS)
+    await svc.search(query="x", access_levels=frozenset([AccessLevel.PUBLIC]))
+    after = _histogram_sum(RERANK_HITS)
+    # 2 hits from mock vector_hits → observed.
+    assert after - before == 2.0
+
+
+@pytest.mark.asyncio
+async def test_rerank_metrics_not_emitted_when_reranker_disabled() -> None:
+    """Без reranker — rerank counters не двигаются."""
+    from src.api.search.metrics import RERANK_TOTAL
+
+    svc = _make_service(vector_hits=[_hit(uuid4())])
+    before = _counter_value(RERANK_TOTAL, provider="mock")
+    await svc.search(query="x", access_levels=frozenset([AccessLevel.PUBLIC]))
+    after = _counter_value(RERANK_TOTAL, provider="mock")
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_rerank_metrics_not_emitted_when_zero_hits() -> None:
+    """RetrievalService.search ничего не reranks если RRF выдал [] —
+    rerank counters не двигаются."""
+    from src.api.search.metrics import RERANK_TOTAL
+    from src.api.search.rerank import MockReranker
+
+    embedding_repo = MagicMock()
+    embedding_repo.search = AsyncMock(return_value=[])
+    article_repo = MagicMock()
+    article_repo.search = AsyncMock(return_value=([], False))
+    svc = RetrievalService(
+        embedding_repo,
+        article_repo,
+        MockEmbeddingProvider(),
+        reranker=MockReranker(),
+        rerank_top_n=20,
+    )
+    before = _counter_value(RERANK_TOTAL, provider="mock")
+    await svc.search(query="x", access_levels=frozenset([AccessLevel.PUBLIC]))
+    after = _counter_value(RERANK_TOTAL, provider="mock")
+    assert after == before
