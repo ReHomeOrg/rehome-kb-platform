@@ -44,6 +44,7 @@ from src.api.search.repository import (
     RetrievalHit,
     get_embedding_repository,
 )
+from src.api.search.rerank import MockReranker, Reranker
 
 # Row shape от `ArticleRepository.search`: (id, title, snippet, ts_rank).
 # Используется только для индекса rank (id) — поля title/snippet/score
@@ -71,10 +72,16 @@ class RetrievalService:
         embedding_repo: EmbeddingRepository,
         article_repo: ArticleRepository,
         provider: EmbeddingProvider,
+        reranker: Reranker | None = None,
+        rerank_top_n: int = 20,
     ) -> None:
         self._embedding_repo = embedding_repo
         self._article_repo = article_repo
         self._provider = provider
+        # `reranker=None` → re-ranking off, чистый RRF flow (default).
+        # Когда подключён, RRF возвращает top_n → reranker → top_k.
+        self._reranker = reranker
+        self._rerank_top_n = rerank_top_n
 
     async def search(
         self,
@@ -118,8 +125,16 @@ class RetrievalService:
             limit=per_retriever_k,
         )
 
-        # 4. RRF fusion.
-        result = self._rrf_fuse(vector_hits, bm25_hits, top_k=top_k)
+        # 4. RRF fusion. Если reranker подключён — fuse'им до большего
+        # top_n (даёт reranker'у пространство для promote'а далёких RRF
+        # hits), затем cross-encoder reorders top_n → output top_k.
+        fuse_k = max(top_k, self._rerank_top_n) if self._reranker else top_k
+        result = self._rrf_fuse(vector_hits, bm25_hits, top_k=fuse_k)
+
+        if self._reranker is not None and result:
+            result = await self._reranker.rerank(query, result)
+            result = result[:top_k]
+
         RETRIEVAL_DURATION_SECONDS.observe(time.perf_counter() - started)
         RETRIEVAL_HITS.observe(len(result))
         RETRIEVAL_TOTAL.labels(has_results="yes" if result else "no").inc()
@@ -204,6 +219,26 @@ def _build_provider(settings: Settings) -> EmbeddingProvider:
     )
 
 
+def _build_reranker(settings: Settings) -> Reranker | None:
+    """`RERANK_ENABLED=false` (default) → None — re-ranking off.
+
+    При `true` returns MockReranker либо CrossEncoderReranker (lazy
+    sentence_transformers import).
+    """
+    if not settings.rerank_enabled:
+        return None
+    choice = settings.rerank_provider.lower()
+    if choice == "mock":
+        return MockReranker()
+    if choice == "cross_encoder":
+        from src.api.search.rerank import CrossEncoderReranker
+
+        return CrossEncoderReranker(model_name=settings.rerank_model)
+    raise ValueError(
+        f"unknown rerank_provider={settings.rerank_provider!r}; expected 'mock' or 'cross_encoder'"
+    )
+
+
 def get_retrieval_service(
     embedding_repo: EmbeddingRepository = Depends(get_embedding_repository),
     article_repo: ArticleRepository = Depends(get_article_repository),
@@ -214,5 +249,13 @@ def get_retrieval_service(
     Default `EMBEDDING_PROVIDER=mock` для dev / tests. Production
     переключение на `hf` — после landing'а HF embedder + ingest'а
     real vectors через indexer worker.
+
+    `RERANK_ENABLED=true` подключает cross-encoder поверх RRF top-N.
     """
-    return RetrievalService(embedding_repo, article_repo, _build_provider(settings))
+    return RetrievalService(
+        embedding_repo,
+        article_repo,
+        _build_provider(settings),
+        reranker=_build_reranker(settings),
+        rerank_top_n=settings.rerank_top_n,
+    )

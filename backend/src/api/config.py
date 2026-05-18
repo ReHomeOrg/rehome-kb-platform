@@ -131,6 +131,25 @@ class Settings(BaseSettings):
     # migration — менять одновременно с model bump.
     embedding_dim: int = Field(default=1024, alias="EMBEDDING_DIM")
 
+    # Cross-encoder re-ranking (ADR-0010 follow-up). `False` default —
+    # retrieval работает через чистый RRF; при `True` поверх RRF top-N
+    # запускается reranker (mock либо real cross-encoder). Latency cost
+    # +50-200ms per request (depends на N и model size).
+    rerank_enabled: bool = Field(default=False, alias="RERANK_ENABLED")
+    rerank_provider: Literal["mock", "cross_encoder"] = Field(
+        default="mock",
+        alias="RERANK_PROVIDER",
+    )
+    # Default model — multilingual (RU + EN). Альтернатива: ms-marco-MiniLM-L-6-v2
+    # для English-only deployments (~80 MB vs 280 MB).
+    rerank_model: str = Field(
+        default="BAAI/bge-reranker-base",
+        alias="RERANK_MODEL",
+    )
+    # Сколько hits из RRF top-N passing через reranker. >top_k чтобы
+    # reranker мог промотить далёкие RRF hits если они более relevant.
+    rerank_top_n: int = Field(default=20, alias="RERANK_TOP_N")
+
     # Documents object storage (ADR-0012, TZ §3.4). MinIO/S3-compatible.
     # `minio_enabled=False` default: read endpoint возвращает 503 пока ops
     # не сконфигурируют MinIO; integration tests включают true с docker

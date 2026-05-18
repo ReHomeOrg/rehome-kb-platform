@@ -202,3 +202,144 @@ def test_build_provider_unknown_raises() -> None:
     object.__setattr__(settings, "embedding_provider", "bogus")
     with pytest.raises(ValueError, match="unknown embedding_provider"):
         _build_provider(settings)
+
+
+# ---------------------------------------------------------------------------
+# Reranker integration (#216)
+
+
+@pytest.mark.asyncio
+async def test_search_without_reranker_returns_rrf_order() -> None:
+    """`reranker=None` → behavior backward-compatible."""
+    a = uuid4()
+    b = uuid4()
+    svc, _, _ = _make_service(
+        vector_hits=[_hit(a, chunk_index=0), _hit(b, chunk_index=0)],
+        bm25_articles=[],
+    )
+    hits = await svc.search(query="хочу инфу", access_levels=frozenset([AccessLevel.PUBLIC]))
+    assert len(hits) == 2
+    # Vector order preserved (a первым).
+    assert hits[0].article_id == a
+
+
+@pytest.mark.asyncio
+async def test_search_with_reranker_invokes_and_reorders() -> None:
+    """Подключённый reranker применяется поверх RRF → topK."""
+    from src.api.search.rerank import MockReranker
+
+    a = uuid4()
+    b = uuid4()
+    # Two vector hits; query — содержит токены matchable only с hit b.
+    embedding_repo = MagicMock()
+    embedding_repo.search = AsyncMock(
+        return_value=[
+            RetrievalHit(
+                article_id=a,
+                slug="a",
+                title="Article A",
+                chunk_index=0,
+                text="общая статья без ключевых слов",
+                char_start=0,
+                char_end=30,
+                score=0.5,
+            ),
+            RetrievalHit(
+                article_id=b,
+                slug="b",
+                title="Article B",
+                chunk_index=0,
+                text="залог сервисный платёж невозвратный",
+                char_start=0,
+                char_end=35,
+                score=0.5,
+            ),
+        ]
+    )
+    article_repo = MagicMock()
+    article_repo.search = AsyncMock(return_value=([], False))
+
+    svc = RetrievalService(
+        embedding_repo,
+        article_repo,
+        MockEmbeddingProvider(),
+        reranker=MockReranker(),
+        rerank_top_n=10,
+    )
+    # query matches text 'b' tokens.
+    hits = await svc.search(
+        query="сервисный залог",
+        access_levels=frozenset([AccessLevel.PUBLIC]),
+        top_k=2,
+    )
+    # Reranker должен промотить b на первое место.
+    assert hits[0].article_id == b
+    assert hits[1].article_id == a
+
+
+@pytest.mark.asyncio
+async def test_search_with_reranker_truncates_to_top_k() -> None:
+    """rerank_top_n > top_k → reranker сортирует N, возвращаем K."""
+    from src.api.search.rerank import MockReranker
+
+    embedding_repo = MagicMock()
+    embedding_repo.search = AsyncMock(
+        return_value=[
+            RetrievalHit(
+                article_id=uuid4(),
+                slug=f"a{i}",
+                title=f"a{i}",
+                chunk_index=0,
+                text=f"text {i}",
+                char_start=0,
+                char_end=10,
+                score=0.5,
+            )
+            for i in range(5)
+        ]
+    )
+    article_repo = MagicMock()
+    article_repo.search = AsyncMock(return_value=([], False))
+
+    svc = RetrievalService(
+        embedding_repo,
+        article_repo,
+        MockEmbeddingProvider(),
+        reranker=MockReranker(),
+        rerank_top_n=5,
+    )
+    hits = await svc.search(
+        query="anything",
+        access_levels=frozenset([AccessLevel.PUBLIC]),
+        top_k=2,
+    )
+    assert len(hits) == 2
+
+
+# ---------------------------------------------------------------------------
+# _build_reranker factory
+
+
+def test_build_reranker_disabled_returns_none() -> None:
+    from src.api.search.retrieval import _build_reranker
+
+    settings = Settings(RERANK_ENABLED=False)
+    assert _build_reranker(settings) is None
+
+
+def test_build_reranker_mock() -> None:
+    from src.api.search.rerank import MockReranker
+    from src.api.search.retrieval import _build_reranker
+
+    settings = Settings(RERANK_ENABLED=True, RERANK_PROVIDER="mock")
+    r = _build_reranker(settings)
+    assert isinstance(r, MockReranker)
+
+
+def test_build_reranker_unknown_raises() -> None:
+    from src.api.search.retrieval import _build_reranker
+
+    settings = Settings(RERANK_ENABLED=True, RERANK_PROVIDER="mock")
+    object.__setattr__(settings, "rerank_provider", "bogus")
+    with pytest.raises(ValueError, match="unknown rerank_provider"):
+        _build_reranker(settings)
