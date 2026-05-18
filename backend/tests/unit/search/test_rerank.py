@@ -87,3 +87,31 @@ async def test_mock_reranker_score_replaced_not_dropped() -> None:
     assert out.score != 0.99
     # Остальные fields preserved.
     assert out.text == "hello world test"
+
+
+# ---------------------------------------------------------------------------
+# Provider label dispatch (regression test, PR #262 reviewer concern §2)
+
+
+def test_rerank_provider_label_mock() -> None:
+    """MockReranker → 'mock' label."""
+    from src.api.search.retrieval import _rerank_provider_label
+
+    assert _rerank_provider_label(MockReranker()) == "mock"
+
+
+def test_rerank_provider_label_unknown() -> None:
+    """Custom Reranker, не один из known классов → 'unknown' (catches
+    misconfiguration in dashboard rather than silently labeling as
+    cross_encoder)."""
+    from src.api.search.retrieval import _rerank_provider_label
+
+    class _CustomReranker:
+        @property
+        def model_id(self) -> str:
+            return "custom"
+
+        async def rerank(self, query: str, hits: list[RetrievalHit]) -> list[RetrievalHit]:
+            return hits
+
+    assert _rerank_provider_label(_CustomReranker()) == "unknown"
