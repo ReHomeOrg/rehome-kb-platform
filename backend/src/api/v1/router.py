@@ -17,6 +17,7 @@ from src.api.collaborators.junction_router import router as premises_collaborato
 from src.api.collaborators.metrics_router import router as collaborator_metrics_router
 from src.api.collaborators.reviews_router import router as collaborator_reviews_router
 from src.api.collaborators.router import router as collaborators_router
+from src.api.collaborators.service_orders_router import router as service_orders_router
 from src.api.documents.router import router as documents_router
 from src.api.hr.router import router as hr_router
 from src.api.premises.router import router as premises_router
@@ -38,6 +39,7 @@ router.include_router(collaborators_router)
 router.include_router(collaborator_reviews_router)
 router.include_router(collaborator_metrics_router)
 router.include_router(premises_collaborators_router)
+router.include_router(service_orders_router)
 router.include_router(chat_router)
 router.include_router(search_router)
 router.include_router(premises_router)
