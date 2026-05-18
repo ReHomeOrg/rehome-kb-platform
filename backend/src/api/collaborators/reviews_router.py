@@ -34,6 +34,11 @@ from src.api.auth.scope import AccessLevel
 from src.api.collaborators.access import compute_visible_groups
 from src.api.collaborators.models import Collaborator, CollaboratorReview
 from src.api.db import get_session
+from src.api.webhooks.dispatcher import (
+    WebhookEventDispatcher,
+    get_webhook_event_dispatcher,
+)
+from src.api.webhooks.events import WebhookEvent
 
 router = APIRouter(prefix="/collaborators/{collaborator_id}/reviews", tags=["Collaborators"])
 
@@ -193,6 +198,7 @@ async def create_review(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     session: AsyncSession = Depends(get_session),
     audit: AuditRepository = Depends(get_audit_repository),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> ReviewView:
     """`POST /api/v1/collaborators/{id}/reviews` — auth required.
 
@@ -235,6 +241,20 @@ async def create_review(
         metadata={"collaborator_id": str(collaborator_id), "rating": payload.rating},
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.review.posted`. Payload содержит
+    # ТОЛЬКО rating + collaborator_id + review_id (без comment text — comment
+    # потенциально содержит ПДн / sensitive feedback; subscribers идут в
+    # KB через GET /reviews если им нужен текст).
+    await webhook_dispatcher.dispatch(
+        event_type=WebhookEvent.COLLABORATOR_REVIEW_POSTED.value,
+        payload={
+            "review_id": str(review.id),
+            "collaborator_id": str(collaborator_id),
+            "rating": payload.rating,
+            "created_at": review.created_at.isoformat(),
+        },
+    )
     return _to_view(review)
 
 

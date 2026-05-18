@@ -21,6 +21,12 @@ class WebhookEvent(StrEnum):
     PREMISES_CARD_UPDATED = "premises_card.updated"
     AUDIT_SECURITY_EVENT = "audit.security_event"
     COLLABORATOR_CREATED = "collaborator.created"
+    COLLABORATOR_ACTIVATED = "collaborator.activated"
+    COLLABORATOR_SUSPENDED = "collaborator.suspended"
+    COLLABORATOR_ARCHIVED = "collaborator.archived"
+    COLLABORATOR_REVIEW_POSTED = "collaborator.review.posted"
+    COLLABORATOR_PORTAL_ACCESS_CHANGED = "collaborator.portal_access.changed"
+    COLLABORATOR_ONBOARDING_SUBMITTED = "collaborator.onboarding.submitted"
 
 
 ALLOWED_EVENTS: frozenset[str] = frozenset(e.value for e in WebhookEvent)

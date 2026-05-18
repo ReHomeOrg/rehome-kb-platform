@@ -293,14 +293,15 @@ def test_detail_returns_404_when_repo_returns_none(
 # POST /collaborators
 
 
-def test_create_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
-    """Anon → PUBLIC scope, STAFF required → 403 (не 401, поскольку
-    require_access_level признаёт guest'а authenticated as PUBLIC)."""
+def test_create_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+    """Anon без JWT → 401 (require_authenticated). Per #225: write
+    endpoints теперь требуют authenticated identity для audit_log
+    actor_sub + webhook payload."""
     resp = client.post(
         "/api/v1/collaborators",
         json={"name": "x", "type": "management_company", "service_area": "Москва"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_create_tenant_returns_403(
@@ -429,9 +430,9 @@ def test_create_writes_audit(
 # PATCH /collaborators/{id}
 
 
-def test_patch_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+def test_patch_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
     resp = client.patch(f"/api/v1/collaborators/{uuid4()}", json={"name": "y"})
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_patch_returns_404_when_not_found(
@@ -476,9 +477,9 @@ def test_patch_updates_fields_and_audits(
 # DELETE /collaborators/{id}
 
 
-def test_delete_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+def test_delete_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
     resp = client.delete(f"/api/v1/collaborators/{uuid4()}")
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_delete_archives_and_audits(
@@ -506,9 +507,9 @@ def test_delete_archives_and_audits(
 # POST /collaborators/{id}/activate (Slice 2)
 
 
-def test_activate_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+def test_activate_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
     resp = client.post(f"/api/v1/collaborators/{uuid4()}/activate")
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_activate_d_group_from_draft_succeeds(
@@ -591,12 +592,12 @@ def test_activate_not_found_returns_404(
 # POST /collaborators/{id}/suspend (Slice 2)
 
 
-def test_suspend_anon_returns_403(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
+def test_suspend_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
     resp = client.post(
         f"/api/v1/collaborators/{uuid4()}/suspend",
         json={"reason": "просрочка проверки"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_suspend_active_succeeds_with_reason(
@@ -817,14 +818,14 @@ def test_onboarding_persists_portal_access_history(
 # PUT /collaborators/{id}/portal-access (Slice 3)
 
 
-def test_portal_access_anon_returns_403(
+def test_portal_access_anon_returns_401(
     client: TestClient, override_repo: dict[str, AsyncMock]
 ) -> None:
     resp = client.put(
         f"/api/v1/collaborators/{uuid4()}/portal-access",
         json={"portal_access_level": "LIGHT"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_portal_access_demote_no_reason_ok(
