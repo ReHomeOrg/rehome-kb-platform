@@ -35,6 +35,9 @@ from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
 from src.api.search.embeddings import EmbeddingProvider, MockEmbeddingProvider
 from src.api.search.metrics import (
+    RERANK_DURATION_SECONDS,
+    RERANK_HITS,
+    RERANK_TOTAL,
     RETRIEVAL_DURATION_SECONDS,
     RETRIEVAL_HITS,
     RETRIEVAL_TOTAL,
@@ -45,6 +48,14 @@ from src.api.search.repository import (
     get_embedding_repository,
 )
 from src.api.search.rerank import MockReranker, Reranker
+
+
+def _rerank_provider_label(reranker: Reranker) -> str:
+    """Map reranker instance → Prometheus label (fixed cardinality 2)."""
+    if isinstance(reranker, MockReranker):
+        return "mock"
+    return "cross_encoder"
+
 
 # Row shape от `ArticleRepository.search`: (id, title, snippet, ts_rank).
 # Используется только для индекса rank (id) — поля title/snippet/score
@@ -132,7 +143,14 @@ class RetrievalService:
         result = self._rrf_fuse(vector_hits, bm25_hits, top_k=fuse_k)
 
         if self._reranker is not None and result:
+            rerank_label = _rerank_provider_label(self._reranker)
+            RERANK_HITS.observe(len(result))
+            rerank_started = time.perf_counter()
             result = await self._reranker.rerank(query, result)
+            RERANK_DURATION_SECONDS.labels(provider=rerank_label).observe(
+                time.perf_counter() - rerank_started
+            )
+            RERANK_TOTAL.labels(provider=rerank_label).inc()
             result = result[:top_k]
 
         RETRIEVAL_DURATION_SECONDS.observe(time.perf_counter() - started)
