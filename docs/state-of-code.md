@@ -237,7 +237,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 - Frontend: **486 Vitest tests** в 83 файлах (Next.js 14 App Router + TypeScript strict).
 - 22+ Alembic миграций (через 0023).
 - 335+ commits since baseline (2026-05-11).
-- 16 ADRs (0001-0017), все принятые.
+- 17 ADRs (0001-0017), все принятые.
 
 ## CS.1. Backend модули
 

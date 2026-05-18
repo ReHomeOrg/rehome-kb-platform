@@ -51,10 +51,24 @@ from src.api.search.rerank import MockReranker, Reranker
 
 
 def _rerank_provider_label(reranker: Reranker) -> str:
-    """Map reranker instance → Prometheus label (fixed cardinality 2)."""
+    """Map reranker instance → Prometheus label (fixed cardinality).
+
+    Explicit isinstance checks per known class — defensive against
+    future Reranker implementations (e.g., remote API rerank) being
+    silently mislabeled as 'cross_encoder'. New types: add explicit branch.
+    Unknown → 'unknown' (catches the misconfiguration in dashboards).
+    """
     if isinstance(reranker, MockReranker):
         return "mock"
-    return "cross_encoder"
+    # Lazy import — CrossEncoderReranker импортирует sentence_transformers
+    # которая не установлена в default API контейнере. isinstance работает
+    # даже без installed deps т.к. класс импортирует на module level в
+    # rerank.py.
+    from src.api.search.rerank import CrossEncoderReranker
+
+    if isinstance(reranker, CrossEncoderReranker):
+        return "cross_encoder"
+    return "unknown"
 
 
 # Row shape от `ArticleRepository.search`: (id, title, snippet, ts_rank).
