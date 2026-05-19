@@ -9,6 +9,8 @@ import { listLlmProviders } from "@/lib/api/admin-llm-providers";
 import { ApiError } from "@/lib/api/client";
 import type { LlmProvider, LlmProviderStatus } from "@/lib/api/types";
 
+import SwitchProviderButton from "./_components/switch-provider-button";
+
 function statusBadge(status: LlmProviderStatus): JSX.Element {
   const colors: Record<LlmProviderStatus, string> = {
     ACTIVE: "bg-green-100 text-green-800",
@@ -88,6 +90,7 @@ export default async function LlmProvidersPage(): Promise<JSX.Element> {
                   <th className="px-3 py-2">In ₽/1M tok</th>
                   <th className="px-3 py-2">Out ₽/1M tok</th>
                   <th className="px-3 py-2">Context</th>
+                  <th className="px-3 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -120,6 +123,11 @@ export default async function LlmProvidersPage(): Promise<JSX.Element> {
                     </td>
                     <td className="px-3 py-2 text-gray-700">
                       {p.max_context_tokens?.toLocaleString() ?? "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {p.is_current ? null : (
+                        <SwitchProviderButton providerId={p.id} />
+                      )}
                     </td>
                   </tr>
                 ))}
