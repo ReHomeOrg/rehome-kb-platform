@@ -532,3 +532,34 @@ export interface AuditListResponse {
   data: AuditRecord[];
   pagination: { limit: number; offset: number; count: number };
 }
+
+// ============================================================================
+// Admin eval-runs (#248, backend #244)
+
+export type EvalRunStatus = "RUNNING" | "COMPLETED" | "FAILED";
+export type EvalTestSet = "full" | "smoke" | "custom";
+
+export interface EvalRunProviderResult {
+  provider: string;
+  composite_score: number | null;
+  answer_correctness: number | null;
+  faithfulness: number | null;
+  citation_accuracy: number | null;
+  refusal_correctness: number | null;
+  avg_latency_ms: number | null;
+  cost_per_query_rub: number | null;
+}
+
+export interface EvalRunSummary {
+  id: string;
+  started_at: string;
+  completed_at: string | null;
+  status: EvalRunStatus;
+  providers: string[];
+  test_set: string | null;
+  results: EvalRunProviderResult[];
+}
+
+export interface EvalRunListResponse {
+  data: EvalRunSummary[];
+}
