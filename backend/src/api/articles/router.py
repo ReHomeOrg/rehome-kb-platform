@@ -45,14 +45,17 @@ from src.api.audit import (
     ACTION_ARTICLES_UPDATED,
     RESOURCE_ARTICLE,
     AuditRepository,
+    SecurityEventType,
+    SecuritySeverity,
     get_audit_repository,
+    report_security_event,
 )
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_access_level,
     require_authenticated,
 )
-from src.api.auth.exceptions import UnauthorizedError
+from src.api.auth.exceptions import ForbiddenError, UnauthorizedError
 from src.api.auth.scope import AccessLevel
 from src.api.config import get_settings
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
@@ -107,6 +110,45 @@ def _parse_tags(raw: str | None) -> list[str] | None:
                 detail=f"Tag exceeds max length ({TAGS_MAX_LENGTH} chars)",
             )
     return deduped
+
+
+async def _ensure_write_target_or_report_bypass(
+    *,
+    target: AccessLevel,
+    access_levels: frozenset[AccessLevel],
+    actor_sub: str,
+    slug: str,
+    method: str,
+    dispatcher: WebhookEventDispatcher,
+) -> None:
+    """ADR-0003 target-check + #223 security-event emission.
+
+    Если writer пытается установить target access_level, которого у него
+    самого нет — fire `audit.security_event` (event_type=auth.target_bypass)
+    и propagate'им оригинальный 403. Event эмитится ДО raise — это observable
+    «attempt», даже если HTTP-ответ уйдёт как 403.
+
+    Не пишем в audit_log (он трекает успешные state-changes; неуспешная
+    попытка → отдельный webhook outbox path для SIEM/alerting).
+    """
+    try:
+        ensure_can_write_access_level(target, access_levels)
+    except ForbiddenError:
+        await report_security_event(
+            dispatcher,
+            event_type=SecurityEventType.AUTH_TARGET_BYPASS,
+            severity=SecuritySeverity.WARNING,
+            details={
+                "actor_sub": actor_sub,
+                "method": method,
+                "slug": slug,
+                "target_access_level": target.value,
+                # `current_levels` нужен для post-hoc analysis ("what did
+                # the user have"); sorted чтобы log diff'ы deterministic.
+                "current_access_levels": sorted(level.value for level in access_levels),
+            },
+        )
+        raise
 
 
 async def _maybe_dispatch_article_status_event(
@@ -404,7 +446,14 @@ async def create_article(
             headers=idempotency.replay.headers,
         )
 
-    ensure_can_write_access_level(payload.access_level, access_levels)
+    await _ensure_write_target_or_report_bypass(
+        target=payload.access_level,
+        access_levels=access_levels,
+        actor_sub=claims["sub"],
+        slug=payload.slug,
+        method="POST",
+        dispatcher=webhook_dispatcher,
+    )
 
     article = await repo.create(payload, actor_sub=claims["sub"])
 
@@ -504,7 +553,14 @@ async def replace_article(
     # Target check (ADR-0003 Level-2) — ДО source check, чтобы 403 не
     # утекал информацию о существовании. Если 403 — клиент знает только,
     # что target ему недоступен; источник статьи остаётся опаковым.
-    ensure_can_write_access_level(payload.access_level, access_levels)
+    await _ensure_write_target_or_report_bypass(
+        target=payload.access_level,
+        access_levels=access_levels,
+        actor_sub=claims["sub"],
+        slug=slug,
+        method="PUT",
+        dispatcher=webhook_dispatcher,
+    )
 
     updated = await repo.update(
         slug,
