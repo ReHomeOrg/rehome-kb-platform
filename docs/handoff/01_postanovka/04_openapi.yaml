@@ -929,6 +929,8 @@ paths:
 
         '
       operationId: getPremisesFinancial
+      x-implementation-status: implemented
+      x-implementation-pr: 226
       parameters:
       - name: premises_id
         in: path
@@ -1344,6 +1346,8 @@ paths:
 
         '
       operationId: listKbUsers
+      x-implementation-status: implemented
+      x-implementation-pr: 230
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - name: role
@@ -1395,6 +1399,8 @@ paths:
       - Admin
       summary: Добавить сотрудника
       operationId: createKbUser
+      x-implementation-status: implemented
+      x-implementation-pr: 230
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -1434,6 +1440,8 @@ paths:
       - Admin
       summary: Карточка сотрудника
       operationId: getKbUser
+      x-implementation-status: implemented
+      x-implementation-pr: 230
       responses:
         '200':
           description: OK
@@ -1453,6 +1461,8 @@ paths:
       - Admin
       summary: Изменить роль/права/статус сотрудника
       operationId: updateKbUser
+      x-implementation-status: implemented
+      x-implementation-pr: 230
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -1499,6 +1509,8 @@ paths:
       summary: Деактивировать сотрудника
       description: Soft-delete. Отзывает все доступы, помечает архивированным.
       operationId: deactivateKbUser
+      x-implementation-status: implemented
+      x-implementation-pr: 230
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       responses:
@@ -1650,6 +1662,8 @@ paths:
 
         '
       operationId: listPersonalDataRequests
+      x-implementation-status: implemented
+      x-implementation-pr: 232
       parameters:
       - name: status
         in: query
@@ -1705,6 +1719,8 @@ paths:
       - Admin
       summary: Карточка заявки субъекта ПДн
       operationId: getPersonalDataRequest
+      x-implementation-status: implemented
+      x-implementation-pr: 232
       responses:
         '200':
           description: OK
@@ -1722,6 +1738,8 @@ paths:
       - Admin
       summary: Обработка заявки
       operationId: processPersonalDataRequest
+      x-implementation-status: implemented
+      x-implementation-pr: 232
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -1760,6 +1778,8 @@ paths:
 
         '
       operationId: listSecurityIncidents
+      x-implementation-status: implemented
+      x-implementation-pr: 231
       parameters:
       - name: severity
         in: query
@@ -1810,6 +1830,8 @@ paths:
       - Admin
       summary: Обновление статуса инцидента
       operationId: updateSecurityIncident
+      x-implementation-status: implemented
+      x-implementation-pr: 231
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -1843,6 +1865,8 @@ paths:
 
         '
       operationId: getSystemConfig
+      x-implementation-status: implemented
+      x-implementation-pr: 229
       responses:
         '200':
           description: OK
@@ -1893,6 +1917,8 @@ paths:
 
         '
       operationId: listLlmProviders
+      x-implementation-status: implemented
+      x-implementation-pr: 228
       responses:
         '200':
           description: OK
@@ -2082,6 +2108,8 @@ paths:
 
         '
       operationId: getAdminStats
+      x-implementation-status: implemented
+      x-implementation-pr: 227
       parameters:
       - name: from
         in: query
@@ -2674,6 +2702,8 @@ paths:
 
         '
       operationId: listServiceOrders
+      x-implementation-status: implemented
+      x-implementation-pr: 224
       parameters:
       - name: collaborator_id
         in: query
@@ -2707,6 +2737,8 @@ paths:
       - Collaborators
       summary: Создать заказ у коллаборанта
       operationId: createServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 224
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/CsrfToken'
@@ -2741,6 +2773,8 @@ paths:
       - Collaborators
       summary: Карточка заказа
       operationId: getServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 224
       responses:
         '200':
           description: OK
@@ -2761,6 +2795,8 @@ paths:
       - Collaborators
       summary: Отмена заказа
       operationId: cancelServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 224
       parameters:
       - name: order_id
         in: path

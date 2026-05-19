@@ -56,6 +56,11 @@ from src.api.audit.actions import (
 from src.api.audit.models import AuditLog
 from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.audit.router import router as audit_router
+from src.api.audit.security import (
+    SecurityEventType,
+    SecuritySeverity,
+    report_security_event,
+)
 
 __all__ = [
     "ACTION_ARTICLES_ARCHIVED",
@@ -109,5 +114,8 @@ __all__ = [
     "RESOURCE_VAULT_SECRET",
     "RESOURCE_VAULT_USER",
     "RESOURCE_WEBHOOK",
+    "SecurityEventType",
+    "SecuritySeverity",
     "get_audit_repository",
+    "report_security_event",
 ]
