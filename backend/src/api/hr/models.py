@@ -57,14 +57,10 @@ class HrEmployee(Base):
     # ПДн encrypted columns (ADR-0018 Stage 2). Plaintext НЕ хранится;
     # decrypt happens в hr/crypto.py поверх HR_ENCRYPTION_KEY (env).
     # Access — только через scope = HR_RESTRICTED + audit log.
-    passport_number_encrypted: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True
-    )
+    passport_number_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     inn_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     snils_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    bank_account_encrypted: Mapped[bytes | None] = mapped_column(
-        LargeBinary, nullable=True
-    )
+    bank_account_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

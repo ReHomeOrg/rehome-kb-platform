@@ -302,7 +302,8 @@ def test_patch_mixed_pii_and_regular_fields(
     assert "hr.employee.updated" in actions
     assert "hr.employee.pii_updated" in actions
     pii_call = next(
-        c for c in override_deps["audit"].call_args_list
+        c
+        for c in override_deps["audit"].call_args_list
         if c.kwargs["action"] == "hr.employee.pii_updated"
     )
     assert pii_call.kwargs["metadata"]["fields_set"] == ["snils"]

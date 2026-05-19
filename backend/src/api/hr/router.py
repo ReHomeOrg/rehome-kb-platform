@@ -201,11 +201,7 @@ async def get_employee(
         resource_id=str(emp.id),
     )
     # ПДн audit — fired только если карточка имеет non-null ПДн поля.
-    pii_present = [
-        plain
-        for plain, encrypted in _PII_FIELDS
-        if getattr(emp, encrypted) is not None
-    ]
+    pii_present = [plain for plain, encrypted in _PII_FIELDS if getattr(emp, encrypted) is not None]
     if pii_present:
         await audit_repo.record(
             actor_sub=claims["sub"],

@@ -181,9 +181,7 @@ class Settings(BaseSettings):
     )
     # Optional legacy key для rotation: decrypt-only fallback когда
     # backend transition'ит на новый primary key. None = только primary.
-    hr_encryption_key_legacy: str | None = Field(
-        default=None, alias="HR_ENCRYPTION_KEY_LEGACY"
-    )
+    hr_encryption_key_legacy: str | None = Field(default=None, alias="HR_ENCRYPTION_KEY_LEGACY")
 
     model_config = SettingsConfigDict(
         env_file=None,
