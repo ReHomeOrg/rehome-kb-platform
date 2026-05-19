@@ -219,14 +219,45 @@ groups:
     interval: 60s
     rules:
       - alert: DocumentUploadFailureSpike
-        # Counter doesn't distinguish failure — rely on http alert
-        # (document upload routes will 5xx). Placeholder alert
-        # для completeness; backlog: add status label to upload metric.
-        expr: vector(0)
-        for: 0m
+        # > 10% failed uploads за 10m — typically MinIO down or
+        # client-side malformed multipart spike.
+        expr: |
+          (
+            sum(rate(kb_documents_files_uploaded_total{outcome!="success"}[10m]))
+            /
+            sum(rate(kb_documents_files_uploaded_total[10m]))
+          ) > 0.10
+        for: 10m
         labels:
-          severity: info
+          severity: warning
           component: documents
         annotations:
-          summary: "Document upload failure (placeholder)"
-          description: "Метрика kb_documents_files_uploaded_total не имеет status label. Backlog: добавить + replace this alert."
+          summary: "Document upload failure rate > 10%"
+          description: "{{ $value | humanizePercentage }} of uploads failed. Проверить MinIO health + recent client-side регрессии."
+
+      - alert: DocumentStorageUnavailable
+        # Любой `storage_unavailable` outcome — MinIO либо not configured
+        # либо transient 5xx; в production не должно быть.
+        expr: sum(increase(kb_documents_files_uploaded_total{outcome="storage_unavailable"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: documents
+        annotations:
+          summary: "Document storage (MinIO) unavailable"
+          description: "{{ $value }} upload attempts hit storage_unavailable. MinIO down / DNS-проблема."
+
+      - alert: DocumentDownloadFailureSpike
+        expr: |
+          (
+            sum(rate(kb_documents_files_downloaded_total{outcome!="success"}[10m]))
+            /
+            sum(rate(kb_documents_files_downloaded_total[10m]))
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          component: documents
+        annotations:
+          summary: "Document download failure rate > 10%"
+          description: "{{ $value | humanizePercentage }} of download attempts failed. MinIO degraded или массовый 404."

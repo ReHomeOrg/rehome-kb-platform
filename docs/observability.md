@@ -38,9 +38,15 @@
 - `kb_rerank_hits{provider}` — Histogram.
 
 ### Documents (`src/api/documents/metrics.py`)
-- `kb_documents_files_downloaded_total` — Counter (no status label —
-  см. backlog в alert_rules.yml).
-- `kb_documents_files_uploaded_total` — Counter.
+- `kb_documents_files_downloaded_total{format, outcome}` — Counter.
+- `kb_documents_files_uploaded_total{format, outcome}` — Counter.
+
+Outcomes (общий enum):
+- `success` — happy path.
+- `not_found` — 404 mask.
+- `oversized` — 413 (upload only).
+- `storage_unavailable` — 503 (MinIO not configured / transient 5xx).
+- `storage_error` — 502 (MinIO 5xx non-transient).
 
 ### Workers (`src/workers/*/metrics.py`)
 - **popular_query**: `kb_popular_query_scan_total{result}`,
@@ -72,7 +78,7 @@ Severity convention:
 - `chat` — LLM latency degradation.
 - `search` — retrieval latency, no-results rate (content gap).
 - `workers` — popular_query / vault_reminders / indexer health.
-- `documents` — placeholder (нужен status label на upload metric).
+- `documents` — upload/download failure rate, storage unavailable (MinIO).
 
 ## Production wiring
 
