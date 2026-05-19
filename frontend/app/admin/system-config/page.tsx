@@ -10,6 +10,8 @@ import { getSystemConfig } from "@/lib/api/admin-system-config";
 import { ApiError } from "@/lib/api/client";
 import type { SystemConfig } from "@/lib/api/types";
 
+import SystemConfigEditForm from "./_components/system-config-edit-form";
+
 function formatNullable(v: number | null | undefined): string {
   if (v === null || v === undefined) return "—";
   return v.toString();
@@ -79,6 +81,7 @@ export default async function SystemConfigPage(): Promise<JSX.Element> {
 
         {config ? (
           <>
+            <SystemConfigEditForm initial={config} />
             <Section title="LLM">
               <dl>
                 <KV label="active_provider" value={config.llm_config.active_provider} />

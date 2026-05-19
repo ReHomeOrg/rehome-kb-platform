@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { getSystemConfig } from "./admin-system-config";
+import { getSystemConfig, patchSystemConfig } from "./admin-system-config";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -51,5 +51,27 @@ describe("admin-system-config API", () => {
     const result = await getSystemConfig();
     expect(result.llm_config.active_provider).toBe("mock");
     expect(result.feature_flags.rag_enabled).toBe(true);
+  });
+});
+
+describe("patchSystemConfig", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends PATCH with JSON body", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await patchSystemConfig({ "feature_flags.rag_enabled": false });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/system-config",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toContain('"feature_flags.rag_enabled":false');
+  });
+
+  it("attaches X-MFA-Token when provided", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await patchSystemConfig({ llm_fallback_provider: "mock" }, "mfa-1");
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect((call.headers as Record<string, string>)["X-MFA-Token"]).toBe("mfa-1");
   });
 });
