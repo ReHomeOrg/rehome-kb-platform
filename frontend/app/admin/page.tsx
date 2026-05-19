@@ -217,6 +217,27 @@ export default async function AdminDashboardPage({
                     Eval-стенд →
                   </a>
                 </li>
+                <li>
+                  <a href="/admin/users" className="underline hover:text-blue-900">
+                    KB users (staff) →
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="/admin/llm-providers"
+                    className="underline hover:text-blue-900"
+                  >
+                    LLM providers →
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="/admin/system-config"
+                    className="underline hover:text-blue-900"
+                  >
+                    System config →
+                  </a>
+                </li>
               </ul>
             </section>
           </>

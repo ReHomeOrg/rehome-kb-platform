@@ -732,3 +732,25 @@ export interface SystemConfig {
   moderation: SystemConfigModeration;
   webhooks: SystemConfigWebhooks;
 }
+
+// ============================================================================
+// Admin KB users (#253, backend #230)
+
+export type KbUserRole = "staff_support" | "staff_legal" | "staff_hr" | "staff_admin";
+export type KbUserStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+
+export interface KbUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: KbUserRole;
+  permissions: string[];
+  status: KbUserStatus;
+  created_at: string;
+  last_login_at: string | null;
+  mfa_enabled: boolean;
+}
+
+export interface KbUsersListResponse {
+  data: KbUser[];
+}
