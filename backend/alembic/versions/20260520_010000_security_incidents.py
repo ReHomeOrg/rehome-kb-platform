@@ -1,7 +1,7 @@
 """security_incidents — registry security событий (#231, OpenAPI §SecurityIncident)
 
 Revision ID: 0024_security_incidents
-Revises: 0023_vault_wraps_multi_user
+Revises: 0024_merge_heads
 Create Date: 2026-05-20 01:00:00.000000
 
 ФЗ-152 §17.1: оператор персональных данных обязан фиксировать
@@ -36,7 +36,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0024_security_incidents"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0024_merge_heads"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
