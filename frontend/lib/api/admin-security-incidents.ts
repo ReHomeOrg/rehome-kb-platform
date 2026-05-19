@@ -9,6 +9,7 @@ import { apiFetch } from "./client";
 import type {
   IncidentSeverity,
   IncidentStatus,
+  SecurityIncident,
   SecurityIncidentsListResponse,
 } from "./types";
 
@@ -28,5 +29,33 @@ export async function listSecurityIncidents(
   const qs = params.toString();
   return apiFetch<SecurityIncidentsListResponse>(
     `/api/v1/admin/security-incidents${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getSecurityIncident(
+  id: string,
+): Promise<SecurityIncident> {
+  return apiFetch<SecurityIncident>(
+    `/api/v1/admin/security-incidents/${encodeURIComponent(id)}`,
+  );
+}
+
+export interface SecurityIncidentPatchInput {
+  status?: IncidentStatus;
+  resolution_note?: string | null;
+  rkn_notified_at?: string | null;
+}
+
+export async function patchSecurityIncident(
+  id: string,
+  input: SecurityIncidentPatchInput,
+): Promise<SecurityIncident> {
+  return apiFetch<SecurityIncident>(
+    `/api/v1/admin/security-incidents/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
   );
 }

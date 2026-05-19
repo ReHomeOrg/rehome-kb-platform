@@ -99,7 +99,14 @@ export default function SecurityIncidentsTable({
         <tbody>
           {incidents.map((i) => (
             <tr key={i.id} className="border-t border-gray-100">
-              <td className="px-3 py-2 font-mono">{i.id.slice(0, 8)}</td>
+              <td className="px-3 py-2 font-mono">
+                <a
+                  href={`/admin/security-incidents/${i.id}`}
+                  className="text-blue-700 hover:underline"
+                >
+                  {i.id.slice(0, 8)}
+                </a>
+              </td>
               <td className="px-3 py-2">{i.incident_type}</td>
               <td className="px-3 py-2">{severityBadge(i.severity)}</td>
               <td className="px-3 py-2">{statusBadge(i.status)}</td>

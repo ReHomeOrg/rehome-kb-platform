@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { listSecurityIncidents } from "./admin-security-incidents";
+import {
+  getSecurityIncident,
+  listSecurityIncidents,
+  patchSecurityIncident,
+} from "./admin-security-incidents";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -64,5 +68,49 @@ describe("admin-security-incidents API", () => {
     expect(result.data[0].severity).toBe("high");
     expect(result.data[0].rkn_notification_required).toBe(true);
     expect(result.data[0].rkn_notified_at).toBeNull();
+  });
+});
+
+describe("getSecurityIncident", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("calls expected URL with encoded id", async () => {
+    apiFetchMock.mockResolvedValueOnce({ id: "x" });
+    await getSecurityIncident("11111111-1111-1111-1111-111111111111");
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/security-incidents/11111111-1111-1111-1111-111111111111",
+    );
+  });
+});
+
+describe("patchSecurityIncident", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends PATCH with JSON body", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await patchSecurityIncident("abc", {
+      status: "RESOLVED",
+      resolution_note: "false positive",
+    });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/security-incidents/abc",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toBe(
+      JSON.stringify({ status: "RESOLVED", resolution_note: "false positive" }),
+    );
+  });
+
+  it("supports rkn_notified_at update", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await patchSecurityIncident("abc", {
+      rkn_notified_at: "2026-05-01T12:00:00Z",
+    });
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toContain("rkn_notified_at");
   });
 });
