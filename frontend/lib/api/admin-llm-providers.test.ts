@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { listLlmProviders } from "./admin-llm-providers";
+import {
+  listLlmProviders,
+  setActiveLlmProvider,
+} from "./admin-llm-providers";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -48,5 +51,32 @@ describe("admin-llm-providers API", () => {
     const result = await listLlmProviders();
     expect(result.data).toHaveLength(1);
     expect(result.data[0].is_current).toBe(true);
+  });
+});
+
+describe("setActiveLlmProvider", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends PUT with provider_id + reason", async () => {
+    apiFetchMock.mockResolvedValueOnce({ active_provider: "gigachat" });
+    await setActiveLlmProvider({ provider_id: "gigachat", reason: "A/B" });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/llm/active",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toBe(
+      JSON.stringify({ provider_id: "gigachat", reason: "A/B" }),
+    );
+    expect((call.headers as Record<string, string>)["X-MFA-Token"]).toBeUndefined();
+  });
+
+  it("attaches X-MFA-Token when provided", async () => {
+    apiFetchMock.mockResolvedValueOnce({ active_provider: "x" });
+    await setActiveLlmProvider({ provider_id: "x" }, "mfa-tok-123");
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect((call.headers as Record<string, string>)["X-MFA-Token"]).toBe(
+      "mfa-tok-123",
+    );
   });
 });
