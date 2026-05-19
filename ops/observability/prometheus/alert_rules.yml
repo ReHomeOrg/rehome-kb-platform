@@ -1,0 +1,232 @@
+# Prometheus alert rules для reHome KB platform (#241).
+#
+# Все метрики экспортируются через `/metrics` endpoint основного
+# FastAPI приложения (см. src/api/observability/metrics.py middleware
+# + per-module metrics.py).
+#
+# Severity convention:
+# - `critical` — production user impact (chat broken, vault locked).
+# - `warning` — degradation / suspicious pattern (high failure rate,
+#   slow latency, unusual access pattern).
+# - `info` — operational signal (worker idle, low activity).
+#
+# Wiring: добавляется в Prometheus config через
+# `rule_files: [/etc/prometheus/rules/*.yml]`. Alerts route'ятся в
+# Alertmanager → ops Slack / pager.
+
+groups:
+  # -------------------------------------------------------------------
+  - name: http
+    interval: 30s
+    rules:
+      - alert: HighHttpErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Backend HTTP 5xx rate > 5% за 5m"
+          description: "{{ $value | humanizePercentage }} of HTTP requests returning 5xx. Check Backend logs + recent deploys."
+
+      - alert: SlowApiP99
+        # p99 > 2s для НЕ-search endpoints (search has own latency targets).
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, route) (rate(http_request_duration_seconds_bucket{route!~"/api/v1/search.*"}[5m]))
+          ) > 2.0
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API p99 latency > 2s на {{ $labels.route }}"
+          description: "Endpoint {{ $labels.route }} p99={{ $value }}s. Capacity / DB lock investigation."
+
+  # -------------------------------------------------------------------
+  - name: webhooks
+    interval: 30s
+    rules:
+      - alert: WebhookDeliveryFailureSpike
+        # > 10% failed deliveries за 10 минут — typically signals
+        # subscriber endpoint down или сертификат истёк.
+        expr: |
+          (
+            sum(rate(kb_webhook_deliveries_total{status=~"failed_.*"}[10m]))
+            /
+            sum(rate(kb_webhook_deliveries_total[10m]))
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          component: webhooks
+        annotations:
+          summary: "Webhook delivery failure rate > 10%"
+          description: "{{ $value | humanizePercentage }} of deliveries failing. Subscribers might be down."
+
+      - alert: WebhookRetryStorm
+        # >5 retries/sec — subscriber down + outbox накапливает.
+        expr: sum(rate(kb_webhook_retries_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: webhooks
+        annotations:
+          summary: "Webhook retry rate > 5/s"
+          description: "Outbox набирает retries. Subscribers likely down."
+
+  # -------------------------------------------------------------------
+  - name: vault
+    interval: 30s
+    rules:
+      - alert: VaultUnlockFailureSpike
+        # > 10 failed unlock'ов за 5 минут — potential brute-force.
+        # ФЗ-152 §17.1 security_incident candidate.
+        expr: sum(increase(kb_vault_unlock_total{result="failed"}[5m])) > 10
+        for: 0m  # fire immediately (brute force signal)
+        labels:
+          severity: critical
+          component: vault
+          security: brute_force
+        annotations:
+          summary: "Vault failed-unlock spike: >10 за 5m"
+          description: "{{ $value }} failed unlock attempts. Investigate IP/user pattern; create security_incident."
+
+      - alert: VaultUnusualSecretAccessVolume
+        # Anomaly: > 100 secret reads/min от одного user normally.
+        # Catch insider threat / compromised credentials.
+        expr: sum by (action) (rate(kb_vault_secret_access_total{action="read"}[5m])) > 1.67
+        for: 10m
+        labels:
+          severity: warning
+          component: vault
+        annotations:
+          summary: "Vault secret read rate >100/min sustained"
+          description: "Possible automation / leak. Audit log review."
+
+  # -------------------------------------------------------------------
+  - name: chat
+    interval: 30s
+    rules:
+      - alert: ChatLlmHighLatency
+        # p95 LLM message latency > 10s — UX broken.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, scope) (rate(kb_chat_message_duration_seconds_bucket[5m]))
+          ) > 10.0
+        for: 5m
+        labels:
+          severity: warning
+          component: chat
+        annotations:
+          summary: "Chat p95 latency > 10s ({{ $labels.scope }})"
+          description: "Provider degraded или сетевая проблема. Проверить LLMProvider health."
+
+  # -------------------------------------------------------------------
+  - name: search
+    interval: 30s
+    rules:
+      - alert: SearchHighLatency
+        # p95 retrieval > 1s — RAG broken.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(kb_retrieval_duration_seconds_bucket[5m]))
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: search
+        annotations:
+          summary: "Search retrieval p95 > 1s"
+          description: "Vector index degraded или DB hot. Профилировать."
+
+      - alert: SearchNoResultsRate
+        # > 20% поисков без hits — content gap.
+        expr: |
+          (
+            sum(rate(kb_retrieval_total{has_results="false"}[15m]))
+            /
+            sum(rate(kb_retrieval_total[15m]))
+          ) > 0.20
+        for: 15m
+        labels:
+          severity: info
+          component: search
+        annotations:
+          summary: "Search no-results rate > 20%"
+          description: "Content gap signal. Check popular_query worker для unanswered patterns."
+
+  # -------------------------------------------------------------------
+  - name: workers
+    interval: 60s
+    rules:
+      - alert: PopularQueryWorkerErrors
+        expr: sum(increase(kb_popular_query_scan_errors_total[1h])) > 5
+        for: 0m
+        labels:
+          severity: warning
+          component: workers
+        annotations:
+          summary: "popular_query worker: >5 errors за час"
+          description: "Worker scan failing. Restart / check DB connectivity."
+
+      - alert: VaultRemindersWorkerErrors
+        expr: sum(increase(kb_vault_reminders_scan_errors_total[1h])) > 5
+        for: 0m
+        labels:
+          severity: warning
+          component: workers
+        annotations:
+          summary: "vault_reminders worker: >5 errors за час"
+
+      - alert: IndexerBacklog
+        # > 100 pending articles 30+ минут — indexer stuck.
+        expr: kb_indexer_pending_articles > 100
+        for: 30m
+        labels:
+          severity: warning
+          component: workers
+        annotations:
+          summary: "Indexer pending backlog > 100 (30m+)"
+          description: "Embedding provider down / queue stuck. Restart worker."
+
+      - alert: IndexerFailureRate
+        # > 5% failed indexing operations.
+        expr: |
+          (
+            sum(rate(kb_indexer_articles_failed_total[10m]))
+            /
+            (
+              sum(rate(kb_indexer_articles_processed_total[10m]))
+              + sum(rate(kb_indexer_articles_failed_total[10m]))
+            )
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          component: workers
+        annotations:
+          summary: "Indexer failure rate > 5%"
+          description: "Provider degraded / Qdrant down."
+
+  # -------------------------------------------------------------------
+  - name: documents
+    interval: 60s
+    rules:
+      - alert: DocumentUploadFailureSpike
+        # Counter doesn't distinguish failure — rely on http alert
+        # (document upload routes will 5xx). Placeholder alert
+        # для completeness; backlog: add status label to upload metric.
+        expr: vector(0)
+        for: 0m
+        labels:
+          severity: info
+          component: documents
+        annotations:
+          summary: "Document upload failure (placeholder)"
+          description: "Метрика kb_documents_files_uploaded_total не имеет status label. Backlog: добавить + replace this alert."
