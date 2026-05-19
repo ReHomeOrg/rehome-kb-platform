@@ -112,9 +112,7 @@ class PopularQueryWorker:
                     WebhookDeliveryRepository(session),
                 )
                 payload = {
-                    "queries": [
-                        {"query": p.query, "count": p.count} for p in popular
-                    ],
+                    "queries": [{"query": p.query, "count": p.count} for p in popular],
                     "window_hours": self._window_hours,
                     "min_count": self._min_count,
                 }
