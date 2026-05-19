@@ -1,7 +1,7 @@
 """service_orders — Заказы услуг у коллаборантов (ТЗ §3.10.6)
 
 Revision ID: 0024_service_orders
-Revises: 0023_vault_wraps_multi_user
+Revises: 0024_merge_heads
 Create Date: 2026-05-18 02:00:00.000000
 
 MVP lifecycle table per ТЗ §3.10.6 + OpenAPI 04 §ServiceOrder.
@@ -37,7 +37,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0024_service_orders"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0024_merge_heads"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
