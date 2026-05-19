@@ -22,7 +22,7 @@ const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/chat", label: "Чат" },
   { href: "/hr", label: "Кадры" },
   { href: "/webhooks", label: "Webhooks" },
-  { href: "/admin/audit", label: "Аудит" },
+  { href: "/admin", label: "Admin" },
 ];
 
 export default async function Nav(): Promise<JSX.Element> {
