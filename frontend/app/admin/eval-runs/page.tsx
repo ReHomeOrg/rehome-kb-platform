@@ -14,6 +14,7 @@ import { ApiError } from "@/lib/api/client";
 import type { EvalRunSummary } from "@/lib/api/types";
 
 import EvalRunsTable from "./_components/eval-runs-table";
+import StartRunForm from "./_components/start-run-form";
 
 interface PageProps {
   searchParams: Promise<{
@@ -91,6 +92,7 @@ export default async function EvalRunsPage({
             </a>
           ) : null}
         </form>
+        <StartRunForm />
         <EvalRunsTable runs={runs} error={error} />
       </main>
     </>
