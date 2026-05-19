@@ -2,15 +2,17 @@
 
 ## Статус
 
-- [x] **Предложено**
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант B) — 2026-05-20 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
-- **Дата:** 2026-05-23
+- **Дата:** 2026-05-23 (предложено), 2026-05-20 (approved)
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Требуется approve Архитектора:** scope choice (add endpoint vs
-  keep external-ingest), or hybrid approach.
+- **Approve note:** Architect approved Вариант B — keep external-ingest
+  only, wire `document.created` webhook via internal
+  `DocumentRepository.create()` + `documents.service.create_document`.
+  POST /api/v1/documents намеренно НЕ exposed на HTTP surface.
 
 ## Контекст
 
@@ -155,18 +157,25 @@ POST endpoint существует но не exposed внешнему миру:
 ## Implementation scope (если B approved)
 
 **Backend:**
-1. `DocumentRepository.create()` уже существует. Add audit + webhook
-   trigger:
-   - `audit_repo.record(action="documents.created", ...)`.
-   - `webhook_dispatcher.dispatch("document.created", payload, ...)`.
-2. OpenAPI: explicit `x-implementation-note` на (отсутствующий) POST
-   endpoint объясняющий «external ingest only per ADR-0023».
+1. `DocumentRepository.create()` — pure-storage INSERT с enum-валидацией
+   (raises ValueError до flush).
+2. `documents.service.create_document(repo, audit_repo, dispatcher, ...)` —
+   orchestration helper: create + audit + webhook. Single internal
+   entry point — future migration scripts / 1C / KYC ingestion calls
+   через этот helper чтобы webhook emission гарантировался.
+3. OpenAPI: POST /api/v1/documents намеренно отсутствует. ADR
+   ссылается на это как explicit out-of-scope.
 
 **Frontend:**
 - No new admin UI surface для create (Вариант B-decision).
 
 **Tests:**
-- Unit: DocumentRepository.create() now emits webhook + audit row.
+- Unit `tests/unit/documents/test_create_service.py`:
+  - DocumentRepository.create() — validation rejects bad enum / malformed
+    related_entity, flush + refresh on success.
+  - create_document() — audit row + webhook dispatch с правильным
+    payload; metadata machine-level (без PII в audit JSONB);
+    validation error при repo.create propagates без side effects.
 - Drift sync: WebhookEvent enum включает `document.created` (уже есть).
 
 ## Открытые вопросы для Архитектора

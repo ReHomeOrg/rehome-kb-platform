@@ -437,11 +437,17 @@ ADR-0019 batch (Architect approved):
 
 После landing'а PR #220-#225 — backend WebhookEvent enum полностью
 покрывает OpenAPI §WebhookEvent перечисление **кроме**:
-- `document.created` / `document.signed` — no trigger point (POST /documents
-  отсутствует в OpenAPI и backend; ingest через external migration / 1С).
+- `document.signed` — no trigger point (signing flow Stage 2 — нет
+  signing UX; см. ADR-0023 Открытый вопрос §2).
 - `service_order.{accepted, completed, failed}` — wiring backlog
   (требует partner-side endpoints для accept/complete/fail; cancel wired
   в #224).
+
+`document.created` (#327, ADR-0023 B): emit site landit как
+`documents.service.create_document(...)` orchestration helper. POST
+/documents намеренно НЕ exposed на HTTP (Вариант B). Helper —
+contracted entry point для будущих migration scripts / 1C / KYC
+ingestion.
 
 Все остальные **17 webhook events** имеют actual emit sites в backend:
 - Articles: published, updated, archived.

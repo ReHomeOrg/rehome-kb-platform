@@ -9,6 +9,12 @@ AsyncSession напрямую.
 #215 (ADR-0012 Phase B): добавлен `upsert_file` для multipart
 upload — мутирует JSONB array `documents.files` атомарно с audit
 row через caller's commit.
+
+ADR-0023 B: добавлен `create()` как internal-only API для ingest paths
+(migration scripts / 1C / KYC integration). HTTP surface остаётся
+read-only — POST endpoint намеренно не exposed (см. ADR-0023). Caller
+обычно вызывает через `documents.service.create_document` который
+ferments audit + webhook trigger.
 """
 
 import re
@@ -101,6 +107,47 @@ class DocumentRepository:
         stmt = select(Document).where(*clauses).limit(1)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        title: str,
+        category: str,
+        status: str,
+        confidentiality: str,
+        version: str | None = None,
+        counterparty: str | None = None,
+        related_entity: str | None = None,
+    ) -> Document:
+        """INSERT document. Storage-only — audit + webhook идут через
+        `documents.service.create_document` (см. ADR-0023 B).
+
+        Validates enum values against `Document.allowed_*` чтобы не
+        зависеть от CHECK constraint round-trip'а (raises ValueError
+        до flush'а — faster fail в migration scripts).
+        """
+        if category not in Document.allowed_categories():
+            raise ValueError(f"Invalid category: {category!r}")
+        if status not in Document.allowed_statuses():
+            raise ValueError(f"Invalid status: {status!r}")
+        if confidentiality not in Document.allowed_confidentialities():
+            raise ValueError(f"Invalid confidentiality: {confidentiality!r}")
+        if related_entity is not None and not RELATED_ENTITY_PATTERN.fullmatch(related_entity):
+            raise ValueError(f"Invalid related_entity: {related_entity!r}")
+
+        doc = Document(
+            title=title,
+            category=category,
+            status=status,
+            confidentiality=confidentiality,
+            version=version,
+            counterparty=counterparty,
+            related_entity=related_entity,
+        )
+        self._session.add(doc)
+        await self._session.flush()
+        await self._session.refresh(doc)
+        return doc
 
     async def upsert_file(
         self,
