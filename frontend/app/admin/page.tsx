@@ -211,6 +211,14 @@ export default async function AdminDashboardPage({
                 </li>
                 <li>
                   <a
+                    href="/admin/audit-export"
+                    className="underline hover:text-blue-900"
+                  >
+                    Audit export (compliance) →
+                  </a>
+                </li>
+                <li>
+                  <a
                     href="/admin/eval-runs"
                     className="underline hover:text-blue-900"
                   >
