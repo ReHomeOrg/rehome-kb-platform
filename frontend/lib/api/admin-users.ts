@@ -35,6 +35,21 @@ export async function getKbUser(id: string): Promise<KbUser> {
   return apiFetch<KbUser>(`/api/v1/admin/users/${encodeURIComponent(id)}`);
 }
 
+export interface KbUserCreateInput {
+  email: string;
+  full_name: string;
+  role: KbUserRole;
+  permissions?: string[];
+}
+
+export async function createKbUser(input: KbUserCreateInput): Promise<KbUser> {
+  return apiFetch<KbUser>("/api/v1/admin/users", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export interface KbUserPatchInput {
   role?: KbUserRole;
   status?: KbUserStatus;

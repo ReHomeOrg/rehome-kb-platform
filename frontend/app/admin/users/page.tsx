@@ -78,7 +78,15 @@ export default async function KbUsersPage({
     <>
       <Nav />
       <main className="mx-auto max-w-6xl px-4 py-6">
-        <h1 className="mb-2 text-2xl font-semibold">KB users (staff)</h1>
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">KB users (staff)</h1>
+          <a
+            href="/admin/users/new"
+            className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+          >
+            + Новый
+          </a>
+        </div>
         <p className="mb-4 text-sm text-gray-600">
           Сотрудники с правами в kb-модуле (НЕ конечные пользователи
           rehome.one — те живут в основной системе).
