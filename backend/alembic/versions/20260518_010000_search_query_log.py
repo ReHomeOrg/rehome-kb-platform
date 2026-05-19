@@ -1,7 +1,7 @@
 """search_query_log — лог поисковых запросов для popular_query event
 
 Revision ID: 0024_search_query_log
-Revises: 0023_vault_wraps_multi_user
+Revises: 0024_merge_heads
 Create Date: 2026-05-18 01:00:00.000000
 
 Лог поисковых запросов для daily aggregation `search.popular_query`
@@ -34,7 +34,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0024_search_query_log"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0024_merge_heads"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
