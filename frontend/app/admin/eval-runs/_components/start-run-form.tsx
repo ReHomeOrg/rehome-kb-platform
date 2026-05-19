@@ -47,7 +47,7 @@ export default function StartRunForm(): JSX.Element {
         providers: Array.from(providers),
         test_set: testSet,
       });
-      setSuccess(`Run запущен: ${resp.run_id.slice(0, 8)}`);
+      setSuccess(resp.run_id);
       // Refresh server-side list page.
       router.refresh();
       // Reset form (kept providers/testSet selections для convenience).
@@ -125,7 +125,14 @@ export default function StartRunForm(): JSX.Element {
           role="status"
           className="mb-3 rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-900"
         >
-          {success}
+          Run запущен:{" "}
+          <a
+            href={`/admin/tasks/${success}`}
+            className="font-mono text-blue-700 underline hover:text-blue-900"
+          >
+            {success.slice(0, 8)}
+          </a>{" "}
+          → status
         </div>
       ) : null}
 

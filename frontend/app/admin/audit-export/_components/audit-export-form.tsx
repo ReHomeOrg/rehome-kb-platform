@@ -193,11 +193,14 @@ export default function AuditExportForm(): JSX.Element {
           className="space-y-2 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900"
         >
           <div>
-            Task создан: <code className="font-mono">{result.taskId}</code>
-          </div>
-          <div className="text-xs">
-            Status check через GET /admin/tasks/{result.taskId} (UI tracking —
-            backlog). Сам файл доступен через result_url по той же auth.
+            Task:{" "}
+            <a
+              href={`/admin/tasks/${result.taskId}`}
+              className="font-mono text-blue-700 underline hover:text-blue-900"
+            >
+              {result.taskId}
+            </a>{" "}
+            → status + download
           </div>
         </div>
       ) : null}

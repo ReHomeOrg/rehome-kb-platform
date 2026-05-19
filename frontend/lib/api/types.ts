@@ -754,3 +754,29 @@ export interface KbUser {
 export interface KbUsersListResponse {
   data: KbUser[];
 }
+
+// ============================================================================
+// Admin tasks (#262, backend #238)
+
+export type AdminTaskStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED";
+export type AdminTaskType =
+  | "reindex"
+  | "audit_log_export"
+  | "cache_invalidation"
+  | "eval_run";
+
+export interface AdminTaskStatusView {
+  task_id: string;
+  type: AdminTaskType;
+  status: AdminTaskStatus;
+  progress_percent: number;
+  created_at: string;
+  completed_at: string | null;
+  result_url: string | null;
+  error: string | null;
+}

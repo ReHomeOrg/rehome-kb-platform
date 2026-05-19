@@ -85,8 +85,13 @@ export default function ReindexButton(): JSX.Element {
           className="rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-900"
         >
           Task создан:{" "}
-          <code className="font-mono">{taskId}</code> (статус: COMPLETED;
-          MVP без real async)
+          <a
+            href={`/admin/tasks/${taskId}`}
+            className="font-mono text-blue-700 underline hover:text-blue-900"
+          >
+            {taskId}
+          </a>{" "}
+          → проверить статус
         </div>
       ) : null}
     </div>
