@@ -563,3 +563,37 @@ export interface EvalRunSummary {
 export interface EvalRunListResponse {
   data: EvalRunSummary[];
 }
+
+// ============================================================================
+// Admin security incidents (#249, backend #231)
+
+export type IncidentSeverity = "low" | "medium" | "high" | "critical";
+export type IncidentStatus =
+  | "OPEN"
+  | "INVESTIGATING"
+  | "RESOLVED"
+  | "FALSE_POSITIVE";
+export type IncidentDetectedBy =
+  | "monitoring"
+  | "audit"
+  | "user_report"
+  | "staff"
+  | "automated_scan";
+
+export interface SecurityIncident {
+  id: string;
+  incident_type: string;
+  severity: IncidentSeverity;
+  status: IncidentStatus;
+  detected_at: string;
+  detected_by: IncidentDetectedBy;
+  affected_resources: Record<string, unknown>[];
+  rkn_notification_required: boolean;
+  rkn_notified_at: string | null;
+  resolution_note: string | null;
+  resolved_at: string | null;
+}
+
+export interface SecurityIncidentsListResponse {
+  data: SecurityIncident[];
+}
