@@ -2036,6 +2036,8 @@ paths:
       - Admin
       summary: История прогонов eval-стенда
       operationId: listEvalRuns
+      x-implementation-status: implemented
+      x-implementation-pr: 244
       parameters:
       - name: provider
         in: query
@@ -2064,6 +2066,9 @@ paths:
       - Admin
       summary: Запустить новый прогон eval
       operationId: startEvalRun
+      x-implementation-status: implemented
+      x-implementation-pr: 244
+      x-implementation-note: MVP — mock provider + smoke test_set only; results inline в admin_task
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
