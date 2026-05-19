@@ -87,9 +87,7 @@ class AdminStatsRepository:
         result = await self._session.execute(stmt)
         return int(result.scalar() or 0)
 
-    async def chat_rating_up_and_total(
-        self, *, from_: datetime, to: datetime
-    ) -> tuple[int, int]:
+    async def chat_rating_up_and_total(self, *, from_: datetime, to: datetime) -> tuple[int, int]:
         """`(up_count, total_feedback)` для chat messages в window.
 
         avg_rating вычисляется caller'ом: `up / total` (0..1 scale).
@@ -111,9 +109,7 @@ class AdminStatsRepository:
                 ChatMessage.feedback["rating"].astext == "up",
             )
         )
-        total_stmt = select(func.count(ChatMessage.id)).where(
-            and_(feedback_not_null, time_window)
-        )
+        total_stmt = select(func.count(ChatMessage.id)).where(and_(feedback_not_null, time_window))
 
         up_res = await self._session.execute(up_stmt)
         total_res = await self._session.execute(total_stmt)

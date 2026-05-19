@@ -110,9 +110,7 @@ def test_tenant_returns_403(client: TestClient, make_jwt: Callable[..., str]) ->
     assert resp.status_code == 403
 
 
-def test_staff_admin_returns_4_providers(
-    client: TestClient, make_jwt: Callable[..., str]
-) -> None:
+def test_staff_admin_returns_4_providers(client: TestClient, make_jwt: Callable[..., str]) -> None:
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
         "/api/v1/admin/llm/providers",

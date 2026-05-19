@@ -121,9 +121,7 @@ async def get_admin_stats(
     sessions = await repo.count_chat_sessions(from_=period_from, to=period_to)
     messages = await repo.count_chat_messages(from_=period_from, to=period_to)
     escalations = await repo.count_chat_escalations(from_=period_from, to=period_to)
-    up_count, total_feedback = await repo.chat_rating_up_and_total(
-        from_=period_from, to=period_to
-    )
+    up_count, total_feedback = await repo.chat_rating_up_and_total(from_=period_from, to=period_to)
 
     containment_rate = 0.0 if sessions == 0 else 1.0 - (escalations / sessions)
     # Clip [0, 1] на случай если escalations > sessions (race / edge).
