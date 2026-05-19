@@ -332,3 +332,45 @@ def test_get_status_mapping_cancelled_to_failed(
     resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
     body = resp.json()
     assert body["data"][0]["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# MockJudge integration (#246)
+
+
+def test_post_with_judge_populates_judge_metrics(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """Mock provider + smoke + MockJudge → answer_correctness / refusal*
+    populated в task.params['results']."""
+    task = _make_task(status="PENDING", params={})
+    task_repo_mock["create"].return_value = task
+    # Mutable params для verification post-execution.
+    captured = {}
+
+    def _capture_get(task_id: Any) -> AdminTask:
+        captured["task"] = task
+        return task
+
+    task_repo_mock["get"].side_effect = _capture_get
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/admin/llm/eval-runs",
+        json={"providers": ["mock"], "test_set": "smoke"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 202
+    # After execution, service writes results to task.params.
+    results = task.params.get("results", [])
+    assert len(results) == 1
+    metrics = results[0]
+    # MockJudge produces these (heuristic, deterministic):
+    assert metrics["answer_correctness"] is not None
+    assert metrics["citation_accuracy"] is not None
+    # faithfulness — MockJudge оставляет None (нужен LLMJudge).
+    assert metrics["faithfulness"] is None
+    # refusal_correctness — может быть None если smoke dataset не содержит
+    # refusal-категории, но MockJudge возвращает something OR None per pair.

@@ -25,7 +25,8 @@ from src.api.admin.tasks_models import AdminTask
 from src.api.admin.tasks_repository import AdminTaskRepository
 from src.api.chat.llm.mock import MockProvider
 from src.eval.dataset import load_dataset
-from src.eval.report import aggregate_results
+from src.eval.judge import MockJudge
+from src.eval.report import PairResult, aggregate_results
 from src.eval.runner import run_dataset
 
 logger = logging.getLogger(__name__)
@@ -114,22 +115,35 @@ class EvalRunsService:
         providers: list[str],
         pairs: list[Any],
     ) -> list[EvalRunProviderResult]:
-        """Запускает eval per provider, aggregates result в OpenAPI shape."""
+        """Запускает eval per provider, aggregates result в OpenAPI shape.
+
+        Использует MockJudge (#246) для populating answer_correctness /
+        citation_accuracy / refusal_correctness. faithfulness требует
+        LLMJudge (real LLM), пока не подключён — null.
+        """
         results: list[EvalRunProviderResult] = []
         for provider_name in providers:
             # Currently только mock — _validate уже отфильтровал остальное.
             provider = MockProvider()
-            pair_results = await run_dataset(pairs, provider, provider_name=provider_name)
+            judge = MockJudge()
+            pair_results = await run_dataset(
+                pairs,
+                provider,
+                provider_name=provider_name,
+                judge=judge,
+            )
             agg = aggregate_results(pair_results)
+            judge_metrics = _aggregate_judge_metrics(pair_results)
             results.append(
                 EvalRunProviderResult(
                     provider=provider_name,
                     composite_score=agg.composite_avg,
+                    answer_correctness=judge_metrics["answer_correctness"],
+                    faithfulness=judge_metrics["faithfulness"],
                     citation_accuracy=agg.citation_accuracy_avg,
+                    refusal_correctness=judge_metrics["refusal_correctness"],
                     avg_latency_ms=int(agg.latency_p50 * 1000),
                     cost_per_query_rub=agg.cost_per_query_avg,
-                    # answer_correctness / faithfulness / refusal_correctness
-                    # требуют LLMJudge — null до landing'а judge integration.
                 )
             )
         return results
@@ -150,6 +164,39 @@ class EvalRunsService:
             test_set=params.get("test_set"),
             results=results,
         )
+
+
+def _aggregate_judge_metrics(pair_results: list[PairResult]) -> dict[str, float | None]:
+    """Avg по pair_results.scores для метрик, не агрегированных в `AggregateMetrics`.
+
+    Считаем avg ТОЛЬКО по non-None scores — пропускаем pairs где судья
+    не выставил оценку (MockJudge оставляет refusal_correctness=None для
+    не-refusal категорий, faithfulness всегда None).
+    """
+
+    def _avg(values: list[float]) -> float | None:
+        return sum(values) / len(values) if values else None
+
+    answer = [
+        p.scores.answer_correctness
+        for p in pair_results
+        if p.error is None and p.scores.answer_correctness is not None
+    ]
+    faith = [
+        p.scores.faithfulness
+        for p in pair_results
+        if p.error is None and p.scores.faithfulness is not None
+    ]
+    refusal = [
+        p.scores.refusal_correctness
+        for p in pair_results
+        if p.error is None and p.scores.refusal_correctness is not None
+    ]
+    return {
+        "answer_correctness": _avg(answer),
+        "faithfulness": _avg(faith),
+        "refusal_correctness": _avg(refusal),
+    }
 
 
 def _status_to_eval_run(admin_task_status: str) -> Any:
