@@ -170,6 +170,19 @@ class Settings(BaseSettings):
         default=50 * 1024 * 1024, alias="DOCUMENT_MAX_UPLOAD_BYTES"
     )
 
+    # HR Stage 2 — ПДн encryption (ADR-0018). 32-byte url-safe base64
+    # string (Fernet.generate_key() output). Dev default — fixed valid
+    # Fernet key для tests / local dev. На production environment'е
+    # этот sentinel detected как dev-key и fail'ит startup (см.
+    # `hr/crypto.py` _DEV_KEY_SENTINEL check). Rotate per ADR-0018.
+    hr_encryption_key: str = Field(
+        default="DnshURO5oCxsHWvw5ECnPe75EVAJTPpv2ImjBOyUZmM=",
+        alias="HR_ENCRYPTION_KEY",
+    )
+    # Optional legacy key для rotation: decrypt-only fallback когда
+    # backend transition'ит на новый primary key. None = только primary.
+    hr_encryption_key_legacy: str | None = Field(default=None, alias="HR_ENCRYPTION_KEY_LEGACY")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,

@@ -39,6 +39,12 @@ ACTION_HR_EMPLOYEE_VIEWED: Final = "hr.employee.viewed"
 ACTION_HR_EMPLOYEE_CREATED: Final = "hr.employee.created"
 ACTION_HR_EMPLOYEE_UPDATED: Final = "hr.employee.updated"
 ACTION_HR_EMPLOYEE_ARCHIVED: Final = "hr.employee.archived"
+# Stage 2 (#234, ADR-0018) — ПДн encryption. `pii_accessed` пишется на
+# каждый GET / list где fields декрипту'ются (compliance trail);
+# `pii_updated` — на write c set/clear любого encrypted поля. Metadata
+# хранит только ИМЕНА полей, НЕ их значения (анти-leak в audit_log).
+ACTION_HR_EMPLOYEE_PII_ACCESSED: Final = "hr.employee.pii_accessed"
+ACTION_HR_EMPLOYEE_PII_UPDATED: Final = "hr.employee.pii_updated"
 
 # Vault actions (#146, ADR-0011).
 # Resource — `vault_secret` для secret-level operations, `vault_user` для

@@ -5,7 +5,6 @@
 «Журналирование всех просмотров».
 """
 
-import logging
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.audit import (
     ACTION_HR_EMPLOYEE_ARCHIVED,
     ACTION_HR_EMPLOYEE_CREATED,
+    ACTION_HR_EMPLOYEE_PII_ACCESSED,
+    ACTION_HR_EMPLOYEE_PII_UPDATED,
     ACTION_HR_EMPLOYEE_UPDATED,
     ACTION_HR_EMPLOYEE_VIEWED,
     RESOURCE_HR_EMPLOYEE,
@@ -23,7 +24,10 @@ from src.api.audit import (
 )
 from src.api.auth.dependency import require_access_level, require_authenticated
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings, get_settings
 from src.api.db import get_session
+from src.api.hr.crypto import decrypt_pii, encrypt_pii
+from src.api.hr.models import HrEmployee
 from src.api.hr.repository import (
     HrEmployeeRepository,
     decode_cursor,
@@ -39,7 +43,83 @@ from src.api.hr.schemas import (
     PaginationInfo,
 )
 
-logger = logging.getLogger(__name__)
+# Encrypted ПДн columns names (model attribute → schema attribute).
+# Mapping используется для encrypt/decrypt loops в create/patch/view.
+_PII_FIELDS: tuple[tuple[str, str], ...] = (
+    ("passport_number", "passport_number_encrypted"),
+    ("inn", "inn_encrypted"),
+    ("snils", "snils_encrypted"),
+    ("bank_account", "bank_account_encrypted"),
+)
+
+
+def _build_view(emp: HrEmployee, settings: Settings) -> HrEmployeeView:
+    """Construct HrEmployeeView с decrypted ПДн plaintext."""
+    data = {
+        "id": emp.id,
+        "user_id": emp.user_id,
+        "personnel_number": emp.personnel_number,
+        "full_name": emp.full_name,
+        "position": emp.position,
+        "department": emp.department,
+        "hire_date": emp.hire_date,
+        "termination_date": emp.termination_date,
+        "status": emp.status,
+        "contact_info": emp.contact_info,
+        "notes": emp.notes,
+        "created_at": emp.created_at,
+        "updated_at": emp.updated_at,
+        "archived_at": emp.archived_at,
+    }
+    for plain_attr, encrypted_attr in _PII_FIELDS:
+        data[plain_attr] = decrypt_pii(getattr(emp, encrypted_attr), settings)
+    return HrEmployeeView.model_validate(data)
+
+
+def _split_pii_for_create(
+    payload: HrEmployeeInput, settings: Settings
+) -> tuple[dict[str, Any], list[str]]:
+    """Split create payload в (non-pii dict, list of пии-полей which were set).
+
+    Returns kwargs для repo.create + list ПДн полей чтобы audit log
+    знал какие ПДн были set (без values — анти-leak).
+    """
+    base = payload.model_dump(
+        exclude={f for f, _ in _PII_FIELDS},
+    )
+    pii_fields_touched: list[str] = []
+    for plain_attr, encrypted_attr in _PII_FIELDS:
+        value = getattr(payload, plain_attr)
+        encrypted = encrypt_pii(value, settings)
+        base[encrypted_attr] = encrypted
+        if encrypted is not None:
+            pii_fields_touched.append(plain_attr)
+    return base, pii_fields_touched
+
+
+def _split_pii_for_patch(
+    payload: HrEmployeePatch, settings: Settings
+) -> tuple[dict[str, Any], list[str]]:
+    """Split PATCH payload в (column-keyed dict, ПДн fields list).
+
+    Используется exclude_unset semantic: только явно переданные поля
+    идут в patch dict. ПДн поля separately encrypt'аются.
+    `""` (empty string) → encrypted=None → column NULL (clearing).
+    """
+    raw = payload.model_dump(exclude_unset=True)
+    pii_fields_touched: list[str] = []
+    patch_dict: dict[str, Any] = {}
+    for k, v in raw.items():
+        matched_pii = next((p for p in _PII_FIELDS if p[0] == k), None)
+        if matched_pii is None:
+            if v is not None:
+                patch_dict[k] = v
+            continue
+        encrypted = encrypt_pii(v, settings) if v is not None else None
+        patch_dict[matched_pii[1]] = encrypted
+        pii_fields_touched.append(k)
+    return patch_dict, pii_fields_touched
+
 
 router = APIRouter(prefix="/hr/employees", tags=["HR"])
 
@@ -104,8 +184,13 @@ async def get_employee(
     repo: HrEmployeeRepository = Depends(get_hr_employee_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> HrEmployeeView:
-    """Detail endpoint. PZ §7 — каждый просмотр карточки audit'ится."""
+    """Detail endpoint. PZ §7 — каждый просмотр карточки audit'ится.
+
+    Stage 2 (#234): дополнительно audit'ится `pii_accessed` если на карточке
+    есть encrypted ПДн (compliance trail per ADR-0018 §«audit log»).
+    """
     emp = await repo.get_by_id(employee_id)
     if emp is None or emp.archived_at is not None:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -115,8 +200,18 @@ async def get_employee(
         resource_type=RESOURCE_HR_EMPLOYEE,
         resource_id=str(emp.id),
     )
+    # ПДн audit — fired только если карточка имеет non-null ПДн поля.
+    pii_present = [plain for plain, encrypted in _PII_FIELDS if getattr(emp, encrypted) is not None]
+    if pii_present:
+        await audit_repo.record(
+            actor_sub=claims["sub"],
+            action=ACTION_HR_EMPLOYEE_PII_ACCESSED,
+            resource_type=RESOURCE_HR_EMPLOYEE,
+            resource_id=str(emp.id),
+            metadata={"fields": pii_present},
+        )
     await session.commit()
-    return HrEmployeeView.model_validate(emp)
+    return _build_view(emp, settings)
 
 
 @router.post(
@@ -138,8 +233,13 @@ async def create_employee(
     repo: HrEmployeeRepository = Depends(get_hr_employee_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> HrEmployeeView:
-    emp = await repo.create(**payload.model_dump())
+    """Stage 2 (#234): ПДн поля (passport_number / inn / snils /
+    bank_account) — encrypt'аются перед persisting; audit log пишет
+    имена полей, не значения (анти-leak)."""
+    create_kwargs, pii_fields = _split_pii_for_create(payload, settings)
+    emp = await repo.create(**create_kwargs)
     await audit_repo.record(
         actor_sub=claims["sub"],
         action=ACTION_HR_EMPLOYEE_CREATED,
@@ -147,9 +247,17 @@ async def create_employee(
         resource_id=str(emp.id),
         metadata={"position": emp.position, "department": emp.department},
     )
+    if pii_fields:
+        await audit_repo.record(
+            actor_sub=claims["sub"],
+            action=ACTION_HR_EMPLOYEE_PII_UPDATED,
+            resource_type=RESOURCE_HR_EMPLOYEE,
+            resource_id=str(emp.id),
+            metadata={"fields_set": pii_fields, "via": "POST"},
+        )
     await session.commit()
     response.headers["Location"] = f"/api/v1/hr/employees/{emp.id}"
-    return HrEmployeeView.model_validate(emp)
+    return _build_view(emp, settings)
 
 
 @router.patch(
@@ -171,20 +279,36 @@ async def patch_employee(
     repo: HrEmployeeRepository = Depends(get_hr_employee_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> HrEmployeeView:
-    patch_dict = payload.model_dump(exclude_none=True)
+    """Stage 2 (#234): ПДн поля encrypt'аются; clearing через пустую
+    строку. Audit pii_updated с именами полей (без значений)."""
+    patch_dict, pii_fields = _split_pii_for_patch(payload, settings)
     emp = await repo.update(employee_id, patch=patch_dict)
     if emp is None:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await audit_repo.record(
-        actor_sub=claims["sub"],
-        action=ACTION_HR_EMPLOYEE_UPDATED,
-        resource_type=RESOURCE_HR_EMPLOYEE,
-        resource_id=str(emp.id),
-        metadata={"fields_changed": list(patch_dict.keys())},
-    )
+    # Separate audit events: regular update + pii update (compliance —
+    # pii operations должны быть identifiable в audit query без JSONB
+    # introspection).
+    non_pii_changed = [k for k in patch_dict if k not in {f for _, f in _PII_FIELDS}]
+    if non_pii_changed:
+        await audit_repo.record(
+            actor_sub=claims["sub"],
+            action=ACTION_HR_EMPLOYEE_UPDATED,
+            resource_type=RESOURCE_HR_EMPLOYEE,
+            resource_id=str(emp.id),
+            metadata={"fields_changed": sorted(non_pii_changed)},
+        )
+    if pii_fields:
+        await audit_repo.record(
+            actor_sub=claims["sub"],
+            action=ACTION_HR_EMPLOYEE_PII_UPDATED,
+            resource_type=RESOURCE_HR_EMPLOYEE,
+            resource_id=str(emp.id),
+            metadata={"fields_set": sorted(pii_fields), "via": "PATCH"},
+        )
     await session.commit()
-    return HrEmployeeView.model_validate(emp)
+    return _build_view(emp, settings)
 
 
 @router.delete(
