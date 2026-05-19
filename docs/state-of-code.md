@@ -347,12 +347,12 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
 - 24+ Alembic миграций (через 0024_*).
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 0 open PR'ов; 49 merged 2026-05-22..23 (см. CS.7).
+- 0 open PR'ов; 55 merged 2026-05-22..23; OpenAPI 97/97 (см. CS.7).
 
-## CS.7. Recent PRs (2026-05-23 end-of-day)
+## CS.7. Recent PRs (2026-05-23 finale)
 
-49 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
-**0 открытых PR'ов**.
+55 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+**0 открытых PR'ов**. OpenAPI **97/97 endpoints** (100%) реализованы.
 
 Daytime batch (16 PR'ов):
 - Webhook emitters (#220-#225): popular_query, article.updated,
@@ -409,7 +409,7 @@ Late-night batch (10 PR'ов, в основном frontend):
   cross-link добавление на dashboard.
 - Nav link → /admin dashboard (#254/#307) — entry point updated.
 
-EOD batch (9 PR'ов, frontend mutation forms + task tracking):
+EOD batch (frontend mutation forms + task tracking):
 - Security incident resolve form (#255/#309) — PATCH workflow для
   ФЗ-152 §17.1.
 - PD request process form (#256/#310) — PATCH workflow для §15 SAR.
@@ -420,7 +420,18 @@ EOD batch (9 PR'ов, frontend mutation forms + task tracking):
 - Audit-log export form (#261/#315) — POST с reason для compliance.
 - /admin/tasks/[id] (#262/#316) — task status detail, closes
   reindex/export/eval-runs task tracking loop.
-- State-of-code EOD refresh (этот PR).
+- State-of-code EOD refresh (#317).
+- Auto-polling /admin/tasks/[id] (#263/#318) — closes last self-serve
+  CS.11 item.
+
+ADR-0019 batch (Architect approved):
+- ADR-0019 implementation (#264/#319) — system_config table + Settings
+  merge layer + PATCH endpoint + PUT /admin/llm/active + X-MFA-Token
+  honest stub. **OpenAPI 97/97 (100%) implemented.**
+- LLM provider Switch UI (#265/#320) — PUT /admin/llm/active form per
+  non-current provider.
+- system-config edit form (#266/#321) — PATCH с diff-aware 5-keys form.
+  Closes admin mutation surface (8th form today).
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -499,45 +510,44 @@ design-needed, требуют writable runtime config storage):
 ФЗ-152 compliance: ~70% технических мер реализовано или в process'е
 review. Org-tasks (10-15%) — ответственность Архитектора.
 
-## CS.11. Backlog приоритезация (2026-05-23 night)
+## CS.11. Backlog приоритезация (2026-05-23 finale)
 
-OpenAPI implementation coverage: **95/97 operations** (97.9%) после
-landing'а 30 PR'ов. Remaining 2 unimplemented — оба design-needed,
-оба про runtime config storage (один shared concern).
+OpenAPI implementation coverage: **97/97 operations (100%)** после
+landing'а 55 PR'ов. **All admin endpoints have both backend и frontend
+UI implementations.**
 
 Открытые задачи требующие design decision (architect input):
-1. **PATCH /admin/system-config + PUT /admin/llm/active** — один
-   shared concern: writable runtime config storage. ADR-0019
-   *Proposed* (#247/#300); ждёт architect approve. Open questions:
-   - Single JSONB row vs key/value rows.
-   - Settings merge layer + allowlist.
-   - X-MFA-Token validation: honest stub vs Keycloak step-up.
-   - Worker reload semantics.
+1. ~~PATCH /admin/system-config + PUT /admin/llm/active~~ ✅ DONE
+   (#264 backend ADR-0019; #265 + #266 frontend forms).
 2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
 3. **POST /documents create endpoint** — нужен в OpenAPI?
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
 5. **Real async worker для admin_tasks** — Redis (Dramatiq) vs
    asyncio.create_task; production-scale gate для reindex / export /
    eval-runs (сейчас sync execution).
+6. **Keycloak step-up auth** для X-MFA-Token validation (#264 — пока
+   honest stub; presence logged в audit но не verified).
 
 Self-serve M-sized items без design дополнительного:
-1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh).
+1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh). Нужен
+   ADR для ceremony flow.
 2. **Grafana dashboards** — JSON configs для существующих метрик
    (alert rules уже landit в #241/#293; dashboards — companion).
+   Best built against running Grafana instance.
 3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
 4. ~~POST/GET /admin/llm/eval-runs~~ ✅ DONE MVP (#244/#297; mock+smoke).
-5. ~~Frontend admin UI (read-only)~~ ✅ DONE (PRs #301-#307): dashboard
-   + sub-pages (eval-runs, security-incidents, personal-data,
-   llm-providers, system-config, users).
+5. ~~Frontend admin UI (read-only)~~ ✅ DONE (PRs #301-#307).
 6. ~~LLMJudge MVP в eval-runs~~ ✅ DONE с MockJudge (#246/#299);
-   faithfulness требует real LLMJudge — backlog.
-7. ~~Admin mutation forms~~ ✅ DONE (#309-#315): incident resolve,
-   PD request process, KB user create/edit/deactivate, eval-runs
-   trigger, maintenance buttons, audit-log export. Single missing:
-   PUT /admin/llm/active (gated на ADR-0019).
-8. ~~Task tracking UI~~ ✅ DONE (#316): /admin/tasks/[id] + cross-
-   links from trigger forms.
-9. **Auto-polling task status** — currently manual refresh. M-sized.
+   faithfulness требует real LLMJudge — backlog (зависит от LLM creds).
+7. ~~Admin mutation forms~~ ✅ DONE (#309-#315, #320, #321): incident
+   resolve, PD request process, KB user create/edit/deactivate,
+   eval-runs trigger, maintenance, audit-log export, LLM provider
+   switch, system-config edit.
+8. ~~Task tracking UI~~ ✅ DONE (#316).
+9. ~~Auto-polling task status~~ ✅ DONE (#263/#318).
+
+**Self-serve backlog exhausted.** Только items 1-2 остаются, оба нужны
+preparation: ADR для FIDO2 ceremony / Grafana instance для testing.
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
