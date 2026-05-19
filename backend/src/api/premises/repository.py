@@ -64,6 +64,28 @@ class PremisesRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id(
+        self,
+        card_id: UUID,
+        access_levels: frozenset[AccessLevel],
+    ) -> PremisesCard | None:
+        """Lookup по UUID id с status visibility check.
+
+        Параллель `get_by_slug` но по id. Используется в endpoint'ах,
+        принимающих `{premises_id}` path param (OpenAPI: GET /premises-cards/
+        {premises_id}/financial — #226).
+
+        Returns None если карточка не найдена ИЛИ status не виден scope'у.
+        """
+        statuses = self._visible_statuses(access_levels)
+        stmt = (
+            select(PremisesCard)
+            .where(PremisesCard.id == card_id)
+            .where(PremisesCard.status.in_(statuses))
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_published(
         self,
         *,
