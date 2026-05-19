@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
 import {
+  createKbUser,
   deactivateKbUser,
   getKbUser,
   listKbUsers,
@@ -106,5 +107,26 @@ describe("deactivateKbUser", () => {
       "/api/v1/admin/users/abc",
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+describe("createKbUser", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends POST with required + optional fields", async () => {
+    apiFetchMock.mockResolvedValueOnce({ id: "x" });
+    await createKbUser({
+      email: "u@example.com",
+      full_name: "User",
+      role: "staff_support",
+      permissions: ["a"],
+    });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/users",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toContain('"email":"u@example.com"');
+    expect(call.body).toContain('"role":"staff_support"');
   });
 });
