@@ -259,6 +259,11 @@ export const WEBHOOK_EVENTS = [
   "collaborator.review.posted",
   "collaborator.portal_access.changed",
   "collaborator.onboarding.submitted",
+  "service_order.created",
+  "service_order.accepted",
+  "service_order.completed",
+  "service_order.cancelled",
+  "service_order.failed",
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];

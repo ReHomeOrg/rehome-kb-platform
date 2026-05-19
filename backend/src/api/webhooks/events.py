@@ -27,6 +27,11 @@ class WebhookEvent(StrEnum):
     COLLABORATOR_REVIEW_POSTED = "collaborator.review.posted"
     COLLABORATOR_PORTAL_ACCESS_CHANGED = "collaborator.portal_access.changed"
     COLLABORATOR_ONBOARDING_SUBMITTED = "collaborator.onboarding.submitted"
+    SERVICE_ORDER_CREATED = "service_order.created"
+    SERVICE_ORDER_ACCEPTED = "service_order.accepted"
+    SERVICE_ORDER_COMPLETED = "service_order.completed"
+    SERVICE_ORDER_CANCELLED = "service_order.cancelled"
+    SERVICE_ORDER_FAILED = "service_order.failed"
 
 
 ALLOWED_EVENTS: frozenset[str] = frozenset(e.value for e in WebhookEvent)
