@@ -1,7 +1,7 @@
 """hr_employees — ПДн encrypted columns (#234, ADR-0018)
 
 Revision ID: 0024_hr_pii_encrypted
-Revises: 0023_vault_wraps_multi_user
+Revises: 0024_merge_heads
 Create Date: 2026-05-22 01:00:00.000000
 
 HR Stage 2 — добавляет 4 BYTEA nullable колонки для encrypted ПДн:
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0024_hr_pii_encrypted"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0024_merge_heads"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
