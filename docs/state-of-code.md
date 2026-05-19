@@ -347,11 +347,11 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
 - 24+ Alembic миграций (через 0024_*).
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 0 open PR'ов; 30 merged 2026-05-22..23 (см. CS.7).
+- 0 open PR'ов; 40 merged 2026-05-22..23 (см. CS.7).
 
-## CS.7. Recent PRs (2026-05-23 night)
+## CS.7. Recent PRs (2026-05-23 late night)
 
-30 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+40 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
 **0 открытых PR'ов**.
 
 Daytime batch (16 PR'ов):
@@ -388,6 +388,26 @@ Evening batch (14 PR'ов):
 - POST/GET /admin/llm/eval-runs (#244/#297) — closes 2 of 4 remaining
   unimplemented OpenAPI admin endpoints. MVP per ADR-0013: mock +
   smoke only; aggregate results inline в admin_task.params.
+
+Late-night batch (10 PR'ов, в основном frontend):
+- MockJudge integration в eval-runs (#246/#299) — populates
+  answer_correctness / refusal_correctness в response.
+- ADR-0019 Proposed (#247/#300) — writable runtime config storage
+  design для PATCH /admin/system-config + PUT /admin/llm/active
+  (последние 2 unimplemented endpoints); awaiting architect approve.
+- /admin/eval-runs frontend page (#248/#301) — read-only list +
+  per-provider metrics таблица.
+- /admin/security-incidents UI (#249/#302) — ФЗ-152 §17.1 admin UI;
+  filter + РКН pending warning banner.
+- /admin/personal-data UI (#250/#303) — ФЗ-152 §15 SAR review;
+  OVERDUE highlight + active/overdue counters.
+- /admin dashboard (#251/#304) — landing page с 4 stat panels
+  (content / chat / security / misc) + cross-links на sub-pages.
+- /admin/llm-providers + /admin/system-config (#252/#305) — read-only
+  info pages.
+- /admin/users (#253/#306) — KB staff users list с MFA warning +
+  cross-link добавление на dashboard.
+- Nav link → /admin dashboard (#254/#307) — entry point updated.
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -474,12 +494,12 @@ landing'а 30 PR'ов. Remaining 2 unimplemented — оба design-needed,
 
 Открытые задачи требующие design decision (architect input):
 1. **PATCH /admin/system-config + PUT /admin/llm/active** — один
-   shared concern: writable runtime config storage. Дизайн нужен:
-   - Single JSONB row в `system_config` table vs key/value rows.
-   - Settings merge layer: env как primary, DB overlays specific keys.
-   - X-MFA-Token validation (per OpenAPI требует step-up auth).
-   - Reload semantics: hot-reload через cache invalidation vs request-
-     scoped lookup.
+   shared concern: writable runtime config storage. ADR-0019
+   *Proposed* (#247/#300); ждёт architect approve. Open questions:
+   - Single JSONB row vs key/value rows.
+   - Settings merge layer + allowlist.
+   - X-MFA-Token validation: honest stub vs Keycloak step-up.
+   - Worker reload semantics.
 2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
 3. **POST /documents create endpoint** — нужен в OpenAPI?
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
@@ -493,9 +513,15 @@ Self-serve M-sized items без design дополнительного:
    (alert rules уже landit в #241/#293; dashboards — companion).
 3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
 4. ~~POST/GET /admin/llm/eval-runs~~ ✅ DONE MVP (#244/#297; mock+smoke).
-5. **Frontend admin UI** — для 22 admin endpoints (sessions/lists/forms).
-6. **LLMJudge integration в eval-runs** — answer_correctness /
-   faithfulness / refusal_correctness metrics computation.
+5. ~~Frontend admin UI (read-only)~~ ✅ DONE (PRs #301-#307): dashboard
+   + 6 sub-pages (eval-runs, security-incidents, personal-data,
+   llm-providers, system-config, users). Mutation forms (POST/PATCH) —
+   backlog: bundled CSRF pattern PR.
+6. ~~LLMJudge MVP в eval-runs~~ ✅ DONE с MockJudge (#246/#299);
+   faithfulness требует real LLMJudge — backlog (зависит от LLM creds).
+7. **Admin mutation forms** — POST kb_users / PATCH security-incident
+   resolve / PATCH PD-request process / PUT llm/active — общий CSRF
+   pattern, можно landить bundled PR после ADR-0019 approve.
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
