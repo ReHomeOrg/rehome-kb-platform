@@ -10,6 +10,7 @@ premises-cards, chat и т.д.) добавляются через
 from fastapi import APIRouter
 
 from src.api.admin.audit_log_router import router as admin_audit_log_router
+from src.api.admin.eval_runs_router import router as admin_eval_runs_router
 from src.api.admin.operational_router import router as admin_operational_router
 from src.api.admin.pd_requests_router import router as admin_pd_requests_router
 from src.api.admin.router import router as admin_router
@@ -60,3 +61,4 @@ router.include_router(admin_security_incidents_router)
 router.include_router(admin_pd_requests_router)
 router.include_router(admin_audit_log_router)
 router.include_router(admin_operational_router)
+router.include_router(admin_eval_runs_router)
