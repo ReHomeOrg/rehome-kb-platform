@@ -238,6 +238,14 @@ export default async function AdminDashboardPage({
                     System config →
                   </a>
                 </li>
+                <li>
+                  <a
+                    href="/admin/maintenance"
+                    className="underline hover:text-blue-900"
+                  >
+                    Maintenance (reindex / cache) →
+                  </a>
+                </li>
               </ul>
             </section>
           </>
