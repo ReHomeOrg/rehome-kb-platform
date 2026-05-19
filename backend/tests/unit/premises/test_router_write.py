@@ -263,6 +263,74 @@ def test_patch_applies_fields_and_audits(
     assert set(audit_kwargs["metadata"]["fields_changed"]) == {"status", "address"}
 
 
+# ---------------------------------------------------------------------------
+# #221: premises_card.updated webhook event
+
+
+@pytest.fixture
+def premises_dispatch_mock() -> Iterator[AsyncMock]:
+    """Override no-op dispatcher с tracking mock для assert'ов."""
+    from unittest.mock import MagicMock
+
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    dispatch = AsyncMock(return_value=1)
+    fake = MagicMock(spec=WebhookEventDispatcher)
+    fake.dispatch = dispatch
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: fake
+    yield dispatch
+    app.dependency_overrides.pop(get_webhook_event_dispatcher, None)
+
+
+def test_patch_fires_premises_card_updated(
+    client: TestClient,
+    override_deps: None,
+    update_mock: AsyncMock,
+    premises_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """PATCH с changed fields → webhook event `premises_card.updated`."""
+    card = _make_card(status="PUBLISHED", address="New address")
+    update_mock.return_value = card
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.patch(
+        "/api/v1/premises-cards/spb-test-001",
+        json={"status": "PUBLISHED", "address": "New address"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    premises_dispatch_mock.assert_awaited_once()
+    kwargs = premises_dispatch_mock.call_args.kwargs
+    assert kwargs["event_type"] == "premises_card.updated"
+    payload = kwargs["payload"]
+    assert payload["premises_id"] == str(card.id)
+    assert payload["slug"] == card.slug
+    assert set(payload["changed_fields"]) == {"status", "address"}
+
+
+def test_patch_empty_body_skips_premises_dispatch(
+    client: TestClient,
+    override_deps: None,
+    update_mock: AsyncMock,
+    premises_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Empty PATCH (all None) → no webhook (subscriber не ждёт bare touch)."""
+    card = _make_card(status="PUBLISHED")
+    update_mock.return_value = card
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.patch(
+        "/api/v1/premises-cards/spb-test-001",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    premises_dispatch_mock.assert_not_awaited()
+
+
 def test_patch_invalid_slug_returns_422(
     client: TestClient,
     override_deps: None,

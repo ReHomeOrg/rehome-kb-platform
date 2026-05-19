@@ -163,7 +163,8 @@ async def _maybe_dispatch_article_status_event(
     - `old_status != article.status`: fire transition event если новое
       состояние — PUBLISHED или ARCHIVED.
 
-    `article.updated` не fire'им (out of scope — backlog).
+    `article.updated` для любого edit'а — отдельный helper
+    `_dispatch_article_updated` (вызывается из PUT/PATCH рядом с этим).
     """
     new_status = article.status
     if old_status == new_status:
@@ -187,6 +188,40 @@ async def _maybe_dispatch_article_status_event(
                 "archived_at": article.updated_at.isoformat(),
             },
         )
+
+
+async def _dispatch_article_updated(
+    dispatcher: WebhookEventDispatcher,
+    article: Any,
+    *,
+    changed_fields: list[str],
+) -> None:
+    """Fire `article.updated` (ТЗ §5.1) для любого edit'а.
+
+    Ortогонален transitions из `_maybe_dispatch_article_status_event` —
+    subscriber'ы могут подписаться независимо на «изменилось хоть что-то»
+    vs «status вышел в PUBLISHED». В PUT/PATCH вызываются оба helper'а;
+    дублирования не будет, т.к. они dispatch'ат разные event_type.
+
+    `changed_fields` — для PATCH derives from `payload.model_dump(exclude_unset=True)`;
+    для PUT передаём `["full_replacement"]` (PUT semantics — full body
+    replacement, granular diff не tracked'ится дешевле re-fetch'а).
+
+    Empty `changed_fields` — no-op (защита от degenerate PATCH с empty body).
+    """
+    if not changed_fields:
+        return
+    await dispatcher.dispatch(
+        event_type="article.updated",
+        payload={
+            "slug": article.slug,
+            "title": article.title,
+            "access_level": article.access_level,
+            "status": article.status,
+            "changed_fields": changed_fields,
+            "updated_at": article.updated_at.isoformat(),
+        },
+    )
 
 
 async def _maybe_index_article(
@@ -565,6 +600,11 @@ async def replace_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    # #221 / ТЗ §5.1: fire `article.updated` для любого PUT (PUT replaces
+    # body полностью — listим `full_replacement` вместо ложного field-list'а).
+    await _dispatch_article_updated(
+        webhook_dispatcher, article, changed_fields=["full_replacement"]
+    )
     # ADR-0010 #130: RAG indexer.
     await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
@@ -781,6 +821,9 @@ async def patch_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    # #221 / ТЗ §5.1: fire `article.updated` с granular changed_fields.
+    changed_fields = sorted(payload.model_dump(exclude_unset=True).keys())
+    await _dispatch_article_updated(webhook_dispatcher, article, changed_fields=changed_fields)
     await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
 
