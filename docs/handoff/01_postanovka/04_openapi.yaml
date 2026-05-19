@@ -1670,6 +1670,9 @@ paths:
 
         '
       operationId: exportAuditLog
+      x-implementation-status: implemented
+      x-implementation-pr: 239
+      x-implementation-note: sync execution; result_url → existing /audit-log/export.csv
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:

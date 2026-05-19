@@ -105,3 +105,7 @@ RESOURCE_ADMIN_CACHE: Final = "admin_cache"
 RESOURCE_ADMIN_TASK: Final = "admin_task"
 ACTION_ADMIN_CACHE_INVALIDATED: Final = "admin.cache.invalidated"
 ACTION_ADMIN_REINDEX_TRIGGERED: Final = "admin.reindex.triggered"
+# `audit_log.exported` (#239) — мета-audit: фиксируем кто запросил
+# export аудит-лога (для регуляторного запроса). Metadata содержит format
+# + reason; filters payload — в admin_tasks.params (для replay).
+ACTION_ADMIN_AUDIT_LOG_EXPORTED: Final = "admin.audit_log.exported"
