@@ -627,3 +627,47 @@ export interface PersonalDataRequest {
 export interface PersonalDataRequestsListResponse {
   data: PersonalDataRequest[];
 }
+
+// ============================================================================
+// Admin stats (#251, backend #227)
+
+export interface AdminStatsPeriod {
+  from: string;
+  to: string;
+}
+
+export interface AdminStatsRequests {
+  total: number;
+  by_endpoint: Record<string, number>;
+  by_status: Record<string, number>;
+  error_rate_percent: number;
+}
+
+export interface AdminStatsChat {
+  sessions: number;
+  messages: number;
+  containment_rate: number;
+  avg_rating: number | null;
+  no_answer_count: number;
+  escalations: number;
+}
+
+export interface AdminStatsContent {
+  total_articles: number;
+  total_documents: number;
+  pending_reviews: number;
+}
+
+export interface AdminStatsSecurity {
+  open_incidents: number;
+  critical_incidents: number;
+  overdue_pd_requests: number;
+}
+
+export interface AdminStats {
+  period: AdminStatsPeriod;
+  requests: AdminStatsRequests;
+  chat: AdminStatsChat;
+  content: AdminStatsContent;
+  security: AdminStatsSecurity;
+}
