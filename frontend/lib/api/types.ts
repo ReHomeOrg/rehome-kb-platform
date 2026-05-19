@@ -671,3 +671,64 @@ export interface AdminStats {
   content: AdminStatsContent;
   security: AdminStatsSecurity;
 }
+
+// ============================================================================
+// Admin LLM providers (#252, backend #228)
+
+export type LlmProviderStatus = "ACTIVE" | "INACTIVE" | "EXPERIMENTAL";
+export type LlmHealthStatus = "ok" | "degraded" | "down";
+
+export interface LlmProvider {
+  id: string;
+  name: string;
+  vendor: string | null;
+  model: string | null;
+  status: LlmProviderStatus;
+  is_current: boolean;
+  cost_per_1m_input_tokens_rub: number | null;
+  cost_per_1m_output_tokens_rub: number | null;
+  max_context_tokens: number | null;
+  supports_streaming: boolean | null;
+  last_health_check: string | null;
+  health_status: LlmHealthStatus | null;
+}
+
+export interface LlmProvidersListResponse {
+  data: LlmProvider[];
+}
+
+// ============================================================================
+// Admin system config (#252, backend #229)
+
+export interface SystemConfigRateLimits {
+  guest_per_minute: number | null;
+  user_per_minute: number | null;
+  m2m_per_minute: number | null;
+  chat_messages_per_5min: number | null;
+}
+
+export interface SystemConfigLlm {
+  active_provider: string;
+  fallback_provider: string | null;
+  ab_test_split_percent: number | null;
+  max_context_tokens: number | null;
+  temperature: number | null;
+}
+
+export interface SystemConfigModeration {
+  auto_publish_threshold: number | null;
+  require_review_for_categories: string[];
+}
+
+export interface SystemConfigWebhooks {
+  max_retries: number;
+  timeout_seconds: number;
+}
+
+export interface SystemConfig {
+  rate_limits: SystemConfigRateLimits;
+  feature_flags: Record<string, boolean>;
+  llm_config: SystemConfigLlm;
+  moderation: SystemConfigModeration;
+  webhooks: SystemConfigWebhooks;
+}
