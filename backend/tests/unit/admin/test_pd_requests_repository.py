@@ -128,9 +128,7 @@ async def test_transition_new_to_completed_blocked() -> None:
 @pytest.mark.asyncio
 async def test_transition_terminal_blocked() -> None:
     """COMPLETED → IN_PROGRESS blocked (reopen = new request)."""
-    r = _make_request(
-        status="COMPLETED", completed_at=datetime(2026, 5, 15, tzinfo=UTC)
-    )
+    r = _make_request(status="COMPLETED", completed_at=datetime(2026, 5, 15, tzinfo=UTC))
     session = _session()
     repo = PersonalDataRequestRepository(session)
     with pytest.raises(InvalidPdRequestTransitionError):
@@ -178,9 +176,7 @@ async def test_attachments_replace_not_merge() -> None:
 @pytest.mark.asyncio
 async def test_list_filter_status_and_type_in_sql() -> None:
     session = _session()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = PersonalDataRequestRepository(session)
     await repo.list_filtered(status="OVERDUE", type_filter="delete")
     stmt = session.execute.call_args.args[0]
@@ -192,9 +188,7 @@ async def test_list_filter_status_and_type_in_sql() -> None:
 @pytest.mark.asyncio
 async def test_get_by_id_returns_none_for_missing() -> None:
     session = _session()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=lambda: None)
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: None))
     repo = PersonalDataRequestRepository(session)
     assert await repo.get_by_id(uuid4()) is None
 
@@ -222,9 +216,7 @@ async def test_mark_overdue_updates_matching_rows() -> None:
 @pytest.mark.asyncio
 async def test_mark_overdue_no_rows_returns_zero() -> None:
     session = _session()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = PersonalDataRequestRepository(session)
     count = await repo.mark_overdue()
     assert count == 0

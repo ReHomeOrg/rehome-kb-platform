@@ -104,9 +104,7 @@ def override_repo(
 # Auth gating
 
 
-def test_list_anon_returns_401(
-    client: TestClient, override_repo: dict[str, AsyncMock]
-) -> None:
+def test_list_anon_returns_401(client: TestClient, override_repo: dict[str, AsyncMock]) -> None:
     resp = client.get("/api/v1/admin/personal-data/requests")
     assert resp.status_code == 401
 

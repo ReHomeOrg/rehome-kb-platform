@@ -101,9 +101,7 @@ async def list_pd_requests(
 
     return PersonalDataRequestsListResponse(
         data=[PersonalDataRequestView.model_validate(r) for r in rows],
-        pagination=PersonalDataRequestPagination(
-            cursor_next=cursor_next, has_more=has_more
-        ),
+        pagination=PersonalDataRequestPagination(cursor_next=cursor_next, has_more=has_more),
     )
 
 

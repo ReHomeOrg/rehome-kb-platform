@@ -76,9 +76,7 @@ class PersonalDataRequest(Base):
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     attachments: Mapped[list[UUID]] = mapped_column(
         ARRAY(PG_UUID(as_uuid=True)),
@@ -105,10 +103,7 @@ class PersonalDataRequest(Base):
     )
 
     def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"<PersonalDataRequest id={self.id} type={self.type} "
-            f"status={self.status}>"
-        )
+        return f"<PersonalDataRequest id={self.id} type={self.type} " f"status={self.status}>"
 
 
 __all__ = [
