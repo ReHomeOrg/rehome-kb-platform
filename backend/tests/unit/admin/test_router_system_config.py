@@ -103,9 +103,7 @@ def test_tenant_returns_403(client: TestClient, make_jwt: Callable[..., str]) ->
     assert resp.status_code == 403
 
 
-def test_staff_support_alone_returns_403(
-    client: TestClient, make_jwt: Callable[..., str]
-) -> None:
+def test_staff_support_alone_returns_403(client: TestClient, make_jwt: Callable[..., str]) -> None:
     """staff_support (STAFF без LEGAL) → 403."""
     token = make_jwt(roles=["staff_support"], sub=str(uuid4()))
     resp = client.get(
@@ -115,9 +113,7 @@ def test_staff_support_alone_returns_403(
     assert resp.status_code == 403
 
 
-def test_staff_admin_returns_200(
-    client: TestClient, make_jwt: Callable[..., str]
-) -> None:
+def test_staff_admin_returns_200(client: TestClient, make_jwt: Callable[..., str]) -> None:
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
         "/api/v1/admin/system-config",
