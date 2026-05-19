@@ -59,6 +59,8 @@ paths:
       - Health
       summary: Liveness probe
       operationId: health
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security: []
       responses:
         '200':
@@ -78,6 +80,8 @@ paths:
       - Health
       summary: Readiness probe
       operationId: ready
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security: []
       responses:
         '200':
@@ -101,6 +105,8 @@ paths:
       - Health
       summary: Версия API
       operationId: getVersion
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security: []
       responses:
         '200':
@@ -136,6 +142,8 @@ paths:
 
         '
       operationId: listArticles
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -219,6 +227,8 @@ paths:
       summary: Создать статью
       description: Требует scope ≥ staff_support
       operationId: createArticle
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -264,6 +274,8 @@ paths:
       - Articles
       summary: Получить статью по slug
       operationId: getArticleBySlug
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -326,6 +338,8 @@ paths:
       - Articles
       summary: Обновить статью полностью
       operationId: replaceArticle
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -364,6 +378,8 @@ paths:
       - Articles
       summary: Частично обновить статью
       operationId: patchArticle
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -392,6 +408,8 @@ paths:
       - Articles
       summary: Архивировать статью (soft delete)
       operationId: archiveArticle
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -406,6 +424,8 @@ paths:
       - Articles
       summary: История изменений статьи
       operationId: getArticleHistory
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: slug
         in: path
@@ -470,6 +490,8 @@ paths:
       - Articles
       summary: Полнотекстовый поиск по статьям
       operationId: searchArticles
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -525,6 +547,8 @@ paths:
       - Categories
       summary: Дерево категорий
       operationId: listCategories
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security: []
       responses:
         '200':
@@ -546,6 +570,8 @@ paths:
       - Categories
       summary: Список тегов
       operationId: listTags
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       security: []
       parameters:
       - name: q
@@ -577,6 +603,8 @@ paths:
       - Documents
       summary: Список документов
       operationId: listDocuments
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - name: category
@@ -648,6 +676,8 @@ paths:
       - Documents
       summary: Метаданные документа
       operationId: getDocument
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: id
         in: path
@@ -691,6 +721,8 @@ paths:
 
         Реализация ADR-0012 Phase B (#215).
       operationId: uploadDocumentFile
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: id
         in: path
@@ -804,6 +836,8 @@ paths:
 
         Реализация ADR-0012 Phase A (#214).
       operationId: downloadDocumentFile
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: id
         in: path
@@ -872,6 +906,8 @@ paths:
 
         '
       operationId: getPremisesCard
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       responses:
@@ -893,6 +929,8 @@ paths:
       - Premises Cards
       summary: Обновить карточку
       operationId: updatePremisesCard
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -958,6 +996,8 @@ paths:
       - Chat
       summary: Создать сессию чата
       operationId: createChatSession
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -1006,6 +1046,8 @@ paths:
       - Chat
       summary: История сессии
       operationId: getChatSession
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -1032,6 +1074,8 @@ paths:
       - Chat
       summary: Удалить сессию и историю (право по ФЗ-152)
       operationId: deleteChatSession
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       responses:
@@ -1050,6 +1094,8 @@ paths:
 
         '
       operationId: sendChatMessage
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: session_id
         in: path
@@ -1109,6 +1155,8 @@ paths:
       - Chat
       summary: Оставить фидбек на ответ
       operationId: postChatFeedback
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: session_id
         in: path
@@ -1147,6 +1195,8 @@ paths:
       - Chat
       summary: Эскалация на оператора поддержки
       operationId: escalateChatSession
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: session_id
         in: path
@@ -1200,6 +1250,8 @@ paths:
 
         '
       operationId: universalSearch
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/RequestId'
       requestBody:
@@ -1249,6 +1301,8 @@ paths:
       - Webhooks
       summary: Список зарегистрированных webhook
       operationId: listWebhooks
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -1268,6 +1322,8 @@ paths:
       - Webhooks
       summary: Зарегистрировать webhook
       operationId: createWebhook
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -1294,6 +1350,8 @@ paths:
       - Webhooks
       summary: Отозвать webhook
       operationId: deleteWebhook
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: id
         in: path
@@ -1311,6 +1369,8 @@ paths:
       - Webhooks
       summary: Тестовая отправка события
       operationId: testWebhook
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: id
         in: path
@@ -2557,6 +2617,8 @@ paths:
 
         '
       operationId: listPremisesCollaborators
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -2577,6 +2639,8 @@ paths:
       summary: Назначить коллаборанта на объект
       description: Требует staff_support+
       operationId: assignCollaboratorToPremises
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2603,6 +2667,8 @@ paths:
       - Collaborators
       summary: Отвязать коллаборанта от объекта
       operationId: unassignCollaboratorFromPremises
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: premises_id
         in: path
@@ -2949,6 +3015,8 @@ paths:
       tags: [Premises]
       summary: Список карточек квартир (cursor pagination)
       operationId: listPremisesCards
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: cursor
         in: query
@@ -2970,6 +3038,8 @@ paths:
       tags: [Premises]
       summary: Создать карточку квартиры (staff_admin)
       operationId: createPremisesCard
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '201':
           description: Создано
@@ -2980,6 +3050,8 @@ paths:
       tags: [Premises]
       summary: Полнотекстовый поиск (Postgres FTS)
       operationId: searchPremisesCards
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       requestBody:
         required: true
         content:
@@ -3010,6 +3082,8 @@ paths:
       tags: [HR]
       summary: Список сотрудников (HR_RESTRICTED scope)
       operationId: listHrEmployees
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: cursor
         in: query
@@ -3036,6 +3110,8 @@ paths:
       tags: [HR]
       summary: Создать карточку сотрудника
       operationId: createHrEmployee
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '201':
           description: Создано
@@ -3044,6 +3120,8 @@ paths:
       tags: [HR]
       summary: Карточка сотрудника (audited per view)
       operationId: getHrEmployee
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: employee_id
         in: path
@@ -3060,6 +3138,8 @@ paths:
       tags: [HR]
       summary: Partial update
       operationId: patchHrEmployee
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: employee_id
         in: path
@@ -3074,6 +3154,8 @@ paths:
       tags: [HR]
       summary: Архивировать (ФЗ-152 50-year retention compliance)
       operationId: archiveHrEmployee
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: employee_id
         in: path
@@ -3090,6 +3172,8 @@ paths:
       tags: [Vault]
       summary: Текущее crypto state пользователя (для unlock UI)
       operationId: getVaultMe
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: salt + pubkey + encrypted_privkey + has_totp bit
@@ -3098,6 +3182,8 @@ paths:
       tags: [Vault]
       summary: Initial vault setup (zero-knowledge)
       operationId: setupVault
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '201':
           description: Создано
@@ -3108,6 +3194,8 @@ paths:
       tags: [Vault]
       summary: Verify auth_hash (anti-bruteforce, audited)
       operationId: unlockVault
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -3118,6 +3206,8 @@ paths:
       tags: [Vault]
       summary: List accessible secrets (metadata-only)
       operationId: listVaultSecrets
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -3125,6 +3215,8 @@ paths:
       tags: [Vault]
       summary: Create encrypted secret + wraps
       operationId: createVaultSecret
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '201':
           description: Создано
@@ -3133,6 +3225,8 @@ paths:
       tags: [Vault]
       summary: Detail + caller wrapped_key (audited read)
       operationId: getVaultSecret
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: secret_id
         in: path
@@ -3149,6 +3243,8 @@ paths:
       tags: [Vault]
       summary: Update blob (optimistic version match)
       operationId: updateVaultSecret
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: secret_id
         in: path
@@ -3165,6 +3261,8 @@ paths:
       tags: [Vault]
       summary: Archive (soft-delete, owner-only)
       operationId: archiveVaultSecret
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: secret_id
         in: path
@@ -3180,6 +3278,8 @@ paths:
       tags: [Vault]
       summary: Enable TOTP 2FA (encrypted secret)
       operationId: setupVaultTotp
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: OK
@@ -3190,6 +3290,8 @@ paths:
       tags: [Vault]
       summary: Disable TOTP 2FA
       operationId: disableVaultTotp
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '204':
           description: Disabled
@@ -3199,6 +3301,8 @@ paths:
       tags: [Vault]
       summary: List vault groups (user-membership filtered)
       operationId: listVaultGroups
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       responses:
         '200':
           description: Группы пользователя
@@ -3208,6 +3312,8 @@ paths:
       tags: [Vault]
       summary: Create group (auto-owner)
       operationId: createVaultGroup
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       requestBody:
         required: true
         content:
@@ -3231,6 +3337,8 @@ paths:
       tags: [Vault]
       summary: List group members (must be member; non-member → 404)
       operationId: listVaultGroupMembers
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: group_id
         in: path
@@ -3247,6 +3355,8 @@ paths:
       tags: [Vault]
       summary: Add member (owner-only)
       operationId: addVaultGroupMember
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: group_id
         in: path
@@ -3283,6 +3393,8 @@ paths:
       tags: [Vault]
       summary: Remove member (owner-only; can't remove self)
       operationId: removeVaultGroupMember
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: group_id
         in: path
@@ -3313,6 +3425,8 @@ paths:
         forensic. См. также `/api/v1/admin/audit-log` (design-stage, не
         реализован).'
       operationId: searchAuditLog
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: actor_sub
         in: query
@@ -3376,6 +3490,8 @@ paths:
         resource_type, resource_id, metadata (single-line JSON).
         Implemented в Cube U (#170).'
       operationId: exportAuditLogCsv
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline
       parameters:
       - name: actor_sub
         in: query
