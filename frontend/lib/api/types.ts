@@ -597,3 +597,33 @@ export interface SecurityIncident {
 export interface SecurityIncidentsListResponse {
   data: SecurityIncident[];
 }
+
+// ============================================================================
+// Admin personal-data/requests (#250, backend #232) — ФЗ-152 §15 SAR
+
+export type PdRequestType = "provide" | "correct" | "delete" | "transfer";
+export type PdRequestStatus =
+  | "NEW"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "REJECTED"
+  | "OVERDUE";
+
+export interface PersonalDataRequest {
+  id: string;
+  type: PdRequestType;
+  status: PdRequestStatus;
+  subject_id: string;
+  subject_email: string | null;
+  subject_phone: string | null;
+  description: string | null;
+  assigned_to: string | null;
+  created_at: string;
+  due_at: string;
+  completed_at: string | null;
+  resolution_note: string | null;
+}
+
+export interface PersonalDataRequestsListResponse {
+  data: PersonalDataRequest[];
+}
