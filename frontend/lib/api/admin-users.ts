@@ -5,7 +5,12 @@
  */
 
 import { apiFetch } from "./client";
-import type { KbUserRole, KbUserStatus, KbUsersListResponse } from "./types";
+import type {
+  KbUser,
+  KbUserRole,
+  KbUserStatus,
+  KbUsersListResponse,
+} from "./types";
 
 export interface ListKbUsersFilters {
   role?: KbUserRole;
@@ -24,4 +29,31 @@ export async function listKbUsers(
   return apiFetch<KbUsersListResponse>(
     `/api/v1/admin/users${qs ? `?${qs}` : ""}`,
   );
+}
+
+export async function getKbUser(id: string): Promise<KbUser> {
+  return apiFetch<KbUser>(`/api/v1/admin/users/${encodeURIComponent(id)}`);
+}
+
+export interface KbUserPatchInput {
+  role?: KbUserRole;
+  status?: KbUserStatus;
+  permissions?: string[];
+}
+
+export async function patchKbUser(
+  id: string,
+  input: KbUserPatchInput,
+): Promise<KbUser> {
+  return apiFetch<KbUser>(`/api/v1/admin/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function deactivateKbUser(id: string): Promise<void> {
+  await apiFetch<void>(`/api/v1/admin/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

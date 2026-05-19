@@ -76,7 +76,14 @@ export default function KbUsersTable({ users, error }: Props): JSX.Element {
         <tbody>
           {users.map((u) => (
             <tr key={u.id} className="border-t border-gray-100">
-              <td className="px-3 py-2 font-mono text-gray-900">{u.email}</td>
+              <td className="px-3 py-2 font-mono text-gray-900">
+                <a
+                  href={`/admin/users/${u.id}`}
+                  className="text-blue-700 hover:underline"
+                >
+                  {u.email}
+                </a>
+              </td>
               <td className="px-3 py-2 text-gray-700">{u.full_name}</td>
               <td className="px-3 py-2">{roleBadge(u.role)}</td>
               <td className="px-3 py-2">{statusBadge(u.status)}</td>
