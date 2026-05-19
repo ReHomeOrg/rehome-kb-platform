@@ -48,6 +48,10 @@ from src.api.premises.schemas import (
     PremisesView,
     project_for_scope,
 )
+from src.api.webhooks.dispatcher import (
+    WebhookEventDispatcher,
+    get_webhook_event_dispatcher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +351,7 @@ async def patch_premises_card(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: PremisesRepository = Depends(get_premises_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     session: AsyncSession = Depends(get_session),
 ) -> PremisesView:
     """Partial update. Только non-None поля попадают в patch dict.
@@ -360,14 +365,28 @@ async def patch_premises_card(
     if card is None:
         raise HTTPException(status_code=404, detail="Premises card not found")
 
+    changed_fields = sorted(patch_dict.keys())
     await audit_repo.record(
         actor_sub=claims["sub"],
         action=ACTION_PREMISES_UPDATED,
         resource_type=RESOURCE_PREMISES_CARD,
         resource_id=card.slug,
-        metadata={"fields_changed": list(patch_dict.keys())},
+        metadata={"fields_changed": changed_fields},
     )
     await session.commit()
+
+    # #221 / ТЗ §5.1: fire `premises_card.updated`. Empty patch (все None)
+    # → no-op (subscriber'ы ожидают изменения данных, не bare touch).
+    if changed_fields:
+        await webhook_dispatcher.dispatch(
+            event_type="premises_card.updated",
+            payload={
+                "premises_id": str(card.id),
+                "slug": card.slug,
+                "changed_fields": changed_fields,
+                "updated_at": card.updated_at.isoformat(),
+            },
+        )
     return project_for_scope(card, access_levels)
 
 
