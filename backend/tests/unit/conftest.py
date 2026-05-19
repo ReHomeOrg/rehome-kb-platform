@@ -174,6 +174,37 @@ def _no_op_audit_repository() -> Iterator[None]:
     app.dependency_overrides.pop(get_audit_repository, None)
 
 
+@pytest.fixture
+def admin_task_runner_mock() -> Iterator[Any]:
+    """#268 (ADR-0020 B): exposes the no-op AdminTaskRunner для assertion.
+
+    Autouse fixture below installs a MagicMock spec=AdminTaskRunner. This
+    fixture re-installs the same mock и yields it, so tests могут assert
+    spawn_* calls.
+    """
+    from unittest.mock import MagicMock
+
+    from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
+
+    mock = MagicMock(spec=AdminTaskRunner)
+    app.dependency_overrides[get_admin_task_runner] = lambda: mock
+    yield mock
+    app.dependency_overrides.pop(get_admin_task_runner, None)
+
+
+@pytest.fixture(autouse=True)
+def _no_op_admin_task_runner() -> Iterator[None]:
+    """Autouse default: no-op runner so tests без explicit fixture не падают."""
+    from unittest.mock import MagicMock
+
+    from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
+
+    noop = MagicMock(spec=AdminTaskRunner)
+    app.dependency_overrides[get_admin_task_runner] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_admin_task_runner, None)
+
+
 @pytest.fixture(autouse=True)
 def _no_op_system_config_repository() -> Iterator[None]:
     """#264 (ADR-0019): глобальный no-op SystemConfigRepository.

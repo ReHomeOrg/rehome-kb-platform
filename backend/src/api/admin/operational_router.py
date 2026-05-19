@@ -29,6 +29,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
 from src.api.admin.tasks_repository import (
     AdminTaskRepository,
     get_admin_task_repository,
@@ -39,7 +40,6 @@ from src.api.admin.tasks_schemas import (
     ReindexResponse,
     TaskStatusView,
 )
-from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.audit.actions import (
     ACTION_ADMIN_CACHE_INVALIDATED,
     ACTION_ADMIN_REINDEX_TRIGGERED,
@@ -52,7 +52,6 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
-from src.api.search.indexer import IndexerService, get_indexer_service
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -121,28 +120,30 @@ async def reindex_content(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: AdminTaskRepository = Depends(get_admin_task_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
-    article_repo: ArticleRepository = Depends(get_article_repository),
-    indexer: IndexerService = Depends(get_indexer_service),
+    runner: AdminTaskRunner = Depends(get_admin_task_runner),
 ) -> ReindexResponse:
-    """`POST /api/v1/admin/reindex` (OpenAPI 04 §reindexContent, real #240).
+    """`POST /api/v1/admin/reindex` (OpenAPI 04 §reindexContent, #268 async).
 
-    Creates admin_tasks row + audit запись, iterates через всех PUBLISHED
-    articles + вызывает `IndexerService.index_article` для каждой,
-    обновляет `admin_tasks.error` при failure и mark'ает COMPLETED.
+    Per ADR-0020 Вариант B (asyncio.create_task pattern):
+    1. Create admin_tasks row (status=PENDING).
+    2. Audit запись `admin.reindex.triggered`.
+    3. Spawn background coroutine через `runner.spawn_reindex(...)`.
+    4. Return 202 + task_id immediately (request не блокируется).
+
+    Background task (см. `task_runner._run_reindex`):
+    - Opens own DB session.
+    - mark_running → execute IndexerService.reindex_all_articles →
+      mark_completed (или mark_failed if errors_total > 0 with 0 processed).
+    - Crash recovery: reaper (см. `task_reaper`) cleans stale RUNNING
+      rows на app restart (>15min).
 
     Scope behavior:
-    - `articles` / `all` — реальный reindex (через ArticleRepository iter).
-    - `documents` / `premises_cards` — honest stub (no indexer для этих
-      типов; task создаётся но execution no-op'ится).
-
-    Sync execution: на N articles ≈ N × embed_latency. Production volume —
-    backlog (Dramatiq + asyncio runner для off-request execution).
-    Metadata `articles_processed` / `chunks_total` / `errors_total`
-    сохраняется в admin_task.params для post-mortem.
+    - `articles` / `all` — реальный reindex.
+    - `documents` / `premises_cards` — honest stub (task COMPLETED без work).
     """
     _require_staff_admin(access_levels)
     payload = body or ReindexRequest()
-    actor_sub = claims.get("sub", "unknown")
+    actor_sub = str(claims.get("sub", "unknown"))
 
     task = await repo.create(
         type_="reindex",
@@ -157,31 +158,10 @@ async def reindex_content(
         metadata={"scope": payload.scope},
     )
 
-    await repo.mark_running(task.id)
-    try:
-        if payload.scope in ("all", "articles"):
-            result = await indexer.reindex_all_articles(
-                article_repo.iter_published_for_reindex(),
-            )
-            # Failure heuristic: errors > 0 при articles_processed == 0 —
-            # ни одного article не reindex'нулся; mark FAILED.
-            if result.articles_processed == 0 and result.errors_total > 0:
-                await repo.mark_failed(
-                    task.id,
-                    error=f"{result.errors_total} article(s) failed to reindex",
-                )
-                raise HTTPException(
-                    status_code=500,
-                    detail="Reindex failed: all articles errored",
-                )
-        # Other scopes — honest stub (см. docstring).
-    except HTTPException:
-        raise
-    except Exception as exc:
-        await repo.mark_failed(task.id, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Reindex failed: {exc}") from exc
-
-    await repo.mark_completed(task.id)
+    # Spawn background coroutine (asyncio.create_task). Request returns
+    # 202 immediately; background task transitions PENDING → RUNNING →
+    # COMPLETED/FAILED via own session.
+    runner.spawn_reindex(task.id, payload.scope, actor_sub)
     return ReindexResponse(task_id=task.id)
 
 

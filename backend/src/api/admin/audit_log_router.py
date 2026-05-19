@@ -40,6 +40,7 @@ from src.api.admin.audit_log_schemas import (
     AdminAuditLogSeverity,
     AuditLogEntryView,
 )
+from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
 from src.api.admin.tasks_repository import (
     AdminTaskRepository,
     get_admin_task_repository,
@@ -230,26 +231,22 @@ async def export_admin_audit_log(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     task_repo: AdminTaskRepository = Depends(get_admin_task_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    runner: AdminTaskRunner = Depends(get_admin_task_runner),
 ) -> AuditLogExportResponse:
     """`POST /api/v1/admin/audit-log/export` (OpenAPI 04 §exportAuditLog).
 
-    Создаёт `admin_tasks` row + audit запись + сразу marks COMPLETED с
-    result_url, указывающим на существующий `/api/v1/audit-log/export.csv`
-    с теми же filters. Frontend опрашивает GET /admin/tasks/{id},
-    получает result_url, делает GET для скачивания.
+    Per ADR-0020 Вариант B (#268 async pattern):
+    1. Create admin_tasks row (status=PENDING) + audit запись.
+    2. Spawn background coroutine — marks COMPLETED с result_url
+       указывающим на существующий /api/v1/audit-log/export.csv.
+    3. Return 202 + task_id immediately.
 
-    Sync execution: backend сейчас не имеет worker'а; full CSV generation
-    делается inline в request. Hard cap 10k rows из существующего CSV
-    endpoint. Switch на real async — backlog (нужен Dramatiq + retry).
-
-    `reason` (per OpenAPI «причина экспорта») сохраняется в task.params
-    + audit metadata — это compliance trail для аудита аудит-лога.
-
+    `reason` сохраняется в task.params + audit metadata (compliance).
     `filters` whitelist'ятся через `_ALLOWED_EXPORT_FILTER_KEYS` —
     unknown keys отбрасываются (anti-injection в URL).
     """
     _require_staff_admin_or_legal(access_levels)
-    actor_sub = claims.get("sub", "unknown")
+    actor_sub = str(claims.get("sub", "unknown"))
 
     task = await task_repo.create(
         type_="audit_log_export",
@@ -274,8 +271,7 @@ async def export_admin_audit_log(
     )
 
     result_url = _build_export_url(payload)
-    await task_repo.mark_running(task.id)
-    await task_repo.mark_completed(task.id, result_url=result_url)
+    runner.spawn_audit_export(task.id, result_url, actor_sub)
 
     return AuditLogExportResponse(task_id=task.id, estimated_ready_at=None)
 
