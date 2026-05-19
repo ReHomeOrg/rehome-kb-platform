@@ -77,7 +77,14 @@ export default function PdRequestsTable({ requests, error }: Props): JSX.Element
         <tbody>
           {requests.map((r) => (
             <tr key={r.id} className="border-t border-gray-100">
-              <td className="px-3 py-2 font-mono">{r.id.slice(0, 8)}</td>
+              <td className="px-3 py-2 font-mono">
+                <a
+                  href={`/admin/personal-data/${r.id}`}
+                  className="text-blue-700 hover:underline"
+                >
+                  {r.id.slice(0, 8)}
+                </a>
+              </td>
               <td className="px-3 py-2">{r.type}</td>
               <td className="px-3 py-2">{statusBadge(r.status)}</td>
               <td className="px-3 py-2 text-gray-700">

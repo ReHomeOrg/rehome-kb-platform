@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { listPdRequests } from "./admin-pd-requests";
+import {
+  getPdRequest,
+  listPdRequests,
+  processPdRequest,
+} from "./admin-pd-requests";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -66,5 +70,47 @@ describe("admin-pd-requests API", () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0].type).toBe("delete");
     expect(result.data[0].subject_email).toBe("user@example.com");
+  });
+});
+
+describe("getPdRequest", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("calls expected URL", async () => {
+    apiFetchMock.mockResolvedValueOnce({ id: "x" });
+    await getPdRequest("abc-123");
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/personal-data/requests/abc-123",
+    );
+  });
+});
+
+describe("processPdRequest", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends PATCH with status + resolution_note", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await processPdRequest("abc", {
+      status: "COMPLETED",
+      resolution_note: "Все данные удалены",
+    });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/personal-data/requests/abc",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toBe(
+      JSON.stringify({ status: "COMPLETED", resolution_note: "Все данные удалены" }),
+    );
+  });
+
+  it("supports status-only update без resolution_note", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await processPdRequest("abc", { status: "IN_PROGRESS" });
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toBe(JSON.stringify({ status: "IN_PROGRESS" }));
   });
 });
