@@ -1850,3 +1850,88 @@ async def test_update_no_if_match_legacy(
         # if_match=None (default)
     )
     assert out is not None
+
+
+# ---------------------------------------------------------------------------
+# iter_published_for_reindex (#240)
+
+
+@pytest.mark.asyncio
+async def test_iter_published_for_reindex_yields_all_in_one_batch() -> None:
+    """Single batch (< batch_size) — итератор exits clean без extra DB calls."""
+    id1, id2 = uuid4(), uuid4()
+    # session.execute returns rows; .all() возвращает list[Row]-like tuples.
+    batch_result = MagicMock()
+    batch_result.all.return_value = [(id1, "body1"), (id2, "body2")]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=batch_result)
+
+    repo = ArticleRepository(session)
+    yielded: list[tuple[Any, str]] = []
+    async for item in repo.iter_published_for_reindex(batch_size=50):
+        yielded.append(item)
+
+    assert yielded == [(id1, "body1"), (id2, "body2")]
+    # Single DB hit (len < batch_size → exit без second query).
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_iter_published_for_reindex_paginates_when_full_batch() -> None:
+    """Batch full (== batch_size) → second batch query с last_id фильтром."""
+    id1, id2 = uuid4(), uuid4()
+    first_batch = MagicMock()
+    first_batch.all.return_value = [(id1, "b1"), (id2, "b2")]  # batch_size=2, full
+    second_batch = MagicMock()
+    second_batch.all.return_value = []  # exhausted
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[first_batch, second_batch])
+
+    repo = ArticleRepository(session)
+    yielded: list[tuple[Any, str]] = []
+    async for item in repo.iter_published_for_reindex(batch_size=2):
+        yielded.append(item)
+
+    assert yielded == [(id1, "b1"), (id2, "b2")]
+    # Two DB hits (first full → query next batch).
+    assert session.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_iter_published_for_reindex_empty_table() -> None:
+    """Empty results → итератор exit immediately, no yields."""
+    empty = MagicMock()
+    empty.all.return_value = []
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=empty)
+
+    repo = ArticleRepository(session)
+    yielded: list[tuple[Any, str]] = []
+    async for item in repo.iter_published_for_reindex():
+        yielded.append(item)
+
+    assert yielded == []
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_iter_published_for_reindex_no_access_level_filter() -> None:
+    """SQL не включает access_level — это write-side path (ADR-0003 split)."""
+    empty = MagicMock()
+    empty.all.return_value = []
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=empty)
+
+    repo = ArticleRepository(session)
+    async for _ in repo.iter_published_for_reindex():
+        pass
+
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    # Status фильтр обязателен.
+    assert "status" in sql.lower()
+    # access_level НЕ должен быть в SQL — reindex видит всё PUBLISHED.
+    assert "access_level" not in sql.lower()
