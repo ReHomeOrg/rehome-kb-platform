@@ -209,8 +209,9 @@ def test_post_smoke_mock_returns_202(
     client: TestClient,
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
+    admin_task_runner_mock: Any,
 ) -> None:
-    """Happy path: mock + smoke → 202 + run_id."""
+    """ADR-0020 B: handler creates PENDING task + spawns runner."""
     task = _make_task(status="PENDING")
     task_repo_mock["create"].return_value = task
     task_repo_mock["get"].return_value = task
@@ -224,14 +225,15 @@ def test_post_smoke_mock_returns_202(
     assert resp.status_code == 202, resp.text
     body = resp.json()
     assert body["run_id"] == str(task.id)
-    # Lifecycle: create → mark_running → mark_completed.
     task_repo_mock["create"].assert_awaited_once()
     create_kwargs = task_repo_mock["create"].call_args.kwargs
     assert create_kwargs["type_"] == "eval_run"
     assert create_kwargs["params"]["providers"] == ["mock"]
-    assert create_kwargs["params"]["test_set"] == "smoke"
-    task_repo_mock["mark_running"].assert_awaited_once_with(task.id)
-    task_repo_mock["mark_completed"].assert_awaited_once_with(task.id)
+    # ADR-0020 B: spawn вместо inline mark_running/mark_completed.
+    admin_task_runner_mock.spawn_eval_run.assert_called_once()
+    args = admin_task_runner_mock.spawn_eval_run.call_args.args
+    assert args[0] == task.id
+    assert args[1] == ["mock"]
 
 
 # ---------------------------------------------------------------------------
@@ -338,23 +340,20 @@ def test_get_status_mapping_cancelled_to_failed(
 # MockJudge integration (#246)
 
 
-def test_post_with_judge_populates_judge_metrics(
+def test_post_spawns_runner_with_pairs_loaded(
     client: TestClient,
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
+    admin_task_runner_mock: Any,
 ) -> None:
-    """Mock provider + smoke + MockJudge → answer_correctness / refusal*
-    populated в task.params['results']."""
+    """ADR-0020 B: handler loads smoke pairs + spawns runner.spawn_eval_run.
+
+    Pairs payload (10 from golden.jsonl) actually executed в runner
+    background; here we only assert handler flow. Runner execution +
+    MockJudge metric populating tested separately in test_task_runner.py.
+    """
     task = _make_task(status="PENDING", params={})
     task_repo_mock["create"].return_value = task
-    # Mutable params для verification post-execution.
-    captured = {}
-
-    def _capture_get(task_id: Any) -> AdminTask:
-        captured["task"] = task
-        return task
-
-    task_repo_mock["get"].side_effect = _capture_get
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.post(
@@ -363,14 +362,9 @@ def test_post_with_judge_populates_judge_metrics(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 202
-    # After execution, service writes results to task.params.
-    results = task.params.get("results", [])
-    assert len(results) == 1
-    metrics = results[0]
-    # MockJudge produces these (heuristic, deterministic):
-    assert metrics["answer_correctness"] is not None
-    assert metrics["citation_accuracy"] is not None
-    # faithfulness — MockJudge оставляет None (нужен LLMJudge).
-    assert metrics["faithfulness"] is None
-    # refusal_correctness — может быть None если smoke dataset не содержит
-    # refusal-категории, но MockJudge возвращает something OR None per pair.
+    admin_task_runner_mock.spawn_eval_run.assert_called_once()
+    args = admin_task_runner_mock.spawn_eval_run.call_args.args
+    # spawn_eval_run(task_id, providers, pairs, actor_sub)
+    assert args[0] == task.id
+    assert args[1] == ["mock"]
+    assert len(args[2]) == 10  # smoke = 10 pairs

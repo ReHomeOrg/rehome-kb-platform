@@ -15,6 +15,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from src.api.admin.task_reaper import reap_stale_tasks
+from src.api.admin.task_runner import init_runner
 from src.api.config import get_settings
 from src.api.db import get_engine
 from src.api.observability import (
@@ -32,16 +34,27 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
-    """FastAPI lifespan: start/stop webhook delivery worker.
-
-    `app` parameter required by FastAPI contract — unused в нашем case'е
-    (worker конфигурируется через global settings, не через app state).
+    """FastAPI lifespan:
+    - start/stop webhook delivery worker.
+    - init AdminTaskRunner singleton.
+    - reap stale admin_tasks on startup (ADR-0020 §«Crash recovery»).
     """
     settings = get_settings()
+    engine = get_engine()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    # ADR-0020 B: initialize singleton task runner.
+    init_runner(session_factory, settings)
+    logger.info("admin_task_runner.initialized")
+
+    # ADR-0020 §Crash recovery: scan orphaned tasks (>15min stale).
+    try:
+        await reap_stale_tasks(session_factory)
+    except Exception:
+        logger.exception("admin_task_reaper.failed_on_startup")
+
     worker: WebhookDeliveryWorker | None = None
     if settings.webhook_worker_enabled:
-        engine = get_engine()
-        session_factory = async_sessionmaker(engine, expire_on_commit=False)
         worker = WebhookDeliveryWorker(
             session_factory=session_factory,
             settings=settings,
