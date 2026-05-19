@@ -349,14 +349,12 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
 - 0 open PR'ов (backlog от 2026-05-22 полностью merged; см. CS.7).
 
-## CS.7. Open PR backlog (2026-05-23)
+## CS.7. Recent PRs (2026-05-23 evening)
 
-Backlog от 2026-05-22 (17 PR'ов) полностью merged в main, включая
-admin endpoints + ФЗ-152 modules. Текущее состояние: **0 открытых
-PR'ов**. Merge'ы прошли через alembic multi-head fix (#284 + #285)
-для chain'a 0024_* миграций.
+22 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+**0 открытых PR'ов**.
 
-Landed между 2026-05-22 и 2026-05-23 (16 PR'ов):
+Daytime batch (16 PR'ов):
 - Webhook emitters (#220-#225): popular_query, article.updated,
   premises_card.updated, chat.no_answer, audit.security_event,
   7 collaborator.* events.
@@ -368,6 +366,15 @@ Landed между 2026-05-22 и 2026-05-23 (16 PR'ов):
   system-config (#229/#275), security_incidents CRUD (#231/#277),
   personal_data_requests CRUD (#232/#278).
 - Alembic merge revisions (#284, #285) — multi-head fixes.
+
+Evening batch (5 PR'ов):
+- GET /admin/audit-log alias (#237/#287) — OpenAPI-compliant param
+  names над существующим /audit-log.
+- OpenAPI drift sync (#288) — 58 endpoints marked as implemented.
+- Operational triad (#238/#289) — DELETE /admin/cache + POST
+  /admin/reindex + GET /admin/tasks/{id} + admin_tasks foundation.
+- POST /admin/audit-log/export (#239/#290) — admin_tasks-backed
+  task с result_url → existing /audit-log/export.csv.
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -393,10 +400,11 @@ Landed между 2026-05-22 и 2026-05-23 (16 PR'ов):
 Frontend `WEBHOOK_EVENTS` const tuple sync verified через
 `test_events_frontend_sync` drift test.
 
-## CS.9. Admin module foundation (#227+)
+## CS.9. Admin module (#227+) — 2026-05-23
 
-Новый module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed
-в 6 stacked + independent PR'ах:
+Module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed в
+20 endpoint'ах через 13 PR'ов (#227 → #239 + #284, #285, #287, #288,
+#289, #290 — alembic / docs / drift sync).
 
 | Endpoint | PR | RBAC |
 |---|---|---|
@@ -406,16 +414,26 @@ Frontend `WEBHOOK_EVENTS` const tuple sync verified через
 | GET/POST /admin/users + GET/PATCH/DELETE /{id} | #230 | staff_admin |
 | GET/PATCH /admin/security-incidents | #231 | staff_admin |
 | GET/PATCH /admin/personal-data/requests | #232 | staff_admin |
+| GET /admin/audit-log | #237 | staff_admin / staff_legal |
+| DELETE /admin/cache | #238 | staff_admin (honest stub) |
+| POST /admin/reindex | #238 | staff_admin (honest stub) |
+| GET /admin/tasks/{id} | #238 | staff_admin |
+| POST /admin/audit-log/export | #239 | staff_admin / staff_legal |
 
-**Backlog** (требуют design / новой инфраструктуры):
-- PATCH /admin/system-config — runtime config mutation (нужна writable
-  system_config table + merge layer over Settings).
-- /admin/cache, /admin/reindex — operational endpoints (cache layer
-  отсутствует; reindex может trigger через indexer worker).
-- /admin/tasks/{id} — task tracking table.
-- PUT /admin/llm/active — runtime LLM provider switching.
-- /admin/llm/eval-runs — wraps kb-eval CLI; нужен job-tracking table.
-- /admin/audit-log/export (POST) — async export task.
+`admin_tasks` table (#238) — universal async registry с lifecycle
+PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется reindex
+и audit-log export.
+
+**Remaining unimplemented OpenAPI admin endpoints** (4):
+- PATCH /admin/system-config — нужна writable system_config table.
+- PUT /admin/llm/active — runtime provider switching (env vs DB).
+- GET/POST /admin/llm/eval-runs — wraps kb-eval CLI; нужен
+  `eval_runs` table + JSON job tracking.
+
+**Backlog (требует доработки имплементации):**
+- Real `IndexerService.reindex_all_articles` (сейчас #238 — stub).
+- Real async worker для export (сейчас #239 — sync execution).
+- Cache layer (если landит — DELETE /admin/cache wires automatically).
 
 ## CS.10. ФЗ-152 module status (2026-05-22)
 
@@ -432,19 +450,34 @@ Frontend `WEBHOOK_EVENTS` const tuple sync verified через
 ФЗ-152 compliance: ~70% технических мер реализовано или в process'е
 review. Org-tasks (10-15%) — ответственность Архитектора.
 
-## CS.11. Backlog приоритезация (2026-05-22)
+## CS.11. Backlog приоритезация (2026-05-23)
+
+OpenAPI implementation coverage: **93/97 operations** (95.8%) после
+batch'а #237-#239 + drift sync #288. Remaining 4 unimplemented —
+design-needed (system-config mutate / llm/active runtime switch /
+llm/eval-runs job tracking).
 
 Открытые задачи требующие design decision (architect input):
 1. **PATCH /admin/system-config** — runtime mutable config storage.
-2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
-3. **POST /documents create endpoint** — нужен в OpenAPI?
-4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
+   Нужен design: writable settings table + Settings merge layer + reload.
+2. **PUT /admin/llm/active** — runtime LLM provider switching.
+   Дублирует PATCH /admin/system-config; решить за раз.
+3. **GET/POST /admin/llm/eval-runs** — wraps kb-eval CLI; нужен
+   `eval_runs` table + integration с RunEvaluator/Report.
+4. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
+5. **POST /documents create endpoint** — нужен в OpenAPI?
+6. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh).
 2. **Observability — Grafana dashboards + alert rules** — YAML config.
-3. **POST /admin/reindex** — wraps existing indexer trigger.
-4. **POST /admin/cache** — depending on cache layer choice.
+3. **Real `IndexerService.reindex_all_articles`** — wraps existing
+   `index_article` per published article. `POST /admin/reindex` уже
+   landит #238 как stub; upgrade to real execution.
+4. **Real async worker для admin_tasks** — Dramatiq + asyncio job
+   runner; апгрейд `POST /admin/audit-log/export` и `/admin/reindex`
+   с sync на async.
+5. **Frontend admin UI** — для 20 admin endpoints (sessions/lists/forms).
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
