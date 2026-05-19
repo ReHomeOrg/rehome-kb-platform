@@ -138,6 +138,85 @@ class LlmProvidersListResponse(BaseModel):
     data: list[LlmProviderView]
 
 
+# ---------------------------------------------------------------------------
+# System config (#229, OpenAPI 04 §SystemConfig)
+#
+# Read-only projection текущего runtime config'а (Settings) для admin UI.
+# PATCH endpoint deferred: env-based config не mutable at runtime; PATCH
+# требует writable `system_config` table — отдельный PR.
+
+
+class SystemConfigRateLimits(BaseModel):
+    """Rate limit thresholds (per OpenAPI).
+
+    Backend пока не имеет explicit rate-limit config в Settings:
+    `collaborators.onboarding` использует in-memory 5/hour limit, остальные
+    endpoint'ы — без limits. Все поля null до landing'а полноценной
+    rate-limit infrastructure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    guest_per_minute: int | None = None
+    user_per_minute: int | None = None
+    m2m_per_minute: int | None = None
+    chat_messages_per_5min: int | None = None
+
+
+class SystemConfigLlm(BaseModel):
+    """LLM-specific runtime config."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    active_provider: str
+    # `fallback_provider` / `ab_test_split` / `temperature` — null до
+    # landing'а multi-provider routing logic (#258+ stable single-provider
+    # MVP). Backlog: env'ы LLM_FALLBACK_PROVIDER etc.
+    fallback_provider: str | None = None
+    ab_test_split_percent: int | None = None
+    max_context_tokens: int | None = None
+    temperature: float | None = None
+
+
+class SystemConfigModeration(BaseModel):
+    """Moderation thresholds.
+
+    Backend пока не имеет moderation feature (auto-publish queue / human
+    review). Все поля null — будут заполнены когда landит soответствующий
+    эпик.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_publish_threshold: float | None = None
+    require_review_for_categories: list[str] = Field(default_factory=list)
+
+
+class SystemConfigWebhooks(BaseModel):
+    """Webhook delivery config (out of Settings)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_retries: int
+    timeout_seconds: float
+
+
+class SystemConfig(BaseModel):
+    """OpenAPI 04 §SystemConfig — read-only projection текущего runtime
+    config'а из `Settings` + feature-flags."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rate_limits: SystemConfigRateLimits = Field(default_factory=SystemConfigRateLimits)
+    # Feature flags — derived из соответствующих `_enabled` Settings polей.
+    # Subscriber list стабильный: rag_enabled, metrics_enabled,
+    # webhook_worker_enabled, minio_enabled.
+    feature_flags: dict[str, bool] = Field(default_factory=dict)
+    llm_config: SystemConfigLlm
+    moderation: SystemConfigModeration = Field(default_factory=SystemConfigModeration)
+    webhooks: SystemConfigWebhooks
+
+
 __all__ = [
     "AdminStats",
     "AdminStatsChat",
@@ -147,4 +226,9 @@ __all__ = [
     "AdminStatsSecurity",
     "LlmProviderView",
     "LlmProvidersListResponse",
+    "SystemConfig",
+    "SystemConfigLlm",
+    "SystemConfigModeration",
+    "SystemConfigRateLimits",
+    "SystemConfigWebhooks",
 ]
