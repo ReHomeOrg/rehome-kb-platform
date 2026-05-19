@@ -347,30 +347,27 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
 - 24+ Alembic миграций (через 0024_*).
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 7 open PR'ов awaiting review (см. CS.7).
+- 0 open PR'ов (backlog от 2026-05-22 полностью merged; см. CS.7).
 
-## CS.7. Open PR backlog (2026-05-22)
+## CS.7. Open PR backlog (2026-05-23)
 
-Сразу 7 feature/docs branches запушены, ждут review + merge:
+Backlog от 2026-05-22 (17 PR'ов) полностью merged в main, включая
+admin endpoints + ФЗ-152 modules. Текущее состояние: **0 открытых
+PR'ов**. Merge'ы прошли через alembic multi-head fix (#284 + #285)
+для chain'a 0024_* миграций.
 
-| PR branch | Что закрывает | Размер |
-|---|---|---|
-| `feature/220-popular-query-emitter` ... `feature/223-audit-security-event-emitter` | 4 webhook emitter PR'ов: search.popular_query (с aggregator worker), article.updated + premises_card.updated, chat.no_answer, audit.security_event (с articles target-bypass wiring) | 4× S/M |
-| `feature/224-service-orders-lifecycle` | Service Orders MVP — lifecycle only (no payment per memory item 2): 4 endpoints + 5 lifecycle events + state machine | M |
-| `feature/225-collaborators-slice2-lifecycle` | 7 collaborator.* webhook emitters wired (activated/suspended/archived/review.posted/portal_access.changed/onboarding.submitted/created); `actor_sub="staff"` хардкод фикс | M |
-| `feature/226-premises-financial-endpoint` | GET /premises-cards/{id}/financial — financial block для landlord+staff | M |
-| `feature/227-admin-stats-endpoint` → `feature/229-admin-system-config` | Admin chain (3 stacked PRs): /admin/stats, /admin/llm/providers, /admin/system-config (read-only) | 3× S/M |
-| `feature/230-kb-users-crud` | KB staff users registry — 5 endpoints CRUD + UQ email + audit | M |
-| `feature/231-security-incidents-crud` | ФЗ-152 §17.1 incidents registry — 3 endpoints + state machine + РКН notification fields | M |
-| `feature/232-personal-data-requests-crud` | ФЗ-152 §15 SAR — 3 endpoints + 30-day SLA + OVERDUE auto-status helper | M |
-| `feature/234-hr-pii-encryption` | HR Stage 2 — Fernet column-level encryption для 4 ПДн полей (paspport/inn/snils/bank); ADR-0018 implementation | L |
-| `docs/adr-0018-hr-pii-encryption` | ADR-0018 (status: Принято 2026-05-22) | S |
-| `docs/state-of-code-2026-05-22` | Этот refresh | S |
-
-Все PR'ы зелёные локально (mypy strict + ruff + pytest). Merge order
-рекомендован independent → chains: `#225 → #220 → #221 → #222 → #223
-→ #226 → #224 → #227 → #228 → #229 → #230 → #231 → #232 → #234 →
-#235 (docs)`.
+Landed между 2026-05-22 и 2026-05-23 (16 PR'ов):
+- Webhook emitters (#220-#225): popular_query, article.updated,
+  premises_card.updated, chat.no_answer, audit.security_event,
+  7 collaborator.* events.
+- Service Orders (#224, #270): lifecycle MVP (created, cancelled).
+- Premises financial endpoint (#226, #272).
+- KB users CRUD (#230, #276).
+- HR PII encryption Stage 2 (#234, #279) per ADR-0018.
+- Admin chain: stats (#227/#273), llm/providers (#228/#274),
+  system-config (#229/#275), security_incidents CRUD (#231/#277),
+  personal_data_requests CRUD (#232/#278).
+- Alembic merge revisions (#284, #285) — multi-head fixes.
 
 ## CS.8. Webhook event taxonomy — completed
 
