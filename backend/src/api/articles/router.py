@@ -767,9 +767,7 @@ async def patch_article(
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
     # #221 / ТЗ §5.1: fire `article.updated` с granular changed_fields.
     changed_fields = sorted(payload.model_dump(exclude_unset=True).keys())
-    await _dispatch_article_updated(
-        webhook_dispatcher, article, changed_fields=changed_fields
-    )
+    await _dispatch_article_updated(webhook_dispatcher, article, changed_fields=changed_fields)
     await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
 

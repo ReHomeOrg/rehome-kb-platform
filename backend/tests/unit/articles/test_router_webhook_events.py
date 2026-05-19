@@ -239,9 +239,7 @@ def test_patch_multi_field_lists_all_changed(
     assert resp.status_code == 200
     updated = dispatch_mock.await_args_list[0]
     assert updated.kwargs["event_type"] == "article.updated"
-    assert updated.kwargs["payload"]["changed_fields"] == sorted(
-        ["title", "tags", "body_markdown"]
-    )
+    assert updated.kwargs["payload"]["changed_fields"] == sorted(["title", "tags", "body_markdown"])
 
 
 # ---------------------------------------------------------------------------
