@@ -6,6 +6,7 @@ projection / staff-only RBAC. Slug pattern идентичен articles.
 
 import logging
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy.exc import IntegrityError
@@ -21,10 +22,11 @@ from src.api.audit import (
 )
 from src.api.auth.dependency import (
     get_current_access_levels,
+    get_current_scope,
     require_access_level,
     require_authenticated,
 )
-from src.api.auth.scope import AccessLevel
+from src.api.auth.scope import AccessLevel, Scope
 from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
 from src.api.premises.repository import (
@@ -34,6 +36,7 @@ from src.api.premises.repository import (
     get_premises_repository,
 )
 from src.api.premises.schemas import (
+    FinancialBlock,
     PaginationInfo,
     PremisesInput,
     PremisesListResponse,
@@ -80,6 +83,73 @@ async def get_premises_card(
     if card is None:
         raise HTTPException(status_code=404, detail="Premises card not found")
     return project_for_scope(card, access_levels)
+
+
+# ---------------------------------------------------------------------------
+# Financial block (#226, ТЗ §3.5 / §5.2, OpenAPI 04 §FinancialBlock)
+
+
+def _can_view_financial(scope: Scope, access_levels: frozenset[AccessLevel]) -> bool:
+    """Доступ к финансовому блоку — landlord (свои) и staff (ТЗ §3.5).
+
+    Stage 1: ownership-check у landlord'а отсутствует (нет `owner_user_id`
+    FK в premises_cards). Поэтому landlord видит финансовый блок ЛЮБОЙ
+    видимой карточки. Backlog (когда landит kb-users): добавить
+    `owner_user_id` + сравнение с jwt.sub.
+
+    Staff (STAFF/LEGAL/HR) — видят все, как и в `project_for_scope`.
+    """
+    staff_levels = {AccessLevel.STAFF, AccessLevel.LEGAL, AccessLevel.HR_RESTRICTED}
+    if access_levels & staff_levels:
+        return True
+    return scope == Scope.LANDLORD
+
+
+@router.get(
+    "/{premises_id}/financial",
+    response_model=FinancialBlock,
+    summary="Финансовый блок карточки (landlord / staff)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Scope не landlord / staff"},
+        404: {"description": "Карточка не найдена ИЛИ scope не видит её status"},
+    },
+)
+async def get_premises_financial(
+    premises_id: UUID = Path(...),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    scope: Scope = Depends(get_current_scope),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: PremisesRepository = Depends(get_premises_repository),
+) -> FinancialBlock:
+    """`GET /api/v1/premises-cards/{premises_id}/financial` (ТЗ §3.5, ПЗ §5.2).
+
+    Финансовая информация по договору: monthly_rent, contract URLs,
+    payment_history, service_fee (не залог — невозвратный платёж reHome
+    при заезде), insurance policy.
+
+    Auth model:
+    - 401 — нет JWT.
+    - 403 — scope не landlord, не staff (`tenant` / `guest` / `agent`).
+    - 404 — premises не существует ИЛИ scope не видит её status
+      (ADR-0003 anti-enumeration mask).
+
+    Empty `financial_data` JSONB → возвращаем `FinancialBlock` с дефолтными
+    null-полями (frontend нормально handle'ит — карточка без контракта).
+    """
+    if not _can_view_financial(scope, access_levels):
+        raise HTTPException(
+            status_code=403,
+            detail="Финансовый блок доступен только landlord (свои) и staff",
+        )
+
+    card = await repo.get_by_id(premises_id, access_levels)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Premises card not found")
+
+    # `financial_data` — JSONB; FinancialBlock(extra='ignore') tolerates
+    # unknown keys + missing keys (frontend forward-compat).
+    return FinancialBlock.model_validate(card.financial_data or {})
 
 
 @router.get(

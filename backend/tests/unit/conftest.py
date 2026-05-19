@@ -175,6 +175,28 @@ def _no_op_audit_repository() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_op_search_query_log() -> Iterator[None]:
+    """#220: глобальный no-op SearchQueryLogRepository для unit-тестов.
+
+    `POST /api/v1/search` логирует query в DB. В unit-тестах DB нет —
+    подменяем repo на no-op. Тесты, проверяющие сам логгер, делают
+    свой override.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.search.query_log import (
+        SearchQueryLogRepository,
+        get_search_query_log_repository,
+    )
+
+    noop = MagicMock(spec=SearchQueryLogRepository)
+    noop.log = AsyncMock(return_value=None)
+    app.dependency_overrides[get_search_query_log_repository] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_search_query_log_repository, None)
+
+
+@pytest.fixture(autouse=True)
 def _no_op_webhook_dispatcher() -> Iterator[None]:
     """E5.3 #91: глобальный no-op WebhookEventDispatcher для unit-тестов.
 

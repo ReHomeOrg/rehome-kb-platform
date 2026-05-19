@@ -397,3 +397,103 @@ def test_search_passes_query_verbatim(
     assert resp.status_code == 200
     # Query пройден as-is (RetrievalService strip'ает сам если надо).
     assert retrieval_search_mock.call_args.kwargs["query"] == "  как починить кран?  "
+
+
+# ---------------------------------------------------------------------------
+# query log (#220 search.popular_query feed)
+
+
+@pytest.fixture
+def query_log_mock() -> Iterator[AsyncMock]:
+    """Override default no-op query_log fixture с tracking mock."""
+    from src.api.search.query_log import (
+        SearchQueryLogRepository,
+        get_search_query_log_repository,
+    )
+
+    repo_mock = AsyncMock(spec=SearchQueryLogRepository)
+    repo_mock.log = AsyncMock(return_value=None)
+    app.dependency_overrides[get_search_query_log_repository] = lambda: repo_mock
+    yield repo_mock.log
+    app.dependency_overrides.pop(get_search_query_log_repository, None)
+
+
+def test_search_logs_query_with_has_results_true_when_hits(
+    client: TestClient,
+    retrieval_search_mock: AsyncMock,
+    override_retrieval: AsyncMock,
+    query_log_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Hits returned → log с has_results=True."""
+    retrieval_search_mock.return_value = [_hit()]
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/search",
+        json={"query": "сервисный платёж"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    query_log_mock.assert_awaited_once()
+    kwargs = query_log_mock.call_args.kwargs
+    assert kwargs["query"] == "сервисный платёж"
+    assert kwargs["has_results"] is True
+
+
+def test_search_logs_query_with_has_results_false_when_empty(
+    client: TestClient,
+    retrieval_search_mock: AsyncMock,
+    override_retrieval: AsyncMock,
+    query_log_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Нет hits → log с has_results=False (попадает в popular_unanswered aggregator)."""
+    retrieval_search_mock.return_value = []
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/search",
+        json={"query": "тариф несуществующий"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    query_log_mock.assert_awaited_once()
+    assert query_log_mock.call_args.kwargs["has_results"] is False
+
+
+def test_search_logs_query_when_types_filter_returns_early(
+    client: TestClient,
+    retrieval_search_mock: AsyncMock,
+    override_retrieval: AsyncMock,
+    query_log_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """types=['document'] early-return → log тоже выдаёт has_results=False."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/search",
+        json={"query": "иск", "types": ["document"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    query_log_mock.assert_awaited_once()
+    assert query_log_mock.call_args.kwargs["has_results"] is False
+
+
+def test_search_log_failure_does_not_break_response(
+    client: TestClient,
+    retrieval_search_mock: AsyncMock,
+    override_retrieval: AsyncMock,
+    query_log_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Log insert exception swallow'ится — search response ОК."""
+    retrieval_search_mock.return_value = [_hit()]
+    query_log_mock.side_effect = RuntimeError("DB unavailable")
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/search",
+        json={"query": "x"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["data"]) == 1
