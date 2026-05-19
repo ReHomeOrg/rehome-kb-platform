@@ -1,8 +1,13 @@
-"""SQLAlchemy ORM model для HrEmployee (#150, PZ §7).
+"""SQLAlchemy ORM model для HrEmployee (#150, #234, PZ §7).
 
 Stage 1: minimal viable employee card — ФИО, должность, hire/termination
-dates, status, contact info. ПДн (passport / СНИЛС / банковские
-реквизиты) — Stage 2 через kb-vault links или column-level encryption.
+dates, status, contact info.
+
+Stage 2 (#234 / ADR-0018): добавлены 4 encrypted ПДн колонки:
+- `passport_number_encrypted`, `inn_encrypted`, `snils_encrypted`,
+  `bank_account_encrypted` — Fernet-encrypted BYTEA. Plaintext exposed
+  только при scope = HR_RESTRICTED (staff_hr / staff_admin) через
+  router projection layer.
 
 ADR-0003 access: HR_RESTRICTED tier — только staff_hr / staff_admin /
 director видят employee records.
@@ -12,7 +17,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Index, String, func, text
+from sqlalchemy import CheckConstraint, Date, DateTime, Index, LargeBinary, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -48,6 +53,15 @@ class HrEmployee(Base):
     notes: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+
+    # ПДн encrypted columns (ADR-0018 Stage 2). Plaintext НЕ хранится;
+    # decrypt happens в hr/crypto.py поверх HR_ENCRYPTION_KEY (env).
+    # Access — только через scope = HR_RESTRICTED + audit log.
+    passport_number_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    inn_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    snils_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    bank_account_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

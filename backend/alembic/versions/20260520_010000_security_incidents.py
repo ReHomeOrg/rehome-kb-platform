@@ -1,7 +1,7 @@
 """security_incidents — registry security событий (#231, OpenAPI §SecurityIncident)
 
 Revision ID: 0024_security_incidents
-Revises: 0024_merge_heads
+Revises: 0024_hr_pii_encrypted
 Create Date: 2026-05-20 01:00:00.000000
 
 ФЗ-152 §17.1: оператор персональных данных обязан фиксировать
@@ -36,7 +36,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0024_security_incidents"
-down_revision: str | None = "0024_merge_heads"
+down_revision: str | None = "0024_hr_pii_encrypted"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -139,9 +139,7 @@ def upgrade() -> None:
         "ix_security_incidents_rkn_pending",
         "security_incidents",
         ["detected_at"],
-        postgresql_where=sa.text(
-            "rkn_notification_required = true AND rkn_notified_at IS NULL"
-        ),
+        postgresql_where=sa.text("rkn_notification_required = true AND rkn_notified_at IS NULL"),
     )
 
 

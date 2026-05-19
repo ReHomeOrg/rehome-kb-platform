@@ -62,6 +62,79 @@ class PremisesView(BaseModel):
     internal_data: dict[str, Any] | None = None
 
 
+# ---------------------------------------------------------------------------
+# Financial block (#226, OpenAPI 04 §FinancialBlock)
+#
+# Финансовая информация по договору — служит для landlord (свой premises)
+# и staff. ВАЖНО: модель reHome не использует залог (per ПЗ §5.2):
+# сервисный платёж невозвратный, идёт платформе при заезде.
+#
+# MVP: схема — passthrough JSONB shape per OpenAPI; все поля optional
+# для forward-compat (Premises может ещё не иметь contract фронта).
+
+
+_ServiceFeeStatus = Literal["PENDING", "PAID", "FAILED"]
+_PaymentType = Literal["rent", "service_fee", "utilities"]
+_PaymentStatus = Literal["RECEIVED", "RELEASED", "DISPUTED"]
+
+
+class FinancialServiceFee(BaseModel):
+    """Сервисный платёж — невозвратный, идёт reHome платформе."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    amount: float | None = None
+    paid_at: datetime | None = None
+    status: _ServiceFeeStatus | None = None
+    fiscal_receipt_url: str | None = None
+
+
+class FinancialPaymentEntry(BaseModel):
+    """Запись в `payment_history`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    date: str | None = None  # date format per OpenAPI (no datetime)
+    amount: float | None = None
+    type: _PaymentType | None = None
+    status: _PaymentStatus | None = None
+
+
+class FinancialInsurancePolicy(BaseModel):
+    """Полис страхования (опционально)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    number: str | None = None
+    coverage_amount: float | None = None
+    period_end: str | None = None
+    pdf_url: str | None = None
+
+
+class FinancialBlock(BaseModel):
+    """OpenAPI 04 `FinancialBlock` projection (ТЗ §5.2).
+
+    Возвращается через GET /api/v1/premises-cards/{id}/financial.
+    Доступ — landlord (свои) и staff (см. ADR-0003 + ТЗ §3.5).
+
+    Не залог — `service_fee` (см. ПЗ §5.2): невозвратный платёж reHome.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    contract_url: str | None = None
+    contract_start: str | None = None  # date format per OpenAPI
+    contract_end: str | None = None
+    monthly_rent: float | None = None
+    rent_due_day: int | None = Field(default=None, ge=1, le=31)
+    service_fee: FinancialServiceFee | None = None
+    payment_history: list[FinancialPaymentEntry] = Field(default_factory=list)
+    current_debt: float = 0
+    utilities_included: bool | None = None
+    platform_commission_percent: float | None = None
+    insurance_policy: FinancialInsurancePolicy | None = None
+
+
 class PremisesSearchHit(BaseModel):
     """FTS search result hit — identification subset + relevance score."""
 

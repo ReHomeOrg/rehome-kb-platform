@@ -154,6 +154,51 @@ async def get_session_detail(
 _RAG_CHAT_TOP_K = 5
 
 
+async def _maybe_dispatch_no_answer(
+    dispatcher: WebhookEventDispatcher,
+    *,
+    rag_enabled: bool,
+    retrieved_chunks: list[RetrievalHit],
+    session_id: UUID,
+    query: str,
+) -> None:
+    """Fire `chat.no_answer` (ТЗ §5.1) когда RAG не нашёл relevant chunks.
+
+    Fires только если:
+    - `rag_enabled=True` — иначе chat не ожидался grounding'а через KB.
+    - `retrieved_chunks == []` — нет sources для ответа.
+
+    Payload per ТЗ §5.1 — `{session_id, query, retrieved_sources: []}`.
+
+    Privacy note: `query` потенциально содержит ПДн (пользователь мог
+    задать вопрос «как мне расторгнуть договор с Ивановым»). ТЗ явно
+    включает `query` в payload — subscriber'ы (аналитика, KB coverage)
+    обязаны быть в trusted scope (FZ-152 §6). Не logging'уем query в
+    audit_log параллельно — webhook outbox единственный sink.
+
+    Errors swallow'аются (chat не должен fail'ить на webhook side-effect).
+    """
+    if not rag_enabled or retrieved_chunks:
+        return
+    try:
+        await dispatcher.dispatch(
+            event_type="chat.no_answer",
+            payload={
+                "session_id": str(session_id),
+                "query": query,
+                "retrieved_sources": [],
+            },
+        )
+    except Exception:
+        # Defensive — webhook enqueue падать не должен (delivery_repo
+        # сам log'ает swallow'нутые errors), но если упало внутри
+        # subscriber-listing или dispatcher.dispatch — chat не падает.
+        logger.exception(
+            "chat.no_answer.dispatch_failed",
+            extra={"session_id": str(session_id)},
+        )
+
+
 async def _retrieve_chunks_for_rag(
     *,
     enabled: bool,
@@ -287,6 +332,7 @@ async def send_message(
     repo: ChatRepository = Depends(get_chat_repository),
     llm: LLMProvider = Depends(get_llm_provider),
     retrieval: RetrievalService = Depends(get_retrieval_service),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     settings: Settings = Depends(get_settings),
 ) -> ChatMessageResponse | StreamingResponse:
     """`POST /chat/sessions/{id}/messages` — JSON или SSE mode.
@@ -326,6 +372,16 @@ async def send_message(
     )
     system_prompt = build_rag_system_prompt(retrieved_chunks)
     citations = hits_to_citations(retrieved_chunks)
+
+    # #222 / ТЗ §5.1: fire `chat.no_answer` если RAG включён, но не
+    # нашёл relevant chunks — signal для аналитики «нужен content gap fill».
+    await _maybe_dispatch_no_answer(
+        webhook_dispatcher,
+        rag_enabled=settings.rag_enabled,
+        retrieved_chunks=retrieved_chunks,
+        session_id=session_id,
+        query=payload.content,
+    )
 
     if "text/event-stream" in accept.lower():
         # SSE mode (E3.4). Duration observed внутри generator'а в `finally`

@@ -45,14 +45,17 @@ from src.api.audit import (
     ACTION_ARTICLES_UPDATED,
     RESOURCE_ARTICLE,
     AuditRepository,
+    SecurityEventType,
+    SecuritySeverity,
     get_audit_repository,
+    report_security_event,
 )
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_access_level,
     require_authenticated,
 )
-from src.api.auth.exceptions import UnauthorizedError
+from src.api.auth.exceptions import ForbiddenError, UnauthorizedError
 from src.api.auth.scope import AccessLevel
 from src.api.config import get_settings
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
@@ -109,6 +112,45 @@ def _parse_tags(raw: str | None) -> list[str] | None:
     return deduped
 
 
+async def _ensure_write_target_or_report_bypass(
+    *,
+    target: AccessLevel,
+    access_levels: frozenset[AccessLevel],
+    actor_sub: str,
+    slug: str,
+    method: str,
+    dispatcher: WebhookEventDispatcher,
+) -> None:
+    """ADR-0003 target-check + #223 security-event emission.
+
+    Если writer пытается установить target access_level, которого у него
+    самого нет — fire `audit.security_event` (event_type=auth.target_bypass)
+    и propagate'им оригинальный 403. Event эмитится ДО raise — это observable
+    «attempt», даже если HTTP-ответ уйдёт как 403.
+
+    Не пишем в audit_log (он трекает успешные state-changes; неуспешная
+    попытка → отдельный webhook outbox path для SIEM/alerting).
+    """
+    try:
+        ensure_can_write_access_level(target, access_levels)
+    except ForbiddenError:
+        await report_security_event(
+            dispatcher,
+            event_type=SecurityEventType.AUTH_TARGET_BYPASS,
+            severity=SecuritySeverity.WARNING,
+            details={
+                "actor_sub": actor_sub,
+                "method": method,
+                "slug": slug,
+                "target_access_level": target.value,
+                # `current_levels` нужен для post-hoc analysis ("what did
+                # the user have"); sorted чтобы log diff'ы deterministic.
+                "current_access_levels": sorted(level.value for level in access_levels),
+            },
+        )
+        raise
+
+
 async def _maybe_dispatch_article_status_event(
     dispatcher: WebhookEventDispatcher,
     article: Any,
@@ -121,7 +163,8 @@ async def _maybe_dispatch_article_status_event(
     - `old_status != article.status`: fire transition event если новое
       состояние — PUBLISHED или ARCHIVED.
 
-    `article.updated` не fire'им (out of scope — backlog).
+    `article.updated` для любого edit'а — отдельный helper
+    `_dispatch_article_updated` (вызывается из PUT/PATCH рядом с этим).
     """
     new_status = article.status
     if old_status == new_status:
@@ -145,6 +188,40 @@ async def _maybe_dispatch_article_status_event(
                 "archived_at": article.updated_at.isoformat(),
             },
         )
+
+
+async def _dispatch_article_updated(
+    dispatcher: WebhookEventDispatcher,
+    article: Any,
+    *,
+    changed_fields: list[str],
+) -> None:
+    """Fire `article.updated` (ТЗ §5.1) для любого edit'а.
+
+    Ortогонален transitions из `_maybe_dispatch_article_status_event` —
+    subscriber'ы могут подписаться независимо на «изменилось хоть что-то»
+    vs «status вышел в PUBLISHED». В PUT/PATCH вызываются оба helper'а;
+    дублирования не будет, т.к. они dispatch'ат разные event_type.
+
+    `changed_fields` — для PATCH derives from `payload.model_dump(exclude_unset=True)`;
+    для PUT передаём `["full_replacement"]` (PUT semantics — full body
+    replacement, granular diff не tracked'ится дешевле re-fetch'а).
+
+    Empty `changed_fields` — no-op (защита от degenerate PATCH с empty body).
+    """
+    if not changed_fields:
+        return
+    await dispatcher.dispatch(
+        event_type="article.updated",
+        payload={
+            "slug": article.slug,
+            "title": article.title,
+            "access_level": article.access_level,
+            "status": article.status,
+            "changed_fields": changed_fields,
+            "updated_at": article.updated_at.isoformat(),
+        },
+    )
 
 
 async def _maybe_index_article(
@@ -369,7 +446,14 @@ async def create_article(
             headers=idempotency.replay.headers,
         )
 
-    ensure_can_write_access_level(payload.access_level, access_levels)
+    await _ensure_write_target_or_report_bypass(
+        target=payload.access_level,
+        access_levels=access_levels,
+        actor_sub=claims["sub"],
+        slug=payload.slug,
+        method="POST",
+        dispatcher=webhook_dispatcher,
+    )
 
     article = await repo.create(payload, actor_sub=claims["sub"])
 
@@ -469,7 +553,14 @@ async def replace_article(
     # Target check (ADR-0003 Level-2) — ДО source check, чтобы 403 не
     # утекал информацию о существовании. Если 403 — клиент знает только,
     # что target ему недоступен; источник статьи остаётся опаковым.
-    ensure_can_write_access_level(payload.access_level, access_levels)
+    await _ensure_write_target_or_report_bypass(
+        target=payload.access_level,
+        access_levels=access_levels,
+        actor_sub=claims["sub"],
+        slug=slug,
+        method="PUT",
+        dispatcher=webhook_dispatcher,
+    )
 
     updated = await repo.update(
         slug,
@@ -509,6 +600,11 @@ async def replace_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    # #221 / ТЗ §5.1: fire `article.updated` для любого PUT (PUT replaces
+    # body полностью — listим `full_replacement` вместо ложного field-list'а).
+    await _dispatch_article_updated(
+        webhook_dispatcher, article, changed_fields=["full_replacement"]
+    )
     # ADR-0010 #130: RAG indexer.
     await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
@@ -725,6 +821,9 @@ async def patch_article(
     )
     # E5.3 #91: fire matching webhook event на status-перехода.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=old_status)
+    # #221 / ТЗ §5.1: fire `article.updated` с granular changed_fields.
+    changed_fields = sorted(payload.model_dump(exclude_unset=True).keys())
+    await _dispatch_article_updated(webhook_dispatcher, article, changed_fields=changed_fields)
     await _maybe_index_article(indexer, article)
     return ArticleResponse.model_validate(article)
 

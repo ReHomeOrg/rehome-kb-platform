@@ -6,14 +6,17 @@ Alembic autogenerate видит только те таблицы, чьи мод�
 """
 
 from src.api.admin.security_incidents_models import SecurityIncident
+from src.api.admin.users_models import KbUser
 from src.api.articles.models import Article, ArticleVersion
 from src.api.audit.models import AuditLog
 from src.api.categories.models import Category
 from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
 from src.api.collaborators.models import Collaborator, CollaboratorReview, PremisesCollaborator
+from src.api.collaborators.service_orders_models import ServiceOrder
 from src.api.documents.models import Document
 from src.api.idempotency.models import IdempotencyKey
 from src.api.search.models import ArticleEmbedding
+from src.api.search.query_log import SearchQueryLog
 from src.api.webhooks.models import Webhook, WebhookDelivery
 
 __all__ = [
@@ -29,8 +32,11 @@ __all__ = [
     "CollaboratorReview",
     "Document",
     "IdempotencyKey",
+    "KbUser",
     "PremisesCollaborator",
+    "SearchQueryLog",
     "SecurityIncident",
+    "ServiceOrder",
     "Webhook",
     "WebhookDelivery",
 ]
