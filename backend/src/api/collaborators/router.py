@@ -35,7 +35,11 @@ from src.api.audit import (
     AuditRepository,
     get_audit_repository,
 )
-from src.api.auth.dependency import get_current_access_levels, require_access_level
+from src.api.auth.dependency import (
+    get_current_access_levels,
+    require_access_level,
+    require_authenticated,
+)
 from src.api.auth.scope import AccessLevel
 from src.api.collaborators.access import compute_visible_groups, derive_financial_group
 from src.api.collaborators.lifecycle import validate_activation, validate_suspension
@@ -59,6 +63,11 @@ from src.api.collaborators.schemas import (
     SuspendRequest,
 )
 from src.api.db import get_session
+from src.api.webhooks.dispatcher import (
+    WebhookEventDispatcher,
+    get_webhook_event_dispatcher,
+)
+from src.api.webhooks.events import WebhookEvent
 
 router = APIRouter(prefix="/collaborators", tags=["Collaborators"])
 
@@ -88,6 +97,34 @@ StatusPath = Literal["DRAFT", "PENDING_REVIEW", "ACTIVE", "SUSPENDED", "ARCHIVED
 def _has_staff_scope(access_levels: frozenset[AccessLevel]) -> bool:
     """Helper: scope-set содержит STAFF/LEGAL/HR — может видеть internal-данные."""
     return bool(access_levels & {AccessLevel.STAFF, AccessLevel.LEGAL, AccessLevel.HR_RESTRICTED})
+
+
+async def _dispatch_lifecycle_event(
+    dispatcher: WebhookEventDispatcher,
+    *,
+    event: WebhookEvent,
+    collaborator: Collaborator,
+    extras: dict[str, Any] | None = None,
+) -> None:
+    """Fire collaborator.* webhook event (#225, ТЗ §5.1).
+
+    Минимальный payload — `id` + `type` + `financial_group` + `status` +
+    `updated_at`. Имена / контакты / ИНН — НЕ в payload (subscriber'ы
+    могут быть external; ФЗ-152 invariant: ПДн только в STAFF-scope read).
+
+    Errors swallow'аются — webhook dispatch не должен fail'ить
+    business operation (audit log уже записан в той же транзакции).
+    """
+    payload: dict[str, Any] = {
+        "id": str(collaborator.id),
+        "type": collaborator.type,
+        "financial_group": collaborator.financial_group,
+        "status": collaborator.status,
+        "updated_at": collaborator.updated_at.isoformat(),
+    }
+    if extras:
+        payload.update(extras)
+    await dispatcher.dispatch(event_type=event.value, payload=payload)
 
 
 def _serialize_for_scope(
@@ -181,12 +218,13 @@ async def get_collaborator(
 )
 async def create_collaborator(
     payload: CollaboratorCreate,
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
-    _claims: dict[str, Any] = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
     """`POST /api/v1/collaborators` — STAFF-only.
 
@@ -223,7 +261,7 @@ async def create_collaborator(
     )
     await repo.create(c)
 
-    actor_sub = "staff"  # TODO Slice 2: extract from JWT properly
+    actor_sub = str(claims.get("sub", "unknown"))
     await audit.record(
         actor_sub=actor_sub,
         action=ACTION_COLLABORATOR_CREATED,
@@ -236,6 +274,11 @@ async def create_collaborator(
         },
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.created` webhook event.
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher, event=WebhookEvent.COLLABORATOR_CREATED, collaborator=c
+    )
 
     # STAFF+ always gets Internal/Admin variant (inherits Public).
     return _serialize_for_scope(c, access_levels)
@@ -253,6 +296,7 @@ async def create_collaborator(
 async def patch_collaborator(
     payload: CollaboratorPatch,
     collaborator_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
@@ -271,7 +315,7 @@ async def patch_collaborator(
     await repo.update_fields(c, updates)
 
     await audit.record(
-        actor_sub="staff",
+        actor_sub=str(claims.get("sub", "unknown")),
         action=ACTION_COLLABORATOR_UPDATED,
         resource_type=RESOURCE_COLLABORATOR,
         resource_id=str(c.id),
@@ -294,11 +338,13 @@ async def patch_collaborator(
 )
 async def archive_collaborator(
     collaborator_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> None:
     """`DELETE /api/v1/collaborators/{id}` — soft delete → ARCHIVED."""
     allowed_groups = compute_visible_groups(access_levels)
@@ -310,13 +356,21 @@ async def archive_collaborator(
     await repo.archive(c)
 
     await audit.record(
-        actor_sub="staff",
+        actor_sub=str(claims.get("sub", "unknown")),
         action=ACTION_COLLABORATOR_ARCHIVED,
         resource_type=RESOURCE_COLLABORATOR,
         resource_id=str(c.id),
         metadata={"previous_status": previous_status},
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.archived`.
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher,
+        event=WebhookEvent.COLLABORATOR_ARCHIVED,
+        collaborator=c,
+        extras={"previous_status": previous_status},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +389,13 @@ async def archive_collaborator(
 )
 async def activate_collaborator(
     collaborator_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
     """`POST /api/v1/collaborators/{id}/activate` (ТЗ §3.10.2).
 
@@ -377,13 +433,21 @@ async def activate_collaborator(
     await repo.update_fields(c, {"status": "ACTIVE"})
 
     await audit.record(
-        actor_sub="staff",
+        actor_sub=str(claims.get("sub", "unknown")),
         action=ACTION_COLLABORATOR_ACTIVATED,
         resource_type=RESOURCE_COLLABORATOR,
         resource_id=str(c.id),
         metadata={"previous_status": previous_status},
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.activated`.
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher,
+        event=WebhookEvent.COLLABORATOR_ACTIVATED,
+        collaborator=c,
+        extras={"previous_status": previous_status},
+    )
     return _serialize_for_scope(c, access_levels)
 
 
@@ -400,11 +464,13 @@ async def activate_collaborator(
 async def suspend_collaborator(
     payload: SuspendRequest,
     collaborator_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
     """`POST /api/v1/collaborators/{id}/suspend` (ТЗ §3.10.2).
 
@@ -430,7 +496,7 @@ async def suspend_collaborator(
     await repo.update_fields(c, {"status": "SUSPENDED"})
 
     await audit.record(
-        actor_sub="staff",
+        actor_sub=str(claims.get("sub", "unknown")),
         action=ACTION_COLLABORATOR_SUSPENDED,
         resource_type=RESOURCE_COLLABORATOR,
         resource_id=str(c.id),
@@ -441,6 +507,18 @@ async def suspend_collaborator(
         },
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.suspended`.
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher,
+        event=WebhookEvent.COLLABORATOR_SUSPENDED,
+        collaborator=c,
+        extras={
+            "previous_status": previous_status,
+            "reason": payload.reason,
+            "until": payload.until,
+        },
+    )
     return _serialize_for_scope(c, access_levels)
 
 
@@ -465,6 +543,7 @@ async def onboard_collaborator(
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> OnboardingResponse:
     """`POST /api/v1/collaborators/onboarding` — public form (ADR-0015 §6).
 
@@ -530,6 +609,18 @@ async def onboard_collaborator(
     )
     await session.commit()
 
+    # #225 / ТЗ §5.1: fire `collaborator.onboarding.submitted`. Payload не
+    # содержит ИНН / контакты — anti-PII (subscriber может быть external).
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher,
+        event=WebhookEvent.COLLABORATOR_ONBOARDING_SUBMITTED,
+        collaborator=c,
+        extras={
+            "source": "form",
+            "portal_access_requested": payload.portal_access_level_requested,
+        },
+    )
+
     return OnboardingResponse(
         id=c.id,
         status="PENDING_REVIEW",
@@ -557,11 +648,13 @@ _LEVEL_ORDER = {"NONE": 0, "LIGHT": 1, "FULL": 2}
 async def change_portal_access(
     payload: PortalAccessChangeRequest,
     collaborator_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
     _staff: None = Depends(require_access_level(AccessLevel.STAFF)),
     repo: CollaboratorRepository = Depends(get_collaborator_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
 ) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
     """`PUT /api/v1/collaborators/{id}/portal-access` (ТЗ §10.8.1).
 
@@ -612,11 +705,23 @@ async def change_portal_access(
     )
 
     await audit.record(
-        actor_sub="staff",
+        actor_sub=str(claims.get("sub", "unknown")),
         action=ACTION_COLLABORATOR_PORTAL_ACCESS_CHANGED,
         resource_type=RESOURCE_COLLABORATOR,
         resource_id=str(c.id),
         metadata={"from": current, "to": target, "reason": payload.reason},
     )
     await session.commit()
+
+    # #225 / ТЗ §5.1: fire `collaborator.portal_access.changed`.
+    await _dispatch_lifecycle_event(
+        webhook_dispatcher,
+        event=WebhookEvent.COLLABORATOR_PORTAL_ACCESS_CHANGED,
+        collaborator=c,
+        extras={
+            "from": current,
+            "to": target,
+            "reason": payload.reason,
+        },
+    )
     return _serialize_for_scope(c, access_levels)
