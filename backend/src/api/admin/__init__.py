@@ -8,10 +8,12 @@ landing'ится incremental по мере merge'а PR'ов:
 - #230: kb_users CRUD (5 endpoints)
 - #231: security_incidents CRUD (list/get/update)
 - #232: personal_data_requests CRUD (list/get/process)
+- #237: GET /admin/audit-log (alias surface для /audit-log с
+  OpenAPI-compliant param names)
 
 Backlog (отдельные PR'ы):
 - PATCH /admin/system-config (runtime config storage)
 - PUT /admin/llm/active + /admin/llm/eval-runs
 - /admin/cache + reindex + tasks/{id}
-- /admin/audit-log + export (alias /api/v1/audit-log)
+- POST /admin/audit-log/export (async task)
 """

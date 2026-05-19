@@ -1527,6 +1527,8 @@ paths:
 
         '
       operationId: getAuditLog
+      x-implementation-status: implemented
+      x-implementation-pr: 237
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - name: actor_id
