@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { listKbUsers } from "./admin-users";
+import {
+  deactivateKbUser,
+  getKbUser,
+  listKbUsers,
+  patchKbUser,
+} from "./admin-users";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -61,5 +66,45 @@ describe("admin-users API", () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0].role).toBe("staff_admin");
     expect(result.data[0].mfa_enabled).toBe(true);
+  });
+});
+
+describe("getKbUser", () => {
+  afterEach(() => apiFetchMock.mockReset());
+  it("calls expected URL", async () => {
+    apiFetchMock.mockResolvedValueOnce({ id: "x" });
+    await getKbUser("abc-123");
+    expect(apiFetchMock).toHaveBeenCalledWith("/api/v1/admin/users/abc-123");
+  });
+});
+
+describe("patchKbUser", () => {
+  afterEach(() => apiFetchMock.mockReset());
+  it("sends PATCH with JSON body", async () => {
+    apiFetchMock.mockResolvedValueOnce({});
+    await patchKbUser("abc", {
+      role: "staff_legal",
+      status: "SUSPENDED",
+      permissions: ["read.audit"],
+    });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/users/abc",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toContain('"role":"staff_legal"');
+    expect(call.body).toContain('"permissions":["read.audit"]');
+  });
+});
+
+describe("deactivateKbUser", () => {
+  afterEach(() => apiFetchMock.mockReset());
+  it("sends DELETE", async () => {
+    apiFetchMock.mockResolvedValueOnce(undefined);
+    await deactivateKbUser("abc");
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/users/abc",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
