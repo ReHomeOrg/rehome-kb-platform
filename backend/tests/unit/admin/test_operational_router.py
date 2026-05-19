@@ -216,6 +216,106 @@ def test_reindex_with_explicit_scope(
     assert task_repo_mock["create"].call_args.kwargs["params"] == {"scope": "articles"}
 
 
+def test_reindex_calls_indexer_for_articles_scope(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+    audit_repo_mock: AsyncMock,
+) -> None:
+    """scope=articles → IndexerService.reindex_all_articles вызывается (#240)."""
+    from unittest.mock import MagicMock
+
+    from src.api.search.indexer import IndexerService, ReindexResult, get_indexer_service
+
+    indexer = MagicMock(spec=IndexerService)
+    indexer.reindex_all_articles = AsyncMock(
+        return_value=ReindexResult(articles_processed=5, chunks_total=15, errors_total=0)
+    )
+    app.dependency_overrides[get_indexer_service] = lambda: indexer
+
+    try:
+        task = _make_task()
+        task_repo_mock["create"].return_value = task
+
+        token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+        resp = client.post(
+            "/api/v1/admin/reindex",
+            json={"scope": "articles"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 202
+        indexer.reindex_all_articles.assert_awaited_once()
+        task_repo_mock["mark_completed"].assert_awaited_once_with(task.id)
+        task_repo_mock["mark_failed"].assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_indexer_service, None)
+
+
+def test_reindex_documents_scope_skips_indexer(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+    audit_repo_mock: AsyncMock,
+) -> None:
+    """scope=documents — honest stub (no document indexer); task COMPLETED без indexer call."""
+    from unittest.mock import MagicMock
+
+    from src.api.search.indexer import IndexerService, get_indexer_service
+
+    indexer = MagicMock(spec=IndexerService)
+    indexer.reindex_all_articles = AsyncMock()
+    app.dependency_overrides[get_indexer_service] = lambda: indexer
+
+    try:
+        task = _make_task()
+        task_repo_mock["create"].return_value = task
+
+        token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+        resp = client.post(
+            "/api/v1/admin/reindex",
+            json={"scope": "documents"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 202
+        indexer.reindex_all_articles.assert_not_awaited()
+        task_repo_mock["mark_completed"].assert_awaited_once_with(task.id)
+    finally:
+        app.dependency_overrides.pop(get_indexer_service, None)
+
+
+def test_reindex_all_zero_processed_with_errors_returns_500(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+    audit_repo_mock: AsyncMock,
+) -> None:
+    """Catastrophic failure path: 0 processed + errors > 0 → 500 + mark_failed."""
+    from unittest.mock import MagicMock
+
+    from src.api.search.indexer import IndexerService, ReindexResult, get_indexer_service
+
+    indexer = MagicMock(spec=IndexerService)
+    indexer.reindex_all_articles = AsyncMock(
+        return_value=ReindexResult(articles_processed=0, chunks_total=0, errors_total=3)
+    )
+    app.dependency_overrides[get_indexer_service] = lambda: indexer
+
+    try:
+        task = _make_task()
+        task_repo_mock["create"].return_value = task
+
+        token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+        resp = client.post(
+            "/api/v1/admin/reindex",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 500
+        task_repo_mock["mark_failed"].assert_awaited_once()
+        task_repo_mock["mark_completed"].assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_indexer_service, None)
+
+
 def test_reindex_invalid_scope_returns_422(
     client: TestClient,
     make_jwt: Callable[..., str],

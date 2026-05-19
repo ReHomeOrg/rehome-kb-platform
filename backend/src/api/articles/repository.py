@@ -8,6 +8,7 @@ router'ы не имеют права работать напрямую с AsyncS
 от обхода фильтрации в обход type-system.
 """
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 from uuid import UUID
 
@@ -602,6 +603,43 @@ class ArticleRepository:
         rows = [(row[0], row[1], row[2], float(row[3])) for row in result.all()]
         has_more = len(rows) > limit
         return rows[:limit], has_more
+
+    async def iter_published_for_reindex(
+        self,
+        *,
+        batch_size: int = 50,
+    ) -> AsyncIterator[tuple[UUID, str]]:
+        """Async iterator (id, body_markdown) для bulk reindex (#240).
+
+        НЕ применяет access_level фильтр — embeddings индексируют всё
+        published, search-time фильтрация всё равно режет по scope.
+
+        Batch'и keyset'ом по `(id ASC)` — простое continue-on-(id > last).
+        Memory-bounded: за раз в памяти не более `batch_size` строк.
+
+        Используется `IndexerService.reindex_all_articles` для admin
+        reindex endpoint'а (#238). Возвращает только PUBLISHED — ARCHIVED
+        embeddings не возрождаются.
+        """
+        last_id: UUID | None = None
+        while True:
+            stmt = (
+                select(Article.id, Article.body_markdown)
+                .where(Article.status == "PUBLISHED")
+                .order_by(Article.id)
+                .limit(batch_size)
+            )
+            if last_id is not None:
+                stmt = stmt.where(Article.id > last_id)
+            result = await self._session.execute(stmt)
+            rows = list(result.all())
+            if not rows:
+                return
+            for row_id, body in rows:
+                yield (row_id, body)
+            last_id = rows[-1][0]
+            if len(rows) < batch_size:
+                return
 
 
 def get_article_repository(

@@ -1,7 +1,8 @@
 """Unit tests for IndexerService (#130)."""
 
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -131,3 +132,75 @@ async def test_remove_article_swallows_errors() -> None:
     indexer = IndexerService(repo, MockEmbeddingProvider())
     n = await indexer.remove_article(uuid4())
     assert n == 0
+
+
+# ---------------------------------------------------------------------------
+# reindex_all_articles (#240)
+
+
+async def _aiter(items: list[tuple[UUID, str]]) -> AsyncIterator[tuple[UUID, str]]:
+    for it in items:
+        yield it
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_empty_iter_zero_result() -> None:
+    indexer, _, _ = _make_indexer()
+    result = await indexer.reindex_all_articles(_aiter([]))
+    assert result.articles_processed == 0
+    assert result.chunks_total == 0
+    assert result.errors_total == 0
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_processes_each_article() -> None:
+    """3 articles → indexer.index_article called 3 раза."""
+    indexer, repo, _ = _make_indexer(upsert_returns=2)
+    articles = [(uuid4(), f"body-{i}") for i in range(3)]
+    result = await indexer.reindex_all_articles(_aiter(articles))
+    assert result.articles_processed == 3
+    # Each article → 2 chunks (per upsert_returns).
+    assert result.chunks_total == 6
+    assert result.errors_total == 0
+    assert repo.upsert.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_continues_on_per_article_error() -> None:
+    """Per-article failure swallowed by index_article; bulk не falls."""
+    # Provider raises на embed — index_article logs+returns 0.
+    indexer, _, _ = _make_indexer(provider_raises=RuntimeError("embed fail"))
+    articles = [(uuid4(), "body") for _ in range(2)]
+    result = await indexer.reindex_all_articles(_aiter(articles))
+    # `index_article` swallowed error → returned 0 chunks, no error visible.
+    assert result.articles_processed == 2
+    assert result.chunks_total == 0
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_progress_callback_called() -> None:
+    """on_progress invocations match processed count."""
+    indexer, _, _ = _make_indexer(upsert_returns=1)
+    progress_calls: list[tuple[int, int]] = []
+
+    async def cb(processed: int, last_count: int) -> None:
+        progress_calls.append((processed, last_count))
+
+    articles = [(uuid4(), "body") for _ in range(3)]
+    await indexer.reindex_all_articles(_aiter(articles), on_progress=cb)
+    assert len(progress_calls) == 3
+    assert progress_calls[-1][0] == 3
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_progress_callback_errors_swallowed() -> None:
+    """Bad callback не должен fail'ить bulk operation."""
+    indexer, _, _ = _make_indexer(upsert_returns=1)
+
+    async def bad_cb(processed: int, last_count: int) -> None:
+        raise RuntimeError("callback broken")
+
+    articles = [(uuid4(), "body") for _ in range(2)]
+    result = await indexer.reindex_all_articles(_aiter(articles), on_progress=bad_cb)
+    # Bulk завершилось normally несмотря на bad callback.
+    assert result.articles_processed == 2

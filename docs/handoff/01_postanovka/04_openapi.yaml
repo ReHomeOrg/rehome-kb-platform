@@ -2138,8 +2138,8 @@ paths:
         '
       operationId: reindexContent
       x-implementation-status: implemented
-      x-implementation-pr: 238
-      x-implementation-note: task tracking landed; real reindex logic — backlog
+      x-implementation-pr: 240
+      x-implementation-note: real reindex for articles scope; sync execution
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:

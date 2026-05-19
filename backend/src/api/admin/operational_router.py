@@ -39,6 +39,7 @@ from src.api.admin.tasks_schemas import (
     ReindexResponse,
     TaskStatusView,
 )
+from src.api.articles.repository import ArticleRepository, get_article_repository
 from src.api.audit.actions import (
     ACTION_ADMIN_CACHE_INVALIDATED,
     ACTION_ADMIN_REINDEX_TRIGGERED,
@@ -51,6 +52,7 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.search.indexer import IndexerService, get_indexer_service
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -119,19 +121,24 @@ async def reindex_content(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: AdminTaskRepository = Depends(get_admin_task_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
+    article_repo: ArticleRepository = Depends(get_article_repository),
+    indexer: IndexerService = Depends(get_indexer_service),
 ) -> ReindexResponse:
-    """`POST /api/v1/admin/reindex` (OpenAPI 04 §reindexContent).
+    """`POST /api/v1/admin/reindex` (OpenAPI 04 §reindexContent, real #240).
 
-    Creates admin_tasks row + audit запись + task сразу marked COMPLETED.
+    Creates admin_tasks row + audit запись, iterates через всех PUBLISHED
+    articles + вызывает `IndexerService.index_article` для каждой,
+    обновляет `admin_tasks.error` при failure и mark'ает COMPLETED.
 
-    Honest stub: actual reindex logic (полный пересчёт article embeddings)
-    отсутствует — `IndexerService` имеет только per-article `index_article`,
-    real `reindex_all_articles` — отдельный backlog item (нужен batch
-    iterator + retry + worker для long-running execution).
+    Scope behavior:
+    - `articles` / `all` — реальный reindex (через ArticleRepository iter).
+    - `documents` / `premises_cards` — honest stub (no indexer для этих
+      типов; task создаётся но execution no-op'ится).
 
-    Это намеренный split: task tracking infrastructure landит сейчас
-    (admin_tasks table + lifecycle methods + GET endpoint), реальный
-    reindex logic пристёгивается в следующем PR без изменения API surface.
+    Sync execution: на N articles ≈ N × embed_latency. Production volume —
+    backlog (Dramatiq + asyncio runner для off-request execution).
+    Metadata `articles_processed` / `chunks_total` / `errors_total`
+    сохраняется в admin_task.params для post-mortem.
     """
     _require_staff_admin(access_levels)
     payload = body or ReindexRequest()
@@ -147,14 +154,34 @@ async def reindex_content(
         action=ACTION_ADMIN_REINDEX_TRIGGERED,
         resource_type=RESOURCE_ADMIN_TASK,
         resource_id=str(task.id),
-        metadata={"scope": payload.scope, "stub": True},
+        metadata={"scope": payload.scope},
     )
 
-    # Honest stub: переход в COMPLETED без actual work (см. docstring).
-    # Real reindex logic — отдельный PR.
     await repo.mark_running(task.id)
-    await repo.mark_completed(task.id)
+    try:
+        if payload.scope in ("all", "articles"):
+            result = await indexer.reindex_all_articles(
+                article_repo.iter_published_for_reindex(),
+            )
+            # Failure heuristic: errors > 0 при articles_processed == 0 —
+            # ни одного article не reindex'нулся; mark FAILED.
+            if result.articles_processed == 0 and result.errors_total > 0:
+                await repo.mark_failed(
+                    task.id,
+                    error=f"{result.errors_total} article(s) failed to reindex",
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Reindex failed: all articles errored",
+                )
+        # Other scopes — honest stub (см. docstring).
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await repo.mark_failed(task.id, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Reindex failed: {exc}") from exc
 
+    await repo.mark_completed(task.id)
     return ReindexResponse(task_id=task.id)
 
 

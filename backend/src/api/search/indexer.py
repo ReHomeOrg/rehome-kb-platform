@@ -25,6 +25,8 @@ access_level. См. `repository.py` docstring.
 """
 
 import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends
@@ -35,6 +37,18 @@ from src.api.search.embeddings import EmbeddingProvider
 from src.api.search.repository import EmbeddingRepository, get_embedding_repository
 
 logger = logging.getLogger(__name__)
+
+# Callback (processed_count, last_indexed_chunks) — для progress reporting.
+ProgressCallback = Callable[[int, int], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ReindexResult:
+    """Result of `IndexerService.reindex_all_articles` (#240)."""
+
+    articles_processed: int
+    chunks_total: int
+    errors_total: int
 
 
 class IndexerService:
@@ -148,6 +162,62 @@ class IndexerService:
         except Exception:
             logger.exception("indexer.remove_failed", extra={"slug": slug})
             return 0
+
+    async def reindex_all_articles(
+        self,
+        article_iter: AsyncIterator[tuple[UUID, str]],
+        *,
+        on_progress: ProgressCallback | None = None,
+    ) -> ReindexResult:
+        """Iterate over all PUBLISHED articles + reindex каждую (#240).
+
+        Caller-supplied async iterator (typically
+        `ArticleRepository.iter_published_for_reindex`) — keep IndexerService
+        free от ArticleRepository import cycle.
+
+        Per-article failures swallowed inside `index_article` (already
+        logs); reindex_all считает chunks_total / errors_total и продолжает.
+
+        `on_progress(processed, last_indexed_count)` — optional callback
+        для admin_task progress update'ов. Если raise — пропадает (we
+        don't fail bulk operation на progress reporter glitch).
+
+        Sync execution: на N articles стоимость ~ N × embed_latency_ms.
+        В dev/CI обычно < 100 articles → 5s OK. Production volume —
+        backlog (Dramatiq worker для off-request execution).
+        """
+        articles_processed = 0
+        chunks_total = 0
+        errors_total = 0
+        async for article_id, body in article_iter:
+            try:
+                n = await self.index_article(article_id=article_id, body_markdown=body)
+                chunks_total += n
+            except Exception:
+                logger.exception(
+                    "indexer.reindex_all.per_article_failed",
+                    extra={"article_id": str(article_id)},
+                )
+                errors_total += 1
+            articles_processed += 1
+            if on_progress is not None:
+                try:
+                    await on_progress(articles_processed, n if errors_total == 0 else 0)
+                except Exception:
+                    logger.exception("indexer.reindex_all.progress_callback_failed")
+        logger.info(
+            "indexer.reindex_all.completed",
+            extra={
+                "articles_processed": articles_processed,
+                "chunks_total": chunks_total,
+                "errors_total": errors_total,
+            },
+        )
+        return ReindexResult(
+            articles_processed=articles_processed,
+            chunks_total=chunks_total,
+            errors_total=errors_total,
+        )
 
 
 def get_indexer_service(
