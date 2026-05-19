@@ -349,9 +349,9 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
 - 0 open PR'ов (backlog от 2026-05-22 полностью merged; см. CS.7).
 
-## CS.7. Recent PRs (2026-05-23 evening)
+## CS.7. Recent PRs (2026-05-23)
 
-22 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+26 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
 **0 открытых PR'ов**.
 
 Daytime batch (16 PR'ов):
@@ -367,7 +367,7 @@ Daytime batch (16 PR'ов):
   personal_data_requests CRUD (#232/#278).
 - Alembic merge revisions (#284, #285) — multi-head fixes.
 
-Evening batch (5 PR'ов):
+Evening batch (10 PR'ов):
 - GET /admin/audit-log alias (#237/#287) — OpenAPI-compliant param
   names над существующим /audit-log.
 - OpenAPI drift sync (#288) — 58 endpoints marked as implemented.
@@ -375,6 +375,12 @@ Evening batch (5 PR'ов):
   /admin/reindex + GET /admin/tasks/{id} + admin_tasks foundation.
 - POST /admin/audit-log/export (#239/#290) — admin_tasks-backed
   task с result_url → existing /audit-log/export.csv.
+- State-of-code refreshes (#286, #291).
+- Real reindex implementation (#240/#292) — replaces #238 honest stub;
+  ArticleRepository.iter_published_for_reindex + IndexerService
+  .reindex_all_articles + sync execution в request.
+- Prometheus alert rules + observability docs (#241/#293) — 14 alerts
+  across 8 groups; catalog of 30 backend metrics.
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -416,7 +422,7 @@ Module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed в
 | GET/PATCH /admin/personal-data/requests | #232 | staff_admin |
 | GET /admin/audit-log | #237 | staff_admin / staff_legal |
 | DELETE /admin/cache | #238 | staff_admin (honest stub) |
-| POST /admin/reindex | #238 | staff_admin (honest stub) |
+| POST /admin/reindex | #240 | staff_admin (real for `articles` scope) |
 | GET /admin/tasks/{id} | #238 | staff_admin |
 | POST /admin/audit-log/export | #239 | staff_admin / staff_legal |
 
@@ -431,9 +437,10 @@ PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется rei
   `eval_runs` table + JSON job tracking.
 
 **Backlog (требует доработки имплементации):**
-- Real `IndexerService.reindex_all_articles` (сейчас #238 — stub).
-- Real async worker для export (сейчас #239 — sync execution).
-- Cache layer (если landит — DELETE /admin/cache wires automatically).
+- Real async worker для admin_tasks (Dramatiq + Redis ADR'a) — сейчас
+  reindex / export выполняются sync в request (acceptable на dev
+  volumes, не production-scale).
+- Cache layer (если landit — DELETE /admin/cache wires automatically).
 
 ## CS.10. ФЗ-152 module status (2026-05-22)
 
@@ -470,14 +477,14 @@ llm/eval-runs job tracking).
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh).
-2. **Observability — Grafana dashboards + alert rules** — YAML config.
-3. **Real `IndexerService.reindex_all_articles`** — wraps existing
-   `index_article` per published article. `POST /admin/reindex` уже
-   landит #238 как stub; upgrade to real execution.
-4. **Real async worker для admin_tasks** — Dramatiq + asyncio job
-   runner; апгрейд `POST /admin/audit-log/export` и `/admin/reindex`
-   с sync на async.
+2. **Grafana dashboards** — JSON configs для существующих метрик
+   (alert rules уже landит в #241/#293; dashboards — companion).
+3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
+4. **Real async worker для admin_tasks** — нужен Redis ADR (если
+   Dramatiq) либо чистый asyncio.create_task (lost-on-restart caveat).
 5. **Frontend admin UI** — для 20 admin endpoints (sessions/lists/forms).
+6. **POST/GET /admin/llm/eval-runs** — wraps eval CLI; storage design
+   (admin_tasks JSONB vs separate eval_runs table).
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
