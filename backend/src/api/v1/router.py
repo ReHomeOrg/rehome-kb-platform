@@ -10,6 +10,9 @@ premises-cards, chat и т.д.) добавляются через
 from fastapi import APIRouter
 
 from src.api.admin.router import router as admin_router
+from src.api.admin.security_incidents_router import (
+    router as admin_security_incidents_router,
+)
 from src.api.admin.users_router import router as admin_users_router
 from src.api.articles.router import router as articles_router
 from src.api.audit.router import router as audit_router
@@ -50,3 +53,4 @@ router.include_router(vault_router)
 router.include_router(webhooks_router)
 router.include_router(admin_router)
 router.include_router(admin_users_router)
+router.include_router(admin_security_incidents_router)
