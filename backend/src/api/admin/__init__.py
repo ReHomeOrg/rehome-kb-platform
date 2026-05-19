@@ -12,10 +12,12 @@ landing'ится incremental по мере merge'а PR'ов:
   OpenAPI-compliant param names)
 - #238: DELETE /admin/cache + POST /admin/reindex + GET /admin/tasks/{id}
   (operational triad + admin_tasks foundation; reindex — honest stub)
+- #239: POST /admin/audit-log/export (admin_tasks-backed task с
+  result_url → existing /audit-log/export.csv)
 
 Backlog (отдельные PR'ы):
 - PATCH /admin/system-config (runtime config storage)
 - PUT /admin/llm/active + /admin/llm/eval-runs
 - Real reindex logic (IndexerService.reindex_all_articles)
-- POST /admin/audit-log/export (async task через admin_tasks)
+- Real async worker для export (сейчас sync-completion)
 """

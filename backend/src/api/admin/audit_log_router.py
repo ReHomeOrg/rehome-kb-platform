@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -39,6 +40,18 @@ from src.api.admin.audit_log_schemas import (
     AdminAuditLogSeverity,
     AuditLogEntryView,
 )
+from src.api.admin.tasks_repository import (
+    AdminTaskRepository,
+    get_admin_task_repository,
+)
+from src.api.admin.tasks_schemas import (
+    AuditLogExportRequest,
+    AuditLogExportResponse,
+)
+from src.api.audit.actions import (
+    ACTION_ADMIN_AUDIT_LOG_EXPORTED,
+    RESOURCE_ADMIN_TASK,
+)
 from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
@@ -47,6 +60,12 @@ from src.api.auth.dependency import (
 from src.api.auth.scope import AccessLevel
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+# Allowed filter keys для /audit-log/export.csv URL builder'а.
+# Любые другие keys в `filters` body отбрасываются (anti-injection в URL).
+_ALLOWED_EXPORT_FILTER_KEYS: frozenset[str] = frozenset(
+    {"actor_sub", "resource_type", "resource_id", "action", "q"}
+)
 
 # Hard cap per OpenAPI spec (`limit: maximum: 500`).
 _MAX_LIMIT = 500
@@ -164,6 +183,101 @@ async def get_admin_audit_log(
             total_estimate=offset + len(visible) + (1 if has_more else 0),
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/audit-log/export (#239, OpenAPI 04 §exportAuditLog)
+
+
+def _build_export_url(payload: AuditLogExportRequest) -> str:
+    """Build result_url poking at существующий /audit-log/export.csv.
+
+    Reuses сейчас же реализованный CSV endpoint (LEGAL gated) — frontend
+    fetches result_url с тем же auth. Альтернатива (хранить blob в
+    admin_tasks) — backlog когда landит async-real worker; на текущем
+    sync-execution это excess complexity.
+
+    Only `csv` format поддерживается — JSON export endpoint backlog'ом.
+    Спецификация (format=json) принимается но result_url всё равно
+    указывает на csv endpoint; admin UI должен handle отображение.
+    """
+    params: dict[str, str] = {
+        "since": payload.from_.isoformat(),
+        "until": payload.to.isoformat(),
+    }
+    # Whitelist filter keys (см. _ALLOWED_EXPORT_FILTER_KEYS).
+    for key, value in payload.filters.items():
+        if key in _ALLOWED_EXPORT_FILTER_KEYS and value:
+            params[key] = value
+    return f"/api/v1/audit-log/export.csv?{urlencode(params)}"
+
+
+@router.post(
+    "/audit-log/export",
+    response_model=AuditLogExportResponse,
+    status_code=202,
+    summary="Экспорт аудит-лога (staff_admin / staff_legal)",
+    responses={
+        202: {"description": "Принято, задача создана"},
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff_admin или staff_legal scope"},
+        422: {"description": "Невалидные параметры"},
+    },
+)
+async def export_admin_audit_log(
+    payload: AuditLogExportRequest,
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    task_repo: AdminTaskRepository = Depends(get_admin_task_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
+) -> AuditLogExportResponse:
+    """`POST /api/v1/admin/audit-log/export` (OpenAPI 04 §exportAuditLog).
+
+    Создаёт `admin_tasks` row + audit запись + сразу marks COMPLETED с
+    result_url, указывающим на существующий `/api/v1/audit-log/export.csv`
+    с теми же filters. Frontend опрашивает GET /admin/tasks/{id},
+    получает result_url, делает GET для скачивания.
+
+    Sync execution: backend сейчас не имеет worker'а; full CSV generation
+    делается inline в request. Hard cap 10k rows из существующего CSV
+    endpoint. Switch на real async — backlog (нужен Dramatiq + retry).
+
+    `reason` (per OpenAPI «причина экспорта») сохраняется в task.params
+    + audit metadata — это compliance trail для аудита аудит-лога.
+
+    `filters` whitelist'ятся через `_ALLOWED_EXPORT_FILTER_KEYS` —
+    unknown keys отбрасываются (anti-injection в URL).
+    """
+    _require_staff_admin_or_legal(access_levels)
+    actor_sub = claims.get("sub", "unknown")
+
+    task = await task_repo.create(
+        type_="audit_log_export",
+        actor_sub=actor_sub,
+        params={
+            "from": payload.from_.isoformat(),
+            "to": payload.to.isoformat(),
+            "filters": payload.filters,
+            "format": payload.format,
+            "reason": payload.reason,
+        },
+    )
+    await audit_repo.record(
+        actor_sub=actor_sub,
+        action=ACTION_ADMIN_AUDIT_LOG_EXPORTED,
+        resource_type=RESOURCE_ADMIN_TASK,
+        resource_id=str(task.id),
+        metadata={
+            "format": payload.format,
+            "reason": payload.reason,
+        },
+    )
+
+    result_url = _build_export_url(payload)
+    await task_repo.mark_running(task.id)
+    await task_repo.mark_completed(task.id, result_url=result_url)
+
+    return AuditLogExportResponse(task_id=task.id, estimated_ready_at=None)
 
 
 __all__ = ["router"]
