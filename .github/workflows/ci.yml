@@ -45,10 +45,15 @@ jobs:
 
       - name: Upload coverage
         if: always()
+        continue-on-error: true
         uses: codecov/codecov-action@v4
         with:
           file: backend/coverage.xml
           fail_ci_if_error: false
+          # Codecov v4 tokenless upload removed (April 2026) — даже с
+          # fail_ci_if_error=false экшен выходит с code 1, и `if: always()`
+          # не помогает. `continue-on-error` делает step soft без потери
+          # сигнала (coverage upload — non-critical; signal — tests + lint).
 
       # #114: Dockerfile smoke build — ловит регрессии layer caching,
       # missing files, non-root user. Не push'аем — это integration job.
