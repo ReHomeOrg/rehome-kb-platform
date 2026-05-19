@@ -429,6 +429,175 @@ def test_sse_emits_citations_event_after_message_start(
         app.dependency_overrides.pop(get_llm_provider, None)
 
 
+# ---------------------------------------------------------------------------
+# chat.no_answer webhook (#222, ТЗ §5.1)
+
+
+@pytest.fixture
+def chat_dispatch_mock() -> Iterator[AsyncMock]:
+    """Override no-op dispatcher с tracking mock."""
+    from unittest.mock import MagicMock
+
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    dispatch = AsyncMock(return_value=1)
+    fake = MagicMock(spec=WebhookEventDispatcher)
+    fake.dispatch = dispatch
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: fake
+    yield dispatch
+    app.dependency_overrides.pop(get_webhook_event_dispatcher, None)
+
+
+def test_chat_no_answer_fires_when_rag_returns_empty(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    chat_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG enabled + 0 chunks → fire `chat.no_answer`."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "несуществующая тема"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    chat_dispatch_mock.assert_awaited_once()
+    kwargs = chat_dispatch_mock.call_args.kwargs
+    assert kwargs["event_type"] == "chat.no_answer"
+    payload = kwargs["payload"]
+    assert payload["session_id"] == str(session.id)
+    assert payload["query"] == "несуществующая тема"
+    assert payload["retrieved_sources"] == []
+
+
+def test_chat_no_answer_skipped_when_rag_has_hits(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    chat_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG enabled + есть hits → no dispatch."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = [_hit()]
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "договор"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    chat_dispatch_mock.assert_not_awaited()
+
+
+def test_chat_no_answer_skipped_when_rag_disabled(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    chat_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG disabled → no dispatch (chat не grounding'нулся через KB)."""
+    monkeypatch.setenv("RAG_ENABLED", "false")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "x"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    chat_dispatch_mock.assert_not_awaited()
+
+
+def test_chat_no_answer_dispatch_failure_does_not_break_chat(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    chat_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatcher exception swallow'ится — chat response ОК."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []
+    chat_dispatch_mock.side_effect = RuntimeError("broker down")
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "x"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+
+def test_chat_no_answer_fires_when_retrieval_raises(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    chat_dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retrieval exception → `_retrieve_chunks_for_rag` returns [] →
+    no_answer fires (KB не дала контекст, signal'им как gap)."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.side_effect = RuntimeError("pgvector down")
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "x"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    chat_dispatch_mock.assert_awaited_once()
+    assert chat_dispatch_mock.call_args.kwargs["event_type"] == "chat.no_answer"
+
+
 def test_sse_emits_empty_citations_when_rag_disabled(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock],
