@@ -1,7 +1,8 @@
 """Unit tests for IndexerService (#130)."""
 
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -137,7 +138,7 @@ async def test_remove_article_swallows_errors() -> None:
 # reindex_all_articles (#240)
 
 
-async def _aiter(items: list[tuple[object, str]]):  # type: ignore[no-untyped-def]
+async def _aiter(items: list[tuple[UUID, str]]) -> AsyncIterator[tuple[UUID, str]]:
     for it in items:
         yield it
 
