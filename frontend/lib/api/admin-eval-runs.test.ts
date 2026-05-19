@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "./client";
-import { listEvalRuns } from "./admin-eval-runs";
+import { listEvalRuns, startEvalRun } from "./admin-eval-runs";
 
 vi.mock("./client", () => ({
   apiFetch: vi.fn(),
@@ -70,5 +70,35 @@ describe("admin-eval-runs API", () => {
     expect(result.data[0].providers).toEqual(["mock"]);
     expect(result.data[0].results[0].provider).toBe("mock");
     expect(result.data[0].status).toBe("COMPLETED");
+  });
+});
+
+describe("startEvalRun", () => {
+  afterEach(() => apiFetchMock.mockReset());
+
+  it("sends POST with providers + test_set", async () => {
+    apiFetchMock.mockResolvedValueOnce({ run_id: "x" });
+    await startEvalRun({ providers: ["mock"], test_set: "smoke" });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/v1/admin/llm/eval-runs",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toBe(
+      JSON.stringify({ providers: ["mock"], test_set: "smoke" }),
+    );
+  });
+
+  it("supports multi-provider request", async () => {
+    apiFetchMock.mockResolvedValueOnce({ run_id: "x" });
+    await startEvalRun({
+      providers: ["mock", "gigachat"],
+      test_set: "smoke",
+    });
+    const call = apiFetchMock.mock.calls[0][1] as RequestInit;
+    expect(call.body).toContain('"providers":["mock","gigachat"]');
   });
 });

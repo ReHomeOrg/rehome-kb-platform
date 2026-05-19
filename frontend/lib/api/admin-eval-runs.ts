@@ -5,7 +5,7 @@
  */
 
 import { apiFetch } from "./client";
-import type { EvalRunListResponse } from "./types";
+import type { EvalRunListResponse, EvalTestSet } from "./types";
 
 export interface ListEvalRunsFilters {
   provider?: string;
@@ -22,4 +22,26 @@ export async function listEvalRuns(
   return apiFetch<EvalRunListResponse>(
     `/api/v1/admin/llm/eval-runs${qs ? `?${qs}` : ""}`,
   );
+}
+
+// POST /admin/llm/eval-runs (backend #244). MVP: providers=["mock"]
+// + test_set="smoke" only; backend reject'нет 422 для других.
+export interface StartEvalRunInput {
+  providers: string[];
+  test_set: EvalTestSet;
+  custom_questions?: string[];
+}
+
+export interface StartEvalRunResponse {
+  run_id: string;
+}
+
+export async function startEvalRun(
+  input: StartEvalRunInput,
+): Promise<StartEvalRunResponse> {
+  return apiFetch<StartEvalRunResponse>("/api/v1/admin/llm/eval-runs", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
 }
