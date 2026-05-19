@@ -220,6 +220,65 @@ def test_create_review_happy_path_recomputes_rating(
     fake_session.commit.assert_awaited()
 
 
+def test_create_review_fires_collaborator_review_posted_webhook(
+    client: TestClient,
+    fake_session: MagicMock,
+    audit_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """#225: POST /reviews → `collaborator.review.posted` webhook.
+
+    Payload содержит ТОЛЬКО rating + review_id + collaborator_id —
+    comment text не expose'ится (anti-PII; subscribers идут GET если
+    им нужен текст)."""
+    from src.api.webhooks.dispatcher import (
+        WebhookEventDispatcher,
+        get_webhook_event_dispatcher,
+    )
+
+    dispatch = AsyncMock(return_value=1)
+    fake_dispatcher = MagicMock(spec=WebhookEventDispatcher)
+    fake_dispatcher.dispatch = dispatch
+    app.dependency_overrides[get_webhook_event_dispatcher] = lambda: fake_dispatcher
+
+    cid = uuid4()
+    collab = _make_collab("D")
+    collab.id = cid
+    _stub_execute_for(fake_session, collab, 4.5, None)
+    review_id = uuid4()
+
+    async def _flush_with_defaults() -> None:
+        for call in fake_session.add.call_args_list:
+            obj = call.args[0]
+            if isinstance(obj, CollaboratorReview):
+                if obj.id is None:
+                    obj.id = review_id
+                if obj.created_at is None:
+                    obj.created_at = datetime(2026, 5, 17, tzinfo=UTC)
+
+    fake_session.flush = AsyncMock(side_effect=_flush_with_defaults)
+    try:
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/collaborators/{cid}/reviews",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"rating": 4, "comment": "Сенситив текст", "author_display_name": "А"},
+        )
+        assert resp.status_code == 201, resp.text
+        dispatch.assert_awaited_once()
+        kwargs = dispatch.call_args.kwargs
+        assert kwargs["event_type"] == "collaborator.review.posted"
+        payload = kwargs["payload"]
+        assert payload["rating"] == 4
+        assert payload["collaborator_id"] == str(cid)
+        assert payload["review_id"] == str(review_id)
+        # Anti-PII: comment text НЕ в payload.
+        assert "comment" not in payload
+        assert "author_display_name" not in payload
+    finally:
+        app.dependency_overrides.pop(get_webhook_event_dispatcher, None)
+
+
 def test_create_review_duplicate_returns_409(
     client: TestClient,
     fake_session: MagicMock,
