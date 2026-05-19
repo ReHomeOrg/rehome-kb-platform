@@ -13,6 +13,7 @@ from src.api.collaborators.models import Collaborator, CollaboratorReview, Premi
 from src.api.documents.models import Document
 from src.api.idempotency.models import IdempotencyKey
 from src.api.search.models import ArticleEmbedding
+from src.api.search.query_log import SearchQueryLog
 from src.api.webhooks.models import Webhook, WebhookDelivery
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "Document",
     "IdempotencyKey",
     "PremisesCollaborator",
+    "SearchQueryLog",
     "Webhook",
     "WebhookDelivery",
 ]

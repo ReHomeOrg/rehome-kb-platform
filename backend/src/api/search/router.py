@@ -20,6 +20,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.api.auth.dependency import get_current_access_levels, require_authenticated
 from src.api.auth.exceptions import UnauthorizedError
 from src.api.auth.scope import AccessLevel
+from src.api.search.query_log import (
+    SearchQueryLogRepository,
+    get_search_query_log_repository,
+)
 from src.api.search.repository import RetrievalHit
 from src.api.search.retrieval import RetrievalService, get_retrieval_service
 from src.api.search.schemas import SearchHit, SearchInput, SearchResponse
@@ -50,6 +54,7 @@ async def search(
     _claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     retrieval: RetrievalService = Depends(get_retrieval_service),
+    query_log: SearchQueryLogRepository = Depends(get_search_query_log_repository),
 ) -> SearchResponse:
     """POST /api/v1/search — hybrid retrieval по article kb.
 
@@ -76,6 +81,7 @@ async def search(
     # — он не ожидает результатов из этой Stage'и. Не error: forward-compat
     # (когда добавим document/etc, тот же caller сразу получит данные).
     if payload.types is not None and "article" not in payload.types:
+        await _log_query(query_log, payload.query, has_results=False)
         return SearchResponse(data=[])
 
     raw_hits = await retrieval.search(
@@ -98,7 +104,34 @@ async def search(
         )
         for h in deduped
     ]
+
+    # Logging — best-effort. Failure не должен fail'ить search response
+    # (lat-sensitive endpoint). Repo flush'ит в текущую session, commit
+    # привязан к request lifecycle.
+    await _log_query(query_log, payload.query, has_results=bool(hits))
+
     return SearchResponse(data=hits)
+
+
+async def _log_query(
+    repo: SearchQueryLogRepository,
+    query: str,
+    *,
+    has_results: bool,
+) -> None:
+    """Insert query log row, swallow errors с warning'ом.
+
+    Log table — append-only audit signal для daily aggregator; broken
+    insert не должен брэйкать search response.
+    """
+    try:
+        await repo.log(query=query, has_results=has_results)
+    except Exception:
+        logger.warning(
+            "search.query_log.failed",
+            extra={"has_results": has_results},
+            exc_info=True,
+        )
 
 
 def _dedupe_by_article(hits: list[RetrievalHit]) -> list[RetrievalHit]:
