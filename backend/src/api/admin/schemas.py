@@ -8,6 +8,7 @@ content, security. Поля где данных ещё нет (нет соотв
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -94,6 +95,49 @@ class AdminStats(BaseModel):
     security: AdminStatsSecurity = Field(default_factory=AdminStatsSecurity)
 
 
+# ---------------------------------------------------------------------------
+# LLM providers (#228, OpenAPI 04 §listLlmProviders / §LlmProvider)
+
+
+LlmProviderStatus = Literal["ACTIVE", "INACTIVE", "EXPERIMENTAL"]
+LlmHealthStatus = Literal["ok", "degraded", "down"]
+
+
+class LlmProviderView(BaseModel):
+    """One LLM provider entry (OpenAPI 04 §LlmProvider).
+
+    Backend enumeration — статический список known providers; `is_current`
+    derive'ится из `Settings.llm_provider`. Cost / health fields — null
+    в MVP (нет источника данных: provider price book + health checker —
+    backlog).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    vendor: str | None = None
+    model: str | None = None
+    status: LlmProviderStatus
+    is_current: bool = False
+    # `cost_per_1m_*_tokens_rub` — financial pricing metadata; backend
+    # не имеет authoritative source — null = «не предоставлено».
+    cost_per_1m_input_tokens_rub: float | None = None
+    cost_per_1m_output_tokens_rub: float | None = None
+    max_context_tokens: int | None = None
+    supports_streaming: bool | None = None
+    # `last_health_check` + `health_status` — backlog (нужен periodic
+    # health-poller worker; до landing'а — null).
+    last_health_check: datetime | None = None
+    health_status: LlmHealthStatus | None = None
+
+
+class LlmProvidersListResponse(BaseModel):
+    """Envelope для GET /admin/llm/providers."""
+
+    data: list[LlmProviderView]
+
+
 __all__ = [
     "AdminStats",
     "AdminStatsChat",
@@ -101,4 +145,6 @@ __all__ = [
     "AdminStatsPeriod",
     "AdminStatsRequests",
     "AdminStatsSecurity",
+    "LlmProviderView",
+    "LlmProvidersListResponse",
 ]

@@ -1,8 +1,12 @@
 """FastAPI router для `/api/v1/admin/*` (#227+).
 
-Этот PR (#227) — только GET /admin/stats. Дальнейшие admin endpoints
-(users / system-config / security-incidents / personal-data /
-llm / cache / reindex) — отдельные PR'ы.
+Endpoints landed:
+- #227: GET /admin/stats
+- #228: GET /admin/llm/providers
+
+Backlog: system-config / security-incidents / personal-data /
+llm/active (PUT) / llm/eval-runs / cache / reindex / tasks/{id}.
+kb_users CRUD (#230) — отдельный router в `users_router.py`.
 
 RBAC: все admin endpoints требуют `staff_admin` (STAFF + LEGAL) per
 OpenAPI «Доступ — staff_admin». В коде это означает: caller имеет
@@ -17,12 +21,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.api.admin.llm_providers import build_provider_catalog
 from src.api.admin.schemas import (
     AdminStats,
     AdminStatsChat,
     AdminStatsContent,
     AdminStatsPeriod,
     AdminStatsSecurity,
+    LlmProvidersListResponse,
 )
 from src.api.admin.stats_repository import (
     AdminStatsRepository,
@@ -33,6 +39,7 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings, get_settings
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -144,6 +151,41 @@ async def get_admin_stats(
         # документации почему: данных в БД пока нет.
         security=AdminStatsSecurity(),
     )
+
+
+# ---------------------------------------------------------------------------
+# LLM providers (#228, OpenAPI 04 §listLlmProviders)
+
+
+@router.get(
+    "/llm/providers",
+    response_model=LlmProvidersListResponse,
+    summary="Список подключённых LLM-провайдеров (staff_admin)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff_admin scope"},
+    },
+)
+async def list_llm_providers(
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    settings: Settings = Depends(get_settings),
+) -> LlmProvidersListResponse:
+    """`GET /api/v1/admin/llm/providers` (OpenAPI 04 §listLlmProviders).
+
+    Возвращает 4 known providers (mock, vllm, gigachat, yandex_gpt) с
+    `is_current=true` для текущего `LLM_PROVIDER` env-config'а.
+
+    Используется admin UI для feature-flag переключения через PUT
+    /admin/llm/active (backlog). Eval-стенд (см. Чат-поиск ТЗ v2 §3)
+    использует endpoint чтобы перечислить available providers для
+    benchmark runs.
+
+    Cost rates / health checks — null в response (no authoritative
+    backend source; см. schemas docstring + llm_providers.py).
+    """
+    _require_staff_admin(access_levels)
+    return LlmProvidersListResponse(data=build_provider_catalog(settings))
 
 
 __all__ = ["router"]
