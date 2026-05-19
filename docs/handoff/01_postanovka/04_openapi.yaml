@@ -2044,6 +2044,9 @@ paths:
       - Admin
       summary: Инвалидация кеша
       operationId: invalidateCache
+      x-implementation-status: implemented
+      x-implementation-pr: 238
+      x-implementation-note: honest stub — backend не имеет explicit cache layer
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       - name: scope
@@ -2071,6 +2074,9 @@ paths:
 
         '
       operationId: reindexContent
+      x-implementation-status: implemented
+      x-implementation-pr: 238
+      x-implementation-note: task tracking landed; real reindex logic — backlog
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2146,6 +2152,8 @@ paths:
 
         '
       operationId: getTaskStatus
+      x-implementation-status: implemented
+      x-implementation-pr: 238
       parameters:
       - name: task_id
         in: path

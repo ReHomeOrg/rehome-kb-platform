@@ -96,3 +96,12 @@ ACTION_COLLABORATOR_SUSPENDED: Final = "collaborator.suspended"
 # tier change. IP hashed в metadata (ФЗ-152).
 ACTION_COLLABORATOR_ONBOARDED: Final = "collaborator.onboarded"
 ACTION_COLLABORATOR_PORTAL_ACCESS_CHANGED: Final = "collaborator.portal_access.changed"
+
+# Admin operational actions (#238) — cache invalidation, reindex triggers.
+# Metadata содержит scope; не содержит counts (статистика — в admin_tasks
+# row + Prometheus). Audit trail используется для compliance reporting:
+# «кто triggered reindex / cache flush».
+RESOURCE_ADMIN_CACHE: Final = "admin_cache"
+RESOURCE_ADMIN_TASK: Final = "admin_task"
+ACTION_ADMIN_CACHE_INVALIDATED: Final = "admin.cache.invalidated"
+ACTION_ADMIN_REINDEX_TRIGGERED: Final = "admin.reindex.triggered"
