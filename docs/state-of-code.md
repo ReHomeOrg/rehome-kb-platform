@@ -347,11 +347,11 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
 - 24+ Alembic миграций (через 0024_*).
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 0 open PR'ов (backlog от 2026-05-22 полностью merged; см. CS.7).
+- 0 open PR'ов; 30 merged 2026-05-22..23 (см. CS.7).
 
-## CS.7. Recent PRs (2026-05-23)
+## CS.7. Recent PRs (2026-05-23 night)
 
-26 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+30 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
 **0 открытых PR'ов**.
 
 Daytime batch (16 PR'ов):
@@ -367,7 +367,7 @@ Daytime batch (16 PR'ов):
   personal_data_requests CRUD (#232/#278).
 - Alembic merge revisions (#284, #285) — multi-head fixes.
 
-Evening batch (10 PR'ов):
+Evening batch (14 PR'ов):
 - GET /admin/audit-log alias (#237/#287) — OpenAPI-compliant param
   names над существующим /audit-log.
 - OpenAPI drift sync (#288) — 58 endpoints marked as implemented.
@@ -375,12 +375,19 @@ Evening batch (10 PR'ов):
   /admin/reindex + GET /admin/tasks/{id} + admin_tasks foundation.
 - POST /admin/audit-log/export (#239/#290) — admin_tasks-backed
   task с result_url → existing /audit-log/export.csv.
-- State-of-code refreshes (#286, #291).
+- State-of-code refreshes (#286, #291, #294).
 - Real reindex implementation (#240/#292) — replaces #238 honest stub;
   ArticleRepository.iter_published_for_reindex + IndexerService
   .reindex_all_articles + sync execution в request.
 - Prometheus alert rules + observability docs (#241/#293) — 14 alerts
   across 8 groups; catalog of 30 backend metrics.
+- Real documents alerts (#242/#295) — fixed placeholder из #293
+  (outcome label уже существует).
+- Coverage для iter_published_for_reindex (#243/#296) — 4 tests
+  закрывают gap из #240.
+- POST/GET /admin/llm/eval-runs (#244/#297) — closes 2 of 4 remaining
+  unimplemented OpenAPI admin endpoints. MVP per ADR-0013: mock +
+  smoke only; aggregate results inline в admin_task.params.
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -409,8 +416,7 @@ Frontend `WEBHOOK_EVENTS` const tuple sync verified через
 ## CS.9. Admin module (#227+) — 2026-05-23
 
 Module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed в
-20 endpoint'ах через 13 PR'ов (#227 → #239 + #284, #285, #287, #288,
-#289, #290 — alembic / docs / drift sync).
+22 endpoint'ах через 15 feature-PR'ов + alembic / docs / drift sync.
 
 | Endpoint | PR | RBAC |
 |---|---|---|
@@ -425,21 +431,24 @@ Module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed в
 | POST /admin/reindex | #240 | staff_admin (real for `articles` scope) |
 | GET /admin/tasks/{id} | #238 | staff_admin |
 | POST /admin/audit-log/export | #239 | staff_admin / staff_legal |
+| POST/GET /admin/llm/eval-runs | #244 | staff_admin (mock+smoke MVP) |
 
 `admin_tasks` table (#238) — universal async registry с lifecycle
-PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется reindex
-и audit-log export.
+PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется reindex,
+audit-log export и eval-runs.
 
-**Remaining unimplemented OpenAPI admin endpoints** (4):
-- PATCH /admin/system-config — нужна writable system_config table.
-- PUT /admin/llm/active — runtime provider switching (env vs DB).
-- GET/POST /admin/llm/eval-runs — wraps kb-eval CLI; нужен
-  `eval_runs` table + JSON job tracking.
+**Remaining unimplemented OpenAPI admin endpoints** (2 — оба
+design-needed, требуют writable runtime config storage):
+- PATCH /admin/system-config (updateSystemConfig) — нужен ADR'а на
+  system_config table + Settings merge layer + MFA-Token validation.
+- PUT /admin/llm/active (setActiveLlmProvider) — coupled с
+  system-config (одна из конкретных keys); same ADR покроет оба.
 
 **Backlog (требует доработки имплементации):**
 - Real async worker для admin_tasks (Dramatiq + Redis ADR'a) — сейчас
-  reindex / export выполняются sync в request (acceptable на dev
-  volumes, не production-scale).
+  reindex / export / eval-runs выполняются sync в request (acceptable
+  на dev volumes, не production-scale).
+- Real LLM providers в eval-runs (нужны env credentials).
 - Cache layer (если landit — DELETE /admin/cache wires automatically).
 
 ## CS.10. ФЗ-152 module status (2026-05-22)
@@ -457,34 +466,36 @@ PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется rei
 ФЗ-152 compliance: ~70% технических мер реализовано или в process'е
 review. Org-tasks (10-15%) — ответственность Архитектора.
 
-## CS.11. Backlog приоритезация (2026-05-23)
+## CS.11. Backlog приоритезация (2026-05-23 night)
 
-OpenAPI implementation coverage: **93/97 operations** (95.8%) после
-batch'а #237-#239 + drift sync #288. Remaining 4 unimplemented —
-design-needed (system-config mutate / llm/active runtime switch /
-llm/eval-runs job tracking).
+OpenAPI implementation coverage: **95/97 operations** (97.9%) после
+landing'а 30 PR'ов. Remaining 2 unimplemented — оба design-needed,
+оба про runtime config storage (один shared concern).
 
 Открытые задачи требующие design decision (architect input):
-1. **PATCH /admin/system-config** — runtime mutable config storage.
-   Нужен design: writable settings table + Settings merge layer + reload.
-2. **PUT /admin/llm/active** — runtime LLM provider switching.
-   Дублирует PATCH /admin/system-config; решить за раз.
-3. **GET/POST /admin/llm/eval-runs** — wraps kb-eval CLI; нужен
-   `eval_runs` table + integration с RunEvaluator/Report.
-4. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
-5. **POST /documents create endpoint** — нужен в OpenAPI?
-6. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
+1. **PATCH /admin/system-config + PUT /admin/llm/active** — один
+   shared concern: writable runtime config storage. Дизайн нужен:
+   - Single JSONB row в `system_config` table vs key/value rows.
+   - Settings merge layer: env как primary, DB overlays specific keys.
+   - X-MFA-Token validation (per OpenAPI требует step-up auth).
+   - Reload semantics: hot-reload через cache invalidation vs request-
+     scoped lookup.
+2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
+3. **POST /documents create endpoint** — нужен в OpenAPI?
+4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
+5. **Real async worker для admin_tasks** — Redis (Dramatiq) vs
+   asyncio.create_task; production-scale gate для reindex / export /
+   eval-runs (сейчас sync execution).
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh).
 2. **Grafana dashboards** — JSON configs для существующих метрик
-   (alert rules уже landит в #241/#293; dashboards — companion).
+   (alert rules уже landit в #241/#293; dashboards — companion).
 3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
-4. **Real async worker для admin_tasks** — нужен Redis ADR (если
-   Dramatiq) либо чистый asyncio.create_task (lost-on-restart caveat).
-5. **Frontend admin UI** — для 20 admin endpoints (sessions/lists/forms).
-6. **POST/GET /admin/llm/eval-runs** — wraps eval CLI; storage design
-   (admin_tasks JSONB vs separate eval_runs table).
+4. ~~POST/GET /admin/llm/eval-runs~~ ✅ DONE MVP (#244/#297; mock+smoke).
+5. **Frontend admin UI** — для 22 admin endpoints (sessions/lists/forms).
+6. **LLMJudge integration в eval-runs** — answer_correctness /
+   faithfulness / refusal_correctness metrics computation.
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
