@@ -10,9 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 IncidentSeverity = Literal["low", "medium", "high", "critical"]
 IncidentStatus = Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"]
-IncidentDetectedBy = Literal[
-    "monitoring", "audit", "user_report", "staff", "automated_scan"
-]
+IncidentDetectedBy = Literal["monitoring", "audit", "user_report", "staff", "automated_scan"]
 
 
 class SecurityIncidentView(BaseModel):

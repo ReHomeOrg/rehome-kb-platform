@@ -83,13 +83,9 @@ class SecurityIncident(Base):
     rkn_notification_required: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    rkn_notified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    rkn_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    resolved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
@@ -116,10 +112,7 @@ class SecurityIncident(Base):
     )
 
     def __repr__(self) -> str:  # pragma: no cover
-        return (
-            f"<SecurityIncident id={self.id} severity={self.severity} "
-            f"status={self.status}>"
-        )
+        return f"<SecurityIncident id={self.id} severity={self.severity} " f"status={self.status}>"
 
 
 __all__ = [

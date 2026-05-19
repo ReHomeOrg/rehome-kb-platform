@@ -52,13 +52,12 @@ class SecurityIncidentRepository:
             stmt = stmt.where(
                 or_(
                     SecurityIncident.detected_at < cursor_dt,
-                    (SecurityIncident.detected_at == cursor_dt)
-                    & (SecurityIncident.id < cursor_id),
+                    (SecurityIncident.detected_at == cursor_dt) & (SecurityIncident.id < cursor_id),
                 )
             )
-        stmt = stmt.order_by(
-            SecurityIncident.detected_at.desc(), SecurityIncident.id.desc()
-        ).limit(limit + 1)
+        stmt = stmt.order_by(SecurityIncident.detected_at.desc(), SecurityIncident.id.desc()).limit(
+            limit + 1
+        )
         result = await self._session.execute(stmt)
         rows = list(result.scalars().all())
         has_more = len(rows) > limit

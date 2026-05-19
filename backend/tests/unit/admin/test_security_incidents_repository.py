@@ -187,9 +187,7 @@ async def test_update_resolved_preserves_existing_resolved_at() -> None:
 @pytest.mark.asyncio
 async def test_list_filter_severity_and_status_in_sql() -> None:
     session = _session()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = SecurityIncidentRepository(session)
     await repo.list_filtered(severity="critical", status="OPEN")
     stmt = session.execute.call_args.args[0]
@@ -201,9 +199,7 @@ async def test_list_filter_severity_and_status_in_sql() -> None:
 @pytest.mark.asyncio
 async def test_get_by_id_returns_none_for_missing() -> None:
     session = _session()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=lambda: None)
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: None))
     repo = SecurityIncidentRepository(session)
     result = await repo.get_by_id(uuid4())
     assert result is None

@@ -101,9 +101,7 @@ async def list_security_incidents(
 
     return SecurityIncidentsListResponse(
         data=[SecurityIncidentView.model_validate(r) for r in rows],
-        pagination=SecurityIncidentPagination(
-            cursor_next=cursor_next, has_more=has_more
-        ),
+        pagination=SecurityIncidentPagination(cursor_next=cursor_next, has_more=has_more),
     )
 
 
