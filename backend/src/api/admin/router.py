@@ -4,15 +4,13 @@ Endpoints landed:
 - #227: GET /admin/stats
 - #228: GET /admin/llm/providers
 - #229: GET /admin/system-config
+- #264: PATCH /admin/system-config + PUT /admin/llm/active (ADR-0019)
 
-Backlog: security-incidents / personal-data / llm/active (PUT) /
-llm/eval-runs / cache / reindex / tasks/{id}. kb_users CRUD (#230) —
-отдельный router в `users_router.py`.
+Other admin endpoints — в отдельных routers (kb_users CRUD,
+security-incidents, personal-data, audit-log, eval-runs, operational).
 
 RBAC: все admin endpoints требуют `staff_admin` (STAFF + LEGAL) per
-OpenAPI «Доступ — staff_admin». В коде это означает: caller имеет
-AccessLevel.STAFF И AccessLevel.LEGAL (см. `_serialize_for_scope`
-pattern в collaborators router — same admin-set heuristic).
+OpenAPI «Доступ — staff_admin».
 """
 
 from __future__ import annotations
@@ -20,7 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from src.api.admin.llm_providers import build_provider_catalog
 from src.api.admin.schemas import (
@@ -30,13 +28,26 @@ from src.api.admin.schemas import (
     AdminStatsPeriod,
     AdminStatsSecurity,
     LlmProvidersListResponse,
+    SetActiveLlmProviderRequest,
+    SetActiveLlmProviderResponse,
     SystemConfig,
+    SystemConfigPatchRequest,
 )
 from src.api.admin.stats_repository import (
     AdminStatsRepository,
     get_admin_stats_repository,
 )
 from src.api.admin.system_config import build_system_config
+from src.api.admin.system_config_repository import (
+    SystemConfigRepository,
+    UnknownKeyError,
+    get_system_config_repository,
+)
+from src.api.audit.actions import (
+    ACTION_ADMIN_SYSTEM_CONFIG_UPDATED,
+    RESOURCE_ADMIN_SYSTEM_CONFIG,
+)
+from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
@@ -208,19 +219,131 @@ async def get_system_config(
     _claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     settings: Settings = Depends(get_settings),
+    repo: SystemConfigRepository = Depends(get_system_config_repository),
 ) -> SystemConfig:
     """`GET /api/v1/admin/system-config` (OpenAPI 04 §getSystemConfig).
 
-    Read-only projection текущего runtime config'а: feature_flags +
-    llm_config + webhook delivery params. rate_limits / moderation — null
-    blocks (no backend implementation yet — admin UI рендерит «—»).
-
-    PATCH endpoint (OpenAPI § updateSystemConfig) — deferred: env-based
-    config не mutable at runtime; нужна writable `system_config` table
-    с merge-into-Settings layer (отдельный PR).
+    Read-only projection — env (Settings) + DB overlay (ADR-0019).
+    rate_limits / unimplemented blocks — null (admin UI рендерит «—»).
     """
     _require_staff_admin(access_levels)
-    return build_system_config(settings)
+    overlay = await repo.read()
+    return build_system_config(settings, overlay=overlay)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /admin/system-config (#264, OpenAPI 04 §updateSystemConfig, ADR-0019)
+
+
+@router.patch(
+    "/system-config",
+    response_model=SystemConfig,
+    summary="Обновить системные настройки (staff_admin + MFA)",
+    responses={
+        200: {"description": "Обновлено"},
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff_admin scope"},
+        422: {"description": "Unknown / non-mutable keys в payload"},
+    },
+)
+async def update_system_config(
+    payload: SystemConfigPatchRequest,
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    settings: Settings = Depends(get_settings),
+    repo: SystemConfigRepository = Depends(get_system_config_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
+    x_mfa_token: str | None = Header(default=None, alias="X-MFA-Token"),
+) -> SystemConfig:
+    """`PATCH /api/v1/admin/system-config` (#264, ADR-0019).
+
+    Updates allow-listed mutable keys (см. `MUTABLE_KEYS` в repo).
+    Unknown keys → 422 honest reject.
+
+    X-MFA-Token: header принимается + logged в audit. Real validation
+    (Keycloak step-up acr=2) — backlog ADR-0019 explicit.
+    """
+    _require_staff_admin(access_levels)
+    actor_sub = str(claims.get("sub", "unknown"))
+
+    updates = payload.model_dump(exclude_unset=True)
+    try:
+        new_overlay = await repo.patch(updates, actor_sub=actor_sub)
+    except UnknownKeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    await audit_repo.record(
+        actor_sub=actor_sub,
+        action=ACTION_ADMIN_SYSTEM_CONFIG_UPDATED,
+        resource_type=RESOURCE_ADMIN_SYSTEM_CONFIG,
+        resource_id="1",
+        metadata={
+            "keys": sorted(updates.keys()),
+            "mfa_token_provided": x_mfa_token is not None,
+        },
+    )
+
+    return build_system_config(settings, overlay=new_overlay)
+
+
+# ---------------------------------------------------------------------------
+# PUT /admin/llm/active (#264, OpenAPI 04 §setActiveLlmProvider, ADR-0019)
+
+
+@router.put(
+    "/llm/active",
+    response_model=SetActiveLlmProviderResponse,
+    summary="Переключить активного LLM-провайдера (staff_admin + MFA)",
+    responses={
+        200: {"description": "Переключено"},
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff_admin scope"},
+        422: {"description": "Unknown provider_id"},
+    },
+)
+async def set_active_llm_provider(
+    payload: SetActiveLlmProviderRequest,
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: SystemConfigRepository = Depends(get_system_config_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
+    x_mfa_token: str | None = Header(default=None, alias="X-MFA-Token"),
+) -> SetActiveLlmProviderResponse:
+    """`PUT /api/v1/admin/llm/active` (#264, ADR-0019).
+
+    Short-hand for PATCH с key `llm_provider`. provider_id validated
+    через repo allowlist (`llm_provider` ∈ MUTABLE_KEYS); value validation
+    (must be one of known providers) — backlog (см. build_provider_catalog).
+
+    X-MFA-Token — honest stub, см. PATCH endpoint.
+    """
+    _require_staff_admin(access_levels)
+    actor_sub = str(claims.get("sub", "unknown"))
+
+    try:
+        new_overlay = await repo.patch(
+            {"llm_provider": payload.provider_id},
+            actor_sub=actor_sub,
+        )
+    except UnknownKeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    await audit_repo.record(
+        actor_sub=actor_sub,
+        action=ACTION_ADMIN_SYSTEM_CONFIG_UPDATED,
+        resource_type=RESOURCE_ADMIN_SYSTEM_CONFIG,
+        resource_id="1",
+        metadata={
+            "keys": ["llm_provider"],
+            "provider_id": payload.provider_id,
+            "reason": payload.reason,
+            "mfa_token_provided": x_mfa_token is not None,
+        },
+    )
+
+    return SetActiveLlmProviderResponse(
+        active_provider=str(new_overlay.get("llm_provider", payload.provider_id)),
+    )
 
 
 __all__ = ["router"]

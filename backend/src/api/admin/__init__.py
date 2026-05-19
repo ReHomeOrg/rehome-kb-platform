@@ -16,10 +16,12 @@ landing'ится incremental по мере merge'а PR'ов:
   result_url → existing /audit-log/export.csv)
 - #244: POST/GET /admin/llm/eval-runs (mock + smoke MVP; results
   inline в admin_task.params per ADR-0013)
+- #264: PATCH /admin/system-config + PUT /admin/llm/active per
+  ADR-0019 (writable runtime config storage, JSONB single row +
+  Settings overlay + X-MFA-Token honest stub).
 
 Backlog (отдельные PR'ы):
-- PATCH /admin/system-config (runtime config storage)
-- PUT /admin/llm/active
 - Real provider support в eval-runs (нужны env credentials)
 - Real async worker для admin_tasks (сейчас sync-completion)
+- Keycloak step-up auth (acr=2) для X-MFA-Token validation
 """

@@ -175,6 +175,29 @@ def _no_op_audit_repository() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_op_system_config_repository() -> Iterator[None]:
+    """#264 (ADR-0019): глобальный no-op SystemConfigRepository.
+
+    GET /admin/system-config теперь читает overlay из DB. В unit-тестах
+    DB нет — подменяем на empty-overlay repo. Тесты, проверяющие patch
+    explicit, делают свой override.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.admin.system_config_repository import (
+        SystemConfigRepository,
+        get_system_config_repository,
+    )
+
+    noop = MagicMock(spec=SystemConfigRepository)
+    noop.read = AsyncMock(return_value={})
+    noop.patch = AsyncMock(return_value={})
+    app.dependency_overrides[get_system_config_repository] = lambda: noop
+    yield
+    app.dependency_overrides.pop(get_system_config_repository, None)
+
+
+@pytest.fixture(autouse=True)
 def _no_op_search_query_log() -> Iterator[None]:
     """#220: глобальный no-op SearchQueryLogRepository для unit-тестов.
 

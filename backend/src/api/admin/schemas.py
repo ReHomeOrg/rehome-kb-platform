@@ -217,6 +217,42 @@ class SystemConfig(BaseModel):
     webhooks: SystemConfigWebhooks
 
 
+# ---------------------------------------------------------------------------
+# PATCH /admin/system-config (#264, ADR-0019)
+
+
+class SystemConfigPatchRequest(BaseModel):
+    """PATCH body: allow-listed key/value updates.
+
+    Pydantic не enforce'ит allowlist — это делает repo (`MUTABLE_KEYS`).
+    Здесь только base validation (extra="allow" чтобы dynamic-key payload
+    прошёл).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ---------------------------------------------------------------------------
+# PUT /admin/llm/active (#264, ADR-0019)
+
+
+class SetActiveLlmProviderRequest(BaseModel):
+    """PUT body per OpenAPI 04 §setActiveLlmProvider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_id: str = Field(min_length=1, max_length=64)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class SetActiveLlmProviderResponse(BaseModel):
+    """200 response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    active_provider: str
+
+
 __all__ = [
     "AdminStats",
     "AdminStatsChat",
@@ -226,9 +262,12 @@ __all__ = [
     "AdminStatsSecurity",
     "LlmProviderView",
     "LlmProvidersListResponse",
+    "SetActiveLlmProviderRequest",
+    "SetActiveLlmProviderResponse",
     "SystemConfig",
     "SystemConfigLlm",
     "SystemConfigModeration",
+    "SystemConfigPatchRequest",
     "SystemConfigRateLimits",
     "SystemConfigWebhooks",
 ]

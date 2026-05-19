@@ -109,3 +109,9 @@ ACTION_ADMIN_REINDEX_TRIGGERED: Final = "admin.reindex.triggered"
 # export аудит-лога (для регуляторного запроса). Metadata содержит format
 # + reason; filters payload — в admin_tasks.params (для replay).
 ACTION_ADMIN_AUDIT_LOG_EXPORTED: Final = "admin.audit_log.exported"
+# system_config updates (#264, ADR-0019). Metadata содержит keys list +
+# (для PUT /admin/llm/active) provider_id + reason. NEVER хранит values
+# (могут быть допущены sensitive значения через allowlist; values
+# доступны в system_config table напрямую для compliance audit).
+RESOURCE_ADMIN_SYSTEM_CONFIG: Final = "admin_system_config"
+ACTION_ADMIN_SYSTEM_CONFIG_UPDATED: Final = "admin.system_config.updated"

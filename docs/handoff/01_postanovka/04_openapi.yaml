@@ -1949,6 +1949,9 @@ paths:
       - Admin
       summary: Изменение настроек
       operationId: updateSystemConfig
+      x-implementation-status: implemented
+      x-implementation-pr: 264
+      x-implementation-note: ADR-0019; X-MFA-Token honest stub
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       requestBody:
@@ -2007,6 +2010,9 @@ paths:
 
         '
       operationId: setActiveLlmProvider
+      x-implementation-status: implemented
+      x-implementation-pr: 264
+      x-implementation-note: ADR-0019 short-hand для PATCH system-config llm_provider key
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
       - name: X-MFA-Token
