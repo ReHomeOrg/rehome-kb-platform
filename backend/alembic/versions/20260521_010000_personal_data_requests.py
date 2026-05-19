@@ -1,7 +1,7 @@
 """personal_data_requests — ФЗ-152 §15 SAR (#232)
 
 Revision ID: 0024_personal_data_requests
-Revises: 0023_vault_wraps_multi_user
+Revises: 0024_merge_heads
 Create Date: 2026-05-21 01:00:00.000000
 
 Реестр заявок субъектов ПДн на provide / correct / delete / transfer
@@ -27,7 +27,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0024_personal_data_requests"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0024_merge_heads"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
