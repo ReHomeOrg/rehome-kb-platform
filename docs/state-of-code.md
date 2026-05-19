@@ -347,11 +347,11 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 - Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
 - 24+ Alembic миграций (через 0024_*).
 - **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 0 open PR'ов; 40 merged 2026-05-22..23 (см. CS.7).
+- 0 open PR'ов; 49 merged 2026-05-22..23 (см. CS.7).
 
-## CS.7. Recent PRs (2026-05-23 late night)
+## CS.7. Recent PRs (2026-05-23 end-of-day)
 
-40 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
+49 PR'ов merged между 2026-05-22 и 2026-05-23. Текущее состояние:
 **0 открытых PR'ов**.
 
 Daytime batch (16 PR'ов):
@@ -408,6 +408,19 @@ Late-night batch (10 PR'ов, в основном frontend):
 - /admin/users (#253/#306) — KB staff users list с MFA warning +
   cross-link добавление на dashboard.
 - Nav link → /admin dashboard (#254/#307) — entry point updated.
+
+EOD batch (9 PR'ов, frontend mutation forms + task tracking):
+- Security incident resolve form (#255/#309) — PATCH workflow для
+  ФЗ-152 §17.1.
+- PD request process form (#256/#310) — PATCH workflow для §15 SAR.
+- KB user edit + deactivate form (#257/#311) — PATCH/DELETE workflow.
+- Eval-runs trigger form (#258/#312) — POST с providers/test_set.
+- /admin/maintenance — reindex + cache buttons (#259/#313).
+- KB user create form (#260/#314) — POST closes user CRUD.
+- Audit-log export form (#261/#315) — POST с reason для compliance.
+- /admin/tasks/[id] (#262/#316) — task status detail, closes
+  reindex/export/eval-runs task tracking loop.
+- State-of-code EOD refresh (этот PR).
 
 ## CS.8. Webhook event taxonomy — completed
 
@@ -514,14 +527,17 @@ Self-serve M-sized items без design дополнительного:
 3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
 4. ~~POST/GET /admin/llm/eval-runs~~ ✅ DONE MVP (#244/#297; mock+smoke).
 5. ~~Frontend admin UI (read-only)~~ ✅ DONE (PRs #301-#307): dashboard
-   + 6 sub-pages (eval-runs, security-incidents, personal-data,
-   llm-providers, system-config, users). Mutation forms (POST/PATCH) —
-   backlog: bundled CSRF pattern PR.
+   + sub-pages (eval-runs, security-incidents, personal-data,
+   llm-providers, system-config, users).
 6. ~~LLMJudge MVP в eval-runs~~ ✅ DONE с MockJudge (#246/#299);
-   faithfulness требует real LLMJudge — backlog (зависит от LLM creds).
-7. **Admin mutation forms** — POST kb_users / PATCH security-incident
-   resolve / PATCH PD-request process / PUT llm/active — общий CSRF
-   pattern, можно landить bundled PR после ADR-0019 approve.
+   faithfulness требует real LLMJudge — backlog.
+7. ~~Admin mutation forms~~ ✅ DONE (#309-#315): incident resolve,
+   PD request process, KB user create/edit/deactivate, eval-runs
+   trigger, maintenance buttons, audit-log export. Single missing:
+   PUT /admin/llm/active (gated на ADR-0019).
+8. ~~Task tracking UI~~ ✅ DONE (#316): /admin/tasks/[id] + cross-
+   links from trigger forms.
+9. **Auto-polling task status** — currently manual refresh. M-sized.
 
 Skipped explicitly (deferred):
 - Legal contract rewrites (TD-004).
