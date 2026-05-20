@@ -301,3 +301,88 @@ export async function setupTotp(input: VaultTotpSetupInput): Promise<VaultMeView
 export async function disableTotp(): Promise<void> {
   await apiFetch<void>("/api/v1/vault/totp", { method: "DELETE" });
 }
+
+// ---------------------------------------------------------------------------
+// FIDO2 / WebAuthn (ADR-0022 A)
+
+/**
+ * PublicKeyCredentialCreationOptions / RequestOptions — backend сериализует
+ * via py_webauthn's `options_to_json` (base64url-encoded buffers). Client
+ * декодирует → ArrayBuffer перед передачей в navigator.credentials.
+ *
+ * Browser-returned attestation/assertion responses закодированы базой
+ * `JSON.stringify`-friendly shape (base64url для bytes) и шлются на backend
+ * как-есть; py_webauthn принимает dict напрямую.
+ */
+export interface FIDO2OptionsResponse {
+  options: Record<string, unknown>;
+}
+
+export interface FIDO2RegisterCompleteInput {
+  credential: Record<string, unknown>;
+  nickname?: string | null;
+}
+
+export interface FIDO2AssertCompleteInput {
+  credential: Record<string, unknown>;
+}
+
+export interface FIDO2CredentialView {
+  id: string;
+  nickname: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  transports: string[];
+}
+
+export interface FIDO2CredentialListResponse {
+  data: FIDO2CredentialView[];
+}
+
+export async function fido2RegisterBegin(
+  userDisplayName?: string,
+): Promise<FIDO2OptionsResponse> {
+  return apiFetch<FIDO2OptionsResponse>("/api/v1/vault/fido2/register-begin", {
+    method: "POST",
+    body: JSON.stringify({ user_display_name: userDisplayName ?? null }),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fido2RegisterComplete(
+  input: FIDO2RegisterCompleteInput,
+): Promise<FIDO2CredentialView> {
+  return apiFetch<FIDO2CredentialView>("/api/v1/vault/fido2/register-complete", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fido2AssertBegin(): Promise<FIDO2OptionsResponse> {
+  return apiFetch<FIDO2OptionsResponse>("/api/v1/vault/fido2/assert-begin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function fido2AssertComplete(
+  input: FIDO2AssertCompleteInput,
+): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>("/api/v1/vault/fido2/assert-complete", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function listFido2Credentials(): Promise<FIDO2CredentialListResponse> {
+  return apiFetch<FIDO2CredentialListResponse>("/api/v1/vault/fido2/credentials");
+}
+
+export async function deleteFido2Credential(credentialId: string): Promise<void> {
+  await apiFetch<void>(
+    `/api/v1/vault/fido2/credentials/${encodeURIComponent(credentialId)}`,
+    { method: "DELETE" },
+  );
+}

@@ -543,7 +543,9 @@ Self-serve M-sized items без design дополнительного:
    (Вариант A). Backend complete: foundation в #328 (table + repo +
    settings + webauthn dep), ceremony endpoints в #330 (register-begin/
    complete + assert-begin/complete + list/delete + DB-backed challenge
-   storage). Frontend ceremony UI (`/vault/setup-fido2`) — backlog.
+   storage). Frontend ceremony UI landed в #331: `Fido2KeysPanel` в
+   /vault security tab (register + list + revoke). Browser-side
+   webauthn helpers (base64url ↔ ArrayBuffer) в `lib/vault/webauthn.ts`.
 2. **Grafana dashboards** — JSON configs для существующих метрик
    (alert rules уже landit в #241/#293; dashboards — companion).
    Best built against running Grafana instance (PR #267 landed starter

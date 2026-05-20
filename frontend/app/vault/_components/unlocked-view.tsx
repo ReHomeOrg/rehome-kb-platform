@@ -20,6 +20,7 @@ import { lock, touch } from "@/lib/vault/session";
 
 import CreateSecretForm from "./create-secret-form";
 import ExpirySummary from "./expiry-summary";
+import Fido2KeysPanel from "./fido2-keys-panel";
 import GroupsPanel from "./groups-panel";
 import SecretsList from "./secrets-list";
 import TotpSetupForm from "./totp-setup-form";
@@ -172,6 +173,10 @@ export default function UnlockedView({ userId, hasTotp }: Props): JSX.Element {
                 </button>
               </>
             )}
+
+            <div className="mt-6 border-t border-gray-200 pt-6">
+              <Fido2KeysPanel />
+            </div>
           </div>
         )}
       </div>
