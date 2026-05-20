@@ -86,6 +86,28 @@ class VaultRepository:
         await self._session.flush()
         return user
 
+    async def set_escrow_wrap(
+        self,
+        user_id: UUID,
+        escrow_wrap: bytes | None,
+    ) -> VaultUser | None:
+        """Set or clear `escrow_wrap` (ADR-0021 A).
+
+        Caller sends client-built AES-GCM(KEK, escrow_key) blob — server
+        treats opaque. `None` clears previous escrow setup (rotation flow).
+        Returns updated row или None если vault не существует.
+        """
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        user = await self.get_user(user_id)
+        if user is None:
+            return None
+        user.escrow_wrap = escrow_wrap
+        user.updated_at = _dt.now(UTC)
+        await self._session.flush()
+        return user
+
     # -----------------------------------------------------------------
     # VaultGroup
 

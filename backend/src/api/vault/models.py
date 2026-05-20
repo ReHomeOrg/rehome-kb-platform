@@ -49,6 +49,10 @@ class VaultUser(Base):
     encrypted_x25519_privkey: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     x25519_pubkey: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     totp_secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # ADR-0021: AES-GCM(KEK, escrow_key) blob; client-built, backend opaque.
+    # Nullable до setup-escrow ceremony — vault может существовать без
+    # emergency access setup (legacy / new users между Stage 1 и Stage 2).
+    escrow_wrap: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -250,4 +254,57 @@ class VaultFIDO2Challenge(Base):
         ),
         Index("ix_vault_fido2_challenges_user", "user_id"),
         Index("ix_vault_fido2_challenges_expires_at", "expires_at"),
+    )
+
+
+# ADR-0021 reason categories — synced с migration CHECK constraint.
+EMERGENCY_REASON_CATEGORIES: tuple[str, ...] = (
+    "incident",
+    "legal_order",
+    "employee_departure",
+    "forensic_audit",
+    "password_lost",
+)
+
+
+class VaultEmergencyUnlockLog(Base):
+    """Audit/forensic trail для emergency-unlock events (ADR-0021 A).
+
+    Один row per emergency-unlock операция. Caller (admin) предоставляет
+    `requested_by` (JWT sub) + reason; row создаётся атомарно вместе с
+    security_incident (см. router).
+
+    Storage-only. RKN flag и incident_id определяются caller'ом
+    на основе `reason_category` (см. ADR §approve note).
+    """
+
+    __tablename__ = "vault_emergency_unlock_log"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("vault_users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason_category: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    security_incident_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    rkn_notify_required: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason_category IN ('incident', 'legal_order', "
+            "'employee_departure', 'forensic_audit', 'password_lost')",
+            name="ck_vault_emergency_unlock_log_reason_category",
+        ),
+        Index("ix_vault_emergency_unlock_log_user", "user_id"),
+        Index("ix_vault_emergency_unlock_log_created_at", "created_at"),
     )
