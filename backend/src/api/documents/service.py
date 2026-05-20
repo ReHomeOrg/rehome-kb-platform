@@ -8,6 +8,12 @@ Per ADR-0023 Вариант B: POST /documents НЕ exposed на HTTP. Ingest
 
 Repository.create() остаётся pure storage; этот helper orchestrate'ит
 side effects.
+
+Webhook payload — machine-level only (Architect decision 2026-05-20):
+`title` НЕ включается чтобы избежать leak в external subscribers,
+которые могут быть вне trust boundary (e.g. 1C/CRM integrations
+через partner systems). Subscriber retrieves full Document по `document_id`
+через GET /documents/{id} с своим scope-фильтром.
 """
 
 from __future__ import annotations
@@ -64,7 +70,6 @@ async def create_document(
         event_type="document.created",
         payload={
             "document_id": str(doc.id),
-            "title": doc.title,
             "category": doc.category,
             "status": doc.status,
             "confidentiality": doc.confidentiality,
