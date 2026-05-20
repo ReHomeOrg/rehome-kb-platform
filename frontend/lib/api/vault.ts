@@ -386,3 +386,63 @@ export async function deleteFido2Credential(credentialId: string): Promise<void>
     { method: "DELETE" },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Emergency access — escrow ceremony (ADR-0021 A)
+
+export interface VaultSetupEscrowInput {
+  escrow_wrap_b64: string;
+}
+
+export interface VaultSetupEscrowResponse {
+  has_escrow: boolean;
+}
+
+export async function setupEscrow(
+  input: VaultSetupEscrowInput,
+): Promise<VaultSetupEscrowResponse> {
+  return apiFetch<VaultSetupEscrowResponse>("/api/v1/vault/setup-escrow", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export type EmergencyReasonCategory =
+  | "incident"
+  | "legal_order"
+  | "employee_departure"
+  | "forensic_audit"
+  | "password_lost";
+
+export interface VaultEmergencyUnlockInput {
+  target_user_id: string;
+  reason_category: EmergencyReasonCategory;
+  reason_text: string;
+}
+
+export interface VaultEmergencyPayload {
+  escrow_wrap_b64: string;
+  encrypted_x25519_privkey_b64: string;
+  x25519_pubkey_b64: string;
+  argon_salt_b64: string;
+}
+
+export interface VaultEmergencyUnlockResponse {
+  unlock_log_id: string;
+  security_incident_id: string;
+  rkn_notify_required: boolean;
+  severity: string;
+  created_at: string;
+  vault: VaultEmergencyPayload;
+}
+
+export async function emergencyUnlock(
+  input: VaultEmergencyUnlockInput,
+): Promise<VaultEmergencyUnlockResponse> {
+  return apiFetch<VaultEmergencyUnlockResponse>("/api/v1/admin/vault/emergency-unlock", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Content-Type": "application/json" },
+  });
+}
