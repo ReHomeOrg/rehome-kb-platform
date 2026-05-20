@@ -439,9 +439,10 @@ ADR-0019 batch (Architect approved):
 покрывает OpenAPI §WebhookEvent перечисление **кроме**:
 - `document.signed` — no trigger point (signing flow Stage 2 — нет
   signing UX; см. ADR-0023 Открытый вопрос §2).
-- `service_order.{accepted, completed, failed}` — wiring backlog
-  (требует partner-side endpoints для accept/complete/fail; cancel wired
-  в #224).
+- ~~`service_order.{accepted, completed, failed}`~~ ✅ wired в #329:
+  staff-only POST endpoints `/service-orders/{id}/{accept,complete,fail}`
+  каждый fire'ит corresponding event. RBAC расширится до collaborator-
+  side когда partner auth landed.
 
 `document.created` (#327, ADR-0023 B): emit site landit как
 `documents.service.create_document(...)` orchestration helper. POST

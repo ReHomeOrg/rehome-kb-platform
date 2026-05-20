@@ -74,17 +74,24 @@ def cancel_mock() -> AsyncMock:
 
 
 @pytest.fixture
+def transition_mock() -> AsyncMock:
+    return AsyncMock()
+
+
+@pytest.fixture
 def override_repo(
     create_mock: AsyncMock,
     get_mock: AsyncMock,
     list_mock: AsyncMock,
     cancel_mock: AsyncMock,
+    transition_mock: AsyncMock,
 ) -> Iterator[dict[str, AsyncMock]]:
     repo = ServiceOrderRepository.__new__(ServiceOrderRepository)
     repo.create = create_mock  # type: ignore[method-assign]
     repo.get_for_actor = get_mock  # type: ignore[method-assign]
     repo.list_for_actor = list_mock  # type: ignore[method-assign]
     repo.cancel = cancel_mock  # type: ignore[method-assign]
+    repo.transition = transition_mock  # type: ignore[method-assign]
     app.dependency_overrides[get_service_order_repository] = lambda: repo
 
     # Session shim — каждый router endpoint calls session.commit/rollback.
@@ -101,6 +108,7 @@ def override_repo(
         "get": get_mock,
         "list": list_mock,
         "cancel": cancel_mock,
+        "transition": transition_mock,
     }
     app.dependency_overrides.pop(get_service_order_repository, None)
     app.dependency_overrides.pop(get_session, None)
@@ -454,3 +462,149 @@ def test_cancel_with_empty_body_works(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle endpoints — accept / complete / fail (#329)
+
+
+def test_accept_requires_auth(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+) -> None:
+    resp = client.post(f"/api/v1/service-orders/{uuid4()}/accept")
+    assert resp.status_code == 401
+
+
+def test_accept_tenant_returns_403(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Non-staff caller — 403 (staff-only до landing'а partner auth)."""
+    token = make_jwt(roles=["tenant"], sub="user-1")
+    resp = client.post(
+        f"/api/v1/service-orders/{uuid4()}/accept",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_accept_staff_happy_path_fires_accepted_webhook(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    get_mock: AsyncMock,
+    transition_mock: AsyncMock,
+    dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    order = _make_order(status="PENDING_COLLABORATOR")
+    get_mock.return_value = order
+    accepted = _make_order(status="ACCEPTED", order_id=order.id)
+    transition_mock.return_value = accepted
+
+    token = make_jwt(roles=["staff_admin"])
+    resp = client.post(
+        f"/api/v1/service-orders/{order.id}/accept",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ACCEPTED"
+    transition_mock.assert_awaited_once()
+    assert transition_mock.call_args.kwargs["to_status"] == "ACCEPTED"
+    dispatch_mock.assert_awaited_once()
+    assert dispatch_mock.call_args.kwargs["event_type"] == "service_order.accepted"
+
+
+def test_accept_invalid_transition_returns_409(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    get_mock: AsyncMock,
+    transition_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Status already terminal → 409 Conflict."""
+    order = _make_order(status="COMPLETED")
+    get_mock.return_value = order
+    transition_mock.side_effect = InvalidStatusTransitionError(
+        "Cannot transition from COMPLETED to ACCEPTED"
+    )
+
+    token = make_jwt(roles=["staff_admin"])
+    resp = client.post(
+        f"/api/v1/service-orders/{order.id}/accept",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 409
+
+
+def test_complete_staff_fires_completed_webhook(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    get_mock: AsyncMock,
+    transition_mock: AsyncMock,
+    dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    order = _make_order(status="ACCEPTED")
+    get_mock.return_value = order
+    completed = _make_order(status="COMPLETED", order_id=order.id)
+    completed.completed_at = datetime(2026, 5, 20, tzinfo=UTC)
+    transition_mock.return_value = completed
+
+    token = make_jwt(roles=["staff_admin"])
+    resp = client.post(
+        f"/api/v1/service-orders/{order.id}/complete",
+        json={"notes": "done"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "COMPLETED"
+    assert transition_mock.call_args.kwargs["to_status"] == "COMPLETED"
+    assert transition_mock.call_args.kwargs["notes"] == "done"
+    assert dispatch_mock.call_args.kwargs["event_type"] == "service_order.completed"
+
+
+def test_fail_staff_fires_failed_webhook_and_persists_notes(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    get_mock: AsyncMock,
+    transition_mock: AsyncMock,
+    dispatch_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    order = _make_order(status="IN_PROGRESS")
+    get_mock.return_value = order
+    failed = _make_order(status="FAILED", order_id=order.id)
+    failed.collaborator_notes = "tools broke"
+    failed.completed_at = datetime(2026, 5, 20, tzinfo=UTC)
+    transition_mock.return_value = failed
+
+    token = make_jwt(roles=["staff_admin"])
+    resp = client.post(
+        f"/api/v1/service-orders/{order.id}/fail",
+        json={"notes": "tools broke"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILED"
+    assert body["collaborator_notes"] == "tools broke"
+    assert transition_mock.call_args.kwargs["to_status"] == "FAILED"
+    assert dispatch_mock.call_args.kwargs["event_type"] == "service_order.failed"
+
+
+def test_lifecycle_returns_404_when_order_missing(
+    client: TestClient,
+    override_repo: dict[str, AsyncMock],
+    get_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    get_mock.return_value = None
+    token = make_jwt(roles=["staff_admin"])
+    for action in ("accept", "complete", "fail"):
+        resp = client.post(
+            f"/api/v1/service-orders/{uuid4()}/{action}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 404
