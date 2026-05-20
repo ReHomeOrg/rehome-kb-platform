@@ -438,10 +438,13 @@ ADR-0019 batch (Architect approved):
 После landing'а PR #220-#225 — backend WebhookEvent enum полностью
 покрывает OpenAPI §WebhookEvent перечисление **кроме**:
 - `document.created` / `document.signed` — no trigger point (POST /documents
-  отсутствует в OpenAPI и backend; ingest через external migration / 1С).
-- `service_order.{accepted, completed, failed}` — wiring backlog
-  (требует partner-side endpoints для accept/complete/fail; cancel wired
-  в #224).
+  отсутствует в OpenAPI и backend; ingest через external migration / 1С;
+  closure через `documents.service.create_document` — отдельный PR
+  по ADR-0023 B).
+- ~~`service_order.{accepted, completed, failed}`~~ ✅ wired в #329:
+  staff-only POST endpoints `/service-orders/{id}/{accept,complete,fail}`
+  каждый fire'ит corresponding event. RBAC расширится до collaborator-
+  side когда partner auth landed.
 
 Все остальные **17 webhook events** имеют actual emit sites в backend:
 - Articles: published, updated, archived.

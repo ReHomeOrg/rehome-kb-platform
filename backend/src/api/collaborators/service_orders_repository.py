@@ -138,6 +138,35 @@ class ServiceOrderRepository:
         await self._session.refresh(order)
         return order
 
+    async def transition(
+        self,
+        order: ServiceOrder,
+        *,
+        to_status: str,
+        notes: str | None = None,
+    ) -> ServiceOrder:
+        """Generic lifecycle transition (accept / complete / fail / etc).
+
+        - Validates `to_status ∈ ALLOWED_TRANSITIONS[current]`.
+        - Terminal status → sets `completed_at = now()`.
+        - `notes` опционально appended в collaborator_notes (для FAILED
+          reason); cancel-specific `cancel_reason` остаётся отдельным
+          через `cancel()` метод для retro-compat.
+        """
+        allowed = ALLOWED_TRANSITIONS.get(order.status, frozenset())
+        if to_status not in allowed:
+            raise InvalidStatusTransitionError(
+                f"Cannot transition from {order.status} to {to_status}"
+            )
+        order.status = to_status
+        if notes is not None:
+            order.collaborator_notes = notes
+        if to_status in TERMINAL_STATUSES:
+            order.completed_at = datetime.now(UTC)
+        await self._session.flush()
+        await self._session.refresh(order)
+        return order
+
 
 def get_service_order_repository(
     session: AsyncSession = Depends(get_session),

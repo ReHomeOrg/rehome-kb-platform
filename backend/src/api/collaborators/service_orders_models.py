@@ -50,15 +50,19 @@ TERMINAL_STATUSES: Final[frozenset[str]] = frozenset({"COMPLETED", "CANCELLED", 
 # Allowed transitions (lifecycle, без payment). Открытые edges per ТЗ:
 #   DRAFT → PENDING_COLLABORATOR | CANCELLED
 #   PENDING_COLLABORATOR → ACCEPTED | CANCELLED | FAILED
-#   ACCEPTED → IN_PROGRESS | CANCELLED | FAILED
+#   ACCEPTED → IN_PROGRESS | COMPLETED | CANCELLED | FAILED
 #   IN_PROGRESS → COMPLETED | CANCELLED | FAILED | DISPUTED
 #   COMPLETED → DISPUTED (post-hoc claim)
 #   DISPUTED → COMPLETED | CANCELLED | FAILED (resolution)
 #   CANCELLED / FAILED — terminal, no outgoing edges.
+#
+# ACCEPTED → COMPLETED — short-circuit для quick jobs где явный
+# IN_PROGRESS marker не нужен (collaborator accepts и сразу выполняет).
+# IN_PROGRESS остаётся как optional intermediate для long-running tasks.
 ALLOWED_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "DRAFT": frozenset({"PENDING_COLLABORATOR", "CANCELLED"}),
     "PENDING_COLLABORATOR": frozenset({"ACCEPTED", "CANCELLED", "FAILED"}),
-    "ACCEPTED": frozenset({"IN_PROGRESS", "CANCELLED", "FAILED"}),
+    "ACCEPTED": frozenset({"IN_PROGRESS", "COMPLETED", "CANCELLED", "FAILED"}),
     "IN_PROGRESS": frozenset({"COMPLETED", "CANCELLED", "FAILED", "DISPUTED"}),
     "COMPLETED": frozenset({"DISPUTED"}),
     "DISPUTED": frozenset({"COMPLETED", "CANCELLED", "FAILED"}),
