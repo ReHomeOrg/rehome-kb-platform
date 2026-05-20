@@ -224,3 +224,67 @@ def test_all_transitions_target_known_states() -> None:
         assert src_ in known
         for dest in dests:
             assert dest in known
+
+
+def test_accepted_can_short_circuit_to_completed() -> None:
+    """ACCEPTED → COMPLETED — short-circuit для quick jobs (#329)."""
+    assert "COMPLETED" in ALLOWED_TRANSITIONS["ACCEPTED"]
+
+
+# ---------------------------------------------------------------------------
+# transition — lifecycle helper (#329)
+
+
+@pytest.mark.asyncio
+async def test_transition_pending_to_accepted_works() -> None:
+    order = _make_order(status="PENDING_COLLABORATOR")
+    session = _mock_session()
+    repo = ServiceOrderRepository(session)
+    updated = await repo.transition(order, to_status="ACCEPTED")
+    assert updated.status == "ACCEPTED"
+    # ACCEPTED — non-terminal, completed_at остаётся None.
+    assert updated.completed_at is None
+
+
+@pytest.mark.asyncio
+async def test_transition_accepted_to_completed_sets_completed_at() -> None:
+    """Short-circuit ACCEPTED → COMPLETED + completed_at set."""
+    order = _make_order(status="ACCEPTED")
+    session = _mock_session()
+    repo = ServiceOrderRepository(session)
+    updated = await repo.transition(order, to_status="COMPLETED")
+    assert updated.status == "COMPLETED"
+    assert updated.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_transition_to_failed_persists_notes() -> None:
+    order = _make_order(status="IN_PROGRESS")
+    session = _mock_session()
+    repo = ServiceOrderRepository(session)
+    updated = await repo.transition(
+        order, to_status="FAILED", notes="contractor cancelled last minute"
+    )
+    assert updated.status == "FAILED"
+    assert updated.collaborator_notes == "contractor cancelled last minute"
+    assert updated.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_transition_disallowed_raises() -> None:
+    """PENDING_COLLABORATOR → COMPLETED isn't allowed."""
+    order = _make_order(status="PENDING_COLLABORATOR")
+    session = _mock_session()
+    repo = ServiceOrderRepository(session)
+    with pytest.raises(InvalidStatusTransitionError, match="from PENDING_COLLABORATOR"):
+        await repo.transition(order, to_status="COMPLETED")
+
+
+@pytest.mark.asyncio
+async def test_transition_from_terminal_state_raises() -> None:
+    """COMPLETED → ACCEPTED — invalid (terminal except → DISPUTED)."""
+    order = _make_order(status="COMPLETED")
+    session = _mock_session()
+    repo = ServiceOrderRepository(session)
+    with pytest.raises(InvalidStatusTransitionError):
+        await repo.transition(order, to_status="ACCEPTED")

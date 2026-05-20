@@ -1,22 +1,28 @@
 """FastAPI router для `/api/v1/service-orders/*` (ТЗ §3.10.6, #224).
 
-4 endpoint'а:
+7 endpoint'ов:
 - `GET /service-orders` — list (customer's own или staff filter).
 - `POST /service-orders` — create (idempotent через Idempotency-Key).
 - `GET /service-orders/{id}` — карточка (owner-or-staff).
 - `POST /service-orders/{id}/cancel` — отмена (owner-or-staff).
+- `POST /service-orders/{id}/accept` — accept (staff-only MVP; #329).
+- `POST /service-orders/{id}/complete` — completion (staff-only MVP; #329).
+- `POST /service-orders/{id}/fail` — failure (staff-only MVP; #329).
 
 Per ТЗ §3.10.6: «Деньги пользователя удерживаются в эскроу» — payment
 flow OUT OF SCOPE этого PR (Architect deferred). Создание order'а
 ставит `payment_status='HOLD'` placeholder без реального hold'а.
 
-Webhook events (ТЗ §5.1):
+Webhook events (ТЗ §5.1) — все 5 lifecycle events wired:
 - create → `service_order.created`
+- accept → `service_order.accepted` (#329)
+- complete → `service_order.completed` (#329)
+- fail → `service_order.failed` (#329)
 - cancel → `service_order.cancelled`
-- `accepted` / `completed` / `failed` — emitter'ы готовы (helper
-  `_dispatch_lifecycle_event`), но соответствующие state transitions
-  endpoint'ы — backlog (отдельный PR на collaborator-side accept/
-  complete actions).
+
+RBAC на accept/complete/fail — staff-only до landing'а collaborator-side
+auth (partner CRM integration). После landing'а — расширится на owner
+collaborator (по `collaborator_id` order'а).
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from src.api.collaborators.service_orders_schemas import (
     ServiceOrderListResponse,
     ServiceOrderResponse,
     ServiceOrderStatus,
+    ServiceOrderTransitionInput,
 )
 from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
@@ -299,6 +306,146 @@ async def cancel_service_order(
         order=cancelled,
     )
     return ServiceOrderResponse.model_validate(cancelled)
+
+
+async def _staff_only_transition(
+    *,
+    order_id: UUID,
+    to_status: str,
+    event: WebhookEvent,
+    payload: ServiceOrderTransitionInput | None,
+    claims: dict[str, Any],
+    access_levels: frozenset[AccessLevel],
+    repo: ServiceOrderRepository,
+    session: AsyncSession,
+    webhook_dispatcher: WebhookEventDispatcher,
+) -> ServiceOrderResponse:
+    """Shared body для accept / complete / fail endpoints.
+
+    RBAC: staff-only до landing'а partner auth (см. модуль docstring).
+    404-mask non-staff (consistent с другими out-of-scope endpoints).
+    """
+    if not _is_staff(access_levels):
+        raise HTTPException(status_code=403, detail="staff-only operation")
+    order = await repo.get_for_actor(order_id, actor_sub=claims["sub"], is_staff=True)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Service order not found")
+
+    notes = payload.notes if payload is not None else None
+    try:
+        updated = await repo.transition(order, to_status=to_status, notes=notes)
+    except InvalidStatusTransitionError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await session.commit()
+    await _dispatch_lifecycle_event(webhook_dispatcher, event=event, order=updated)
+    return ServiceOrderResponse.model_validate(updated)
+
+
+@router.post(
+    "/{order_id}/accept",
+    response_model=ServiceOrderResponse,
+    response_model_by_alias=True,
+    summary="Принять заказ (staff-only MVP)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff scope"},
+        404: {"description": "Не найдено"},
+        409: {"description": "Невалидный переход состояния"},
+    },
+)
+async def accept_service_order(
+    order_id: UUID = Path(...),
+    payload: ServiceOrderTransitionInput | None = Body(default=None),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ServiceOrderRepository = Depends(get_service_order_repository),
+    session: AsyncSession = Depends(get_session),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+) -> ServiceOrderResponse:
+    """`POST /service-orders/{id}/accept` — PENDING_COLLABORATOR → ACCEPTED."""
+    return await _staff_only_transition(
+        order_id=order_id,
+        to_status="ACCEPTED",
+        event=WebhookEvent.SERVICE_ORDER_ACCEPTED,
+        payload=payload,
+        claims=claims,
+        access_levels=access_levels,
+        repo=repo,
+        session=session,
+        webhook_dispatcher=webhook_dispatcher,
+    )
+
+
+@router.post(
+    "/{order_id}/complete",
+    response_model=ServiceOrderResponse,
+    response_model_by_alias=True,
+    summary="Завершить заказ (staff-only MVP)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff scope"},
+        404: {"description": "Не найдено"},
+        409: {"description": "Невалидный переход состояния"},
+    },
+)
+async def complete_service_order(
+    order_id: UUID = Path(...),
+    payload: ServiceOrderTransitionInput | None = Body(default=None),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ServiceOrderRepository = Depends(get_service_order_repository),
+    session: AsyncSession = Depends(get_session),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+) -> ServiceOrderResponse:
+    """`POST /service-orders/{id}/complete` — ACCEPTED | IN_PROGRESS → COMPLETED."""
+    return await _staff_only_transition(
+        order_id=order_id,
+        to_status="COMPLETED",
+        event=WebhookEvent.SERVICE_ORDER_COMPLETED,
+        payload=payload,
+        claims=claims,
+        access_levels=access_levels,
+        repo=repo,
+        session=session,
+        webhook_dispatcher=webhook_dispatcher,
+    )
+
+
+@router.post(
+    "/{order_id}/fail",
+    response_model=ServiceOrderResponse,
+    response_model_by_alias=True,
+    summary="Зафиксировать неудачу заказа (staff-only MVP)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff scope"},
+        404: {"description": "Не найдено"},
+        409: {"description": "Невалидный переход состояния"},
+    },
+)
+async def fail_service_order(
+    order_id: UUID = Path(...),
+    payload: ServiceOrderTransitionInput | None = Body(default=None),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ServiceOrderRepository = Depends(get_service_order_repository),
+    session: AsyncSession = Depends(get_session),
+    webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
+) -> ServiceOrderResponse:
+    """`POST /service-orders/{id}/fail` — PENDING | ACCEPTED | IN_PROGRESS → FAILED."""
+    return await _staff_only_transition(
+        order_id=order_id,
+        to_status="FAILED",
+        event=WebhookEvent.SERVICE_ORDER_FAILED,
+        payload=payload,
+        claims=claims,
+        access_levels=access_levels,
+        repo=repo,
+        session=session,
+        webhook_dispatcher=webhook_dispatcher,
+    )
 
 
 __all__ = ["router"]
