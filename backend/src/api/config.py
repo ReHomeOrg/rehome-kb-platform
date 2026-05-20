@@ -183,6 +183,25 @@ class Settings(BaseSettings):
     # backend transition'ит на новый primary key. None = только primary.
     hr_encryption_key_legacy: str | None = Field(default=None, alias="HR_ENCRYPTION_KEY_LEGACY")
 
+    # FIDO2 / WebAuthn settings (ADR-0022 A). RP = Relying Party.
+    # `rp_id` должен matched domain'у браузера (origin check); `localhost`
+    # для local dev, production выставляет `rehome.one`. Изменение RP_ID
+    # инвалидирует все registered keys (security feature, не bug).
+    webauthn_rp_id: str = Field(default="localhost", alias="WEBAUTHN_RP_ID")
+    webauthn_rp_name: str = Field(default="reHome Vault", alias="WEBAUTHN_RP_NAME")
+    # Origin для assertion validation. Comma-separated если multiple
+    # (e.g. `https://rehome.one,https://app.rehome.one`).
+    webauthn_origins: str = Field(
+        default="http://localhost:3000",
+        alias="WEBAUTHN_ORIGINS",
+    )
+    # `preferred` accept'ит auth UV если authenticator supports; не
+    # требует — иначе users без biometric authenticator locked out.
+    webauthn_user_verification: Literal["required", "preferred", "discouraged"] = Field(
+        default="preferred",
+        alias="WEBAUTHN_USER_VERIFICATION",
+    )
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
@@ -200,6 +219,12 @@ class Settings(BaseSettings):
     def keycloak_jwks_url(self) -> str:
         """JWKS endpoint для получения публичных ключей realm."""
         return f"{self.keycloak_issuer}/protocol/openid-connect/certs"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def webauthn_origin_list(self) -> tuple[str, ...]:
+        """Parsed origin list (comma-separated) для WebAuthn validation."""
+        return tuple(o.strip() for o in self.webauthn_origins.split(",") if o.strip())
 
 
 def get_settings() -> Settings:

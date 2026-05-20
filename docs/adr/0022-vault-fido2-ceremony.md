@@ -2,16 +2,32 @@
 
 ## Статус
 
-- [x] **Предложено**
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант A — FIDO2 заменяет TOTP) — 2026-05-20 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
-- **Дата:** 2026-05-23
+- **Дата:** 2026-05-23 (предложено), 2026-05-20 (approved)
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Требуется approve Архитектора:** scope choice (WebAuthn replacement
-  vs supplement TOTP), Authenticator policy, RP identification, attest-
-  ation requirements, supplementary keystores (multiple keys per user).
+- **Approve note:** Architect approved Вариант A (cold-cut, не phased C).
+  Existing TOTP-users grandfathered: TOTP unlock-path остаётся
+  активным для users у которых TOTP setup'нут; new vault users —
+  FIDO2-only setup. Migration UX «Add FIDO2 → optionally remove
+  TOTP» — user-driven (не forced deadline).
+
+  **Defaults для open questions (Architect approved при implementation):**
+  - `WEBAUTHN_RP_ID` — env-driven, default `localhost` в dev, prod
+    выставляет `rehome.one`.
+  - `WEBAUTHN_RP_NAME` — `reHome Vault`.
+  - `AuthenticatorAttachment` — не specified (either platform / cross-
+    platform; max usability).
+  - `UserVerification` — `preferred` (accept authenticator capability
+    without forcing biometric prompt).
+  - `Attestation` — `none` (internal app, нет CA validation).
+  - Multiple keys per user — max **5** (anti-abuse cap, primary + 4
+    backups).
+  - Backup procedure — Passkey-friendly (resident-key allowed); user
+    видит each key в `/vault/keys` и может revoke.
 
 ## Контекст
 
