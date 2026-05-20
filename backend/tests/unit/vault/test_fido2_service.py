@@ -177,6 +177,66 @@ async def test_complete_registration_persists_credential_on_success() -> None:
     assert kwargs["credential_id"] == b"\xaa" * 32
     assert kwargs["nickname"] == "YubiKey"
     assert kwargs["transports"] == ["usb"]
+    # C-1: AAGUID должен быть 16 raw bytes (не 36-char UTF-8 string).
+    from uuid import UUID as _UUID
+
+    assert kwargs["aaguid"] == _UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").bytes
+    assert len(kwargs["aaguid"]) == 16
+
+
+@pytest.mark.asyncio
+async def test_complete_registration_handles_invalid_aaguid_gracefully() -> None:
+    """Malformed AAGUID string → None (don't crash credential persistence)."""
+    user_id = uuid4()
+    challenge = b"\xcc" * 32
+
+    cred_repo = MagicMock()
+    cred_repo.create = AsyncMock(return_value=_make_stored_cred(user_id))
+    challenge_repo = MagicMock()
+    challenge_repo.consume = AsyncMock(return_value=True)
+
+    verified = MagicMock(
+        credential_id=b"\xaa" * 32,
+        credential_public_key=b"\x02" * 64,
+        sign_count=0,
+        aaguid="not-a-uuid",
+    )
+
+    with patch("src.api.vault.fido2.verify_registration_response", return_value=verified):
+        await complete_registration(
+            user_id=user_id,
+            credential=_make_credential(challenge),
+            nickname=None,
+            cred_repo=cred_repo,
+            challenge_repo=challenge_repo,
+            settings=_settings(),
+        )
+    assert cred_repo.create.call_args.kwargs["aaguid"] is None
+
+
+@pytest.mark.asyncio
+async def test_start_registration_rejects_when_user_at_cap() -> None:
+    """N-1: fail-fast при register-begin если user уже на MAX_KEYS_PER_USER."""
+    from src.api.vault.fido2_repository import MAX_KEYS_PER_USER
+
+    user_id = uuid4()
+    full = [_make_stored_cred(user_id) for _ in range(MAX_KEYS_PER_USER)]
+    cred_repo = MagicMock()
+    cred_repo.list_by_user = AsyncMock(return_value=full)
+    challenge_repo = MagicMock()
+    challenge_repo.create = AsyncMock()
+
+    with pytest.raises(VaultFIDO2CapacityError):
+        await start_registration(
+            user_id=user_id,
+            user_name="alice",
+            user_display_name=None,
+            cred_repo=cred_repo,
+            challenge_repo=challenge_repo,
+            settings=_settings(),
+        )
+    # Challenge should NOT have been persisted.
+    challenge_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -322,6 +382,34 @@ async def test_complete_authentication_detects_sign_count_regression() -> None:
             challenge_repo=challenge_repo,
             settings=_settings(),
         )
+
+
+@pytest.mark.asyncio
+async def test_complete_authentication_allows_zero_counter_passkey() -> None:
+    """Multi-device passkeys may report sign_count=0 без bump. Allowed."""
+    user_id = uuid4()
+    challenge = b"\xcc" * 32
+    stored = _make_stored_cred(user_id)
+    stored.sign_count = 0
+
+    cred_repo = MagicMock()
+    cred_repo.get_by_credential_id = AsyncMock(return_value=stored)
+    cred_repo.update_sign_count = AsyncMock()
+    challenge_repo = MagicMock()
+    challenge_repo.consume = AsyncMock(return_value=True)
+
+    verified = MagicMock(new_sign_count=0)
+
+    with patch("src.api.vault.fido2.verify_authentication_response", return_value=verified):
+        result = await complete_authentication(
+            user_id=user_id,
+            credential=_make_credential(challenge),
+            cred_repo=cred_repo,
+            challenge_repo=challenge_repo,
+            settings=_settings(),
+        )
+    assert result is stored
+    cred_repo.update_sign_count.assert_awaited_once_with(stored.id, 0)
 
 
 @pytest.mark.asyncio

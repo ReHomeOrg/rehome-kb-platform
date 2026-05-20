@@ -73,6 +73,14 @@ async def start_registration(
     encoded base64url для browser consumption.
     """
     existing = await cred_repo.list_by_user(user_id)
+    # Fail-fast если user at-cap — иначе ceremony завершится 409 на complete
+    # (плохой UX: пользователь делает biometric prompt, потом получает отказ).
+    from src.api.vault.fido2_repository import MAX_KEYS_PER_USER
+
+    if len(existing) >= MAX_KEYS_PER_USER:
+        raise VaultFIDO2CapacityError(
+            f"Max {MAX_KEYS_PER_USER} FIDO2 keys per user; revoke an existing key first."
+        )
     exclude = [PublicKeyCredentialDescriptor(id=c.credential_id, transports=None) for c in existing]
 
     options = generate_registration_options(
@@ -133,13 +141,32 @@ async def complete_registration(
             credential_id=verified.credential_id,
             public_key=verified.credential_public_key,
             transports=list(transports),
-            aaguid=verified.aaguid.encode("utf-8") if verified.aaguid else None,
+            aaguid=_aaguid_to_bytes(verified.aaguid),
             nickname=nickname,
             sign_count=verified.sign_count,
         )
     except VaultFIDO2CapacityError:
         raise
     return row
+
+
+def _aaguid_to_bytes(aaguid: str | None) -> bytes | None:
+    """Convert py_webauthn AAGUID (UUID-formatted string) → 16 raw bytes.
+
+    `VaultFIDO2Credential.aaguid` column = `LargeBinary(16)`. Naive
+    `.encode("utf-8")` stores the 36-char UTF-8 string (silent data corruption)
+    — use `UUID(...).bytes` for proper 16-byte serialization.
+
+    AAGUID per WebAuthn spec — все нули legitimate (authenticator не сообщает
+    модель), но py_webauthn возвращает строку либо None. Здесь None passthrough.
+    """
+    if not aaguid:
+        return None
+    try:
+        return UUID(aaguid).bytes
+    except (ValueError, AttributeError) as exc:
+        logger.warning("invalid_aaguid", extra={"aaguid": aaguid, "error": str(exc)})
+        return None
 
 
 async def start_authentication(
