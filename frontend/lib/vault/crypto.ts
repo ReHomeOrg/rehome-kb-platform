@@ -198,6 +198,51 @@ export async function generateSecretKey(): Promise<CryptoKey> {
   );
 }
 
+/**
+ * Re-derive raw KEK bytes from password — ceremony-only path для
+ * emergency access setup (ADR-0021 A).
+ *
+ * Standard `deriveKeys` returns non-extractable CryptoKey (ADR-0016 §D).
+ * Escrow ceremony needs raw KEK bytes to wrap under escrow_key. Caller
+ * MUST zero the returned array immediately after use (`array.fill(0)`).
+ *
+ * Same Argon2id + HKDF params как `deriveKeys` — must produce identical
+ * KEK bytes для consistency с unlock flow.
+ */
+export async function deriveExtractableKek(
+  password: string,
+  argonSalt: Uint8Array,
+): Promise<Uint8Array> {
+  const masterKey = await argon2id({
+    password,
+    salt: argonSalt,
+    parallelism: ARGON2_PARALLELISM,
+    iterations: ARGON2_ITERATIONS,
+    memorySize: ARGON2_MEMORY_KIB,
+    hashLength: ARGON2_OUTPUT_BYTES,
+    outputType: "binary",
+  });
+
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw",
+    bs(masterKey),
+    { name: "HKDF" },
+    /* extractable */ false,
+    ["deriveBits"],
+  );
+  const vaultBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: bs(new Uint8Array(0)),
+      info: bs(utf8(HKDF_INFO_VAULT)),
+    },
+    hkdfKey,
+    256,
+  );
+  return new Uint8Array(vaultBits);
+}
+
 /** Encrypt plaintext (string) → `iv || ciphertext || tag` byte array. */
 export async function encryptBlob(
   secretKey: CryptoKey,

@@ -532,9 +532,12 @@ UI implementations.**
    (split/combine с HMAC integrity), vault_users.escrow_wrap + vault_
    emergency_unlock_log, POST /vault/setup-escrow + POST /admin/vault/
    emergency-unlock, severity-by-reason mapping + РКН policy (только
-   incident category). Frontend ceremony UI — PR 2 backlog. Production
-   gate: physical инфра (sealed envelopes + физ. сейфы у директора и
-   юр. фирмы) — Architect responsibility, не blocker code merge.
+   incident category). Owner setup ceremony UI landit в #334: TS port
+   Shamir SSS + base32, SetupEscrowForm с password re-prompt + share
+   generation + двойной envelope acknowledgement. Wired в /vault Security
+   tab. Admin emergency-unlock UI (combine shares + decrypt vault) — PR 3
+   backlog. Production gate: physical инфра (sealed envelopes + физ.
+   сейфы у директора и юр. фирмы) — Architect responsibility.
 3. **POST /documents create endpoint** — нужен в OpenAPI?
    (ADR-0023 Proposed, awaits architect approval).
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.

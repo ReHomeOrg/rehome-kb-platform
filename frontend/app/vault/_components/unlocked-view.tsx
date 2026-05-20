@@ -23,6 +23,7 @@ import ExpirySummary from "./expiry-summary";
 import Fido2KeysPanel from "./fido2-keys-panel";
 import GroupsPanel from "./groups-panel";
 import SecretsList from "./secrets-list";
+import SetupEscrowForm from "./setup-escrow-form";
 import TotpSetupForm from "./totp-setup-form";
 
 type Tab = "secrets" | "groups" | "security";
@@ -30,9 +31,10 @@ type Tab = "secrets" | "groups" | "security";
 interface Props {
   userId: string;
   hasTotp: boolean;
+  argonSaltB64: string;
 }
 
-export default function UnlockedView({ userId, hasTotp }: Props): JSX.Element {
+export default function UnlockedView({ userId, hasTotp, argonSaltB64 }: Props): JSX.Element {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("secrets");
   const [showCreate, setShowCreate] = useState(false);
@@ -177,6 +179,8 @@ export default function UnlockedView({ userId, hasTotp }: Props): JSX.Element {
             <div className="mt-6 border-t border-gray-200 pt-6">
               <Fido2KeysPanel />
             </div>
+
+            <EmergencyAccessSection argonSaltB64={argonSaltB64} />
           </div>
         )}
       </div>
@@ -204,5 +208,48 @@ function TabButton({ current, value, label, onClick }: TabBtnProps): JSX.Element
     >
       {label}
     </button>
+  );
+}
+
+function EmergencyAccessSection({ argonSaltB64 }: { argonSaltB64: string }): JSX.Element {
+  const [showSetup, setShowSetup] = useState(false);
+  const [done, setDone] = useState(false);
+  return (
+    <div className="mt-6 border-t border-gray-200 pt-6">
+      <h3 className="text-sm font-medium text-gray-700">
+        Emergency access (ADR-0021)
+      </h3>
+      <p className="mt-1 text-xs text-gray-600">
+        Восстановление vault&apos;а при потере master password — через
+        Shamir 2-of-2 ceremony. Shares распечатываются + хранятся в физ.
+        сейфах (директор + юрист). Без обоих — vault невосстановим.
+      </p>
+      {done ? (
+        <p className="mt-2 rounded border border-green-200 bg-green-50 p-2 text-xs text-green-900">
+          ✓ Emergency access настроен. Hовая ceremony перезапишет shares
+          (используйте если перенесли envelope или сменили master password).
+        </p>
+      ) : null}
+      {showSetup ? (
+        <div className="mt-3">
+          <SetupEscrowForm
+            argonSaltB64={argonSaltB64}
+            onSuccess={() => {
+              setShowSetup(false);
+              setDone(true);
+            }}
+            onCancel={() => setShowSetup(false)}
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowSetup(true)}
+          className="mt-3 rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+        >
+          {done ? "Настроить заново" : "Настроить emergency access"}
+        </button>
+      )}
+    </div>
   );
 }
