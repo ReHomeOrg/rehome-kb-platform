@@ -69,6 +69,15 @@ ACTION_VAULT_GROUP_CREATED: Final = "vault.group.created"
 ACTION_VAULT_GROUP_MEMBER_ADDED: Final = "vault.group.member.added"
 ACTION_VAULT_GROUP_MEMBER_REMOVED: Final = "vault.group.member.removed"
 
+# FIDO2 / WebAuthn actions (ADR-0022 A). Metadata содержит credential_id
+# (opaque base64) + transports list; НЕ содержит public_key (избыточно,
+# stored в DB) и НЕ signCounter (включается в incident analysis по
+# credential_id lookup).
+ACTION_VAULT_FIDO2_REGISTERED: Final = "vault.fido2.registered"
+ACTION_VAULT_FIDO2_REVOKED: Final = "vault.fido2.revoked"
+ACTION_VAULT_FIDO2_ASSERT_SUCCESS: Final = "vault.fido2.assert.success"
+ACTION_VAULT_FIDO2_ASSERT_FAILED: Final = "vault.fido2.assert.failed"
+
 # Document file actions (#214, ADR-0012). Metadata machine-level only —
 # no filename / no content (анти-leak PII в audit_log JSONB).
 RESOURCE_DOCUMENT: Final = "document"

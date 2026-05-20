@@ -529,8 +529,10 @@ UI implementations.**
    honest stub; presence logged в audit но не verified).
 
 Self-serve M-sized items без design дополнительного:
-1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh). Нужен
-   ADR для ceremony flow.
+1. **Vault Stage 2 FIDO2** — WebAuthn integration. ADR-0022 принят
+   (Вариант A), foundation landit в #328 (table + repository + settings
+   + webauthn dep); ceremony endpoints (register/assert begin/complete +
+   list/delete) — следующий PR.
 2. **Grafana dashboards** — JSON configs для существующих метрик
    (alert rules уже landit в #241/#293; dashboards — companion).
    Best built against running Grafana instance.
