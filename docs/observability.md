@@ -107,12 +107,23 @@ Route'ы по severity:
 
 ### Grafana
 
-Dashboards — backlog (см. CS.11 в state-of-code.md). Минимальный
-viable набор queries для quick dashboards:
-- `sum(rate(kb_webhook_deliveries_total{status="delivered"}[5m])) by (event_type)`
-- `histogram_quantile(0.95, sum by (le, scope) (rate(kb_chat_message_duration_seconds_bucket[5m])))`
-- `sum(rate(kb_vault_unlock_total[1h])) by (result)`
-- `histogram_quantile(0.95, sum by (le) (rate(kb_retrieval_duration_seconds_bucket[5m])))`
+Dashboards: 4 starter JSON files в `ops/observability/grafana/dashboards/`:
+- `api-overview.json` — HTTP request rate / 5xx error rate / latency
+  p50/p95/p99 per route.
+- `webhooks.json` — delivery rate by event/status / failure rate /
+  duration p50/p95 / retry rate.
+- `vault-chat-search.json` — vault unlock / secret access / chat
+  latency + rate / search retrieval latency + no-results rate.
+- `workers.json` — indexer rate + queue depth / popular_query scans
+  / vault_reminders scans.
+
+**⚠ Untested baseline.** JSON синтаксис validate'нут (json.load passes),
+но не verified в running Grafana 10+. Ops team должен:
+1. Import via Grafana UI (Dashboard → Import → upload JSON).
+2. Verify panels render с правильным datasource.
+3. Adjust `gridPos` / panel sizes если нужно.
+
+Все queries derived из метрик catalog ранее в этом документе.
 
 ## Cardinality budget
 
