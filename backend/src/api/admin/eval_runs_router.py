@@ -22,6 +22,7 @@ from src.api.admin.eval_runs_service import (
     EvalRunsService,
     EvalRunValidationError,
 )
+from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
 from src.api.admin.tasks_repository import (
     AdminTaskRepository,
     get_admin_task_repository,
@@ -49,8 +50,9 @@ def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
 
 def _get_eval_runs_service(
     repo: AdminTaskRepository = Depends(get_admin_task_repository),
+    runner: AdminTaskRunner = Depends(get_admin_task_runner),
 ) -> EvalRunsService:
-    return EvalRunsService(repo)
+    return EvalRunsService(repo, runner)
 
 
 @router.post(

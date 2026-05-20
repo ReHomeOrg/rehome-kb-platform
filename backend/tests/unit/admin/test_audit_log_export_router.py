@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -232,8 +233,10 @@ def test_task_lifecycle_created_running_completed(
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
     audit_repo_mock: AsyncMock,
+    admin_task_runner_mock: Any,
 ) -> None:
-    """create → mark_running → mark_completed (with result_url)."""
+    """Per ADR-0020 B: handler creates task + spawns runner. mark_running/
+    mark_completed happen в background coroutine (covered в runner tests)."""
     task = _make_task()
     task_repo_mock["create"].return_value = task
 
@@ -256,11 +259,12 @@ def test_task_lifecycle_created_running_completed(
     assert create_kwargs["params"]["reason"] == "запрос из РКН №123"
     assert create_kwargs["params"]["format"] == "csv"
 
-    # Lifecycle methods called в правильном порядке.
-    task_repo_mock["mark_running"].assert_awaited_once_with(task.id)
-    task_repo_mock["mark_completed"].assert_awaited_once()
-    completed_kwargs = task_repo_mock["mark_completed"].call_args.kwargs
-    assert completed_kwargs["result_url"].startswith("/api/v1/audit-log/export.csv?")
+    # ADR-0020 B: spawn called с result_url; mark_running/completed —
+    # background coroutine concern, не request handler.
+    admin_task_runner_mock.spawn_audit_export.assert_called_once()
+    call = admin_task_runner_mock.spawn_audit_export.call_args
+    assert call.args[0] == task.id
+    assert call.args[1].startswith("/api/v1/audit-log/export.csv?")
 
     # Audit trail.
     audit_repo_mock.assert_awaited_once()
@@ -274,6 +278,7 @@ def test_filters_propagate_to_result_url(
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
     audit_repo_mock: AsyncMock,
+    admin_task_runner_mock: Any,
 ) -> None:
     task = _make_task()
     task_repo_mock["create"].return_value = task
@@ -289,7 +294,8 @@ def test_filters_propagate_to_result_url(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 202
-    result_url = task_repo_mock["mark_completed"].call_args.kwargs["result_url"]
+    # Per ADR-0020 B: result_url передаётся в spawn_audit_export (2nd arg).
+    result_url = admin_task_runner_mock.spawn_audit_export.call_args.args[1]
     assert "resource_type=vault_secret" in result_url
     assert "action=vault.unlock.failed" in result_url
 
@@ -299,6 +305,7 @@ def test_unknown_filter_keys_ignored_safely(
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
     audit_repo_mock: AsyncMock,
+    admin_task_runner_mock: Any,
 ) -> None:
     """Anti-injection: payload filter с unknown key → не leak'ается в URL."""
     task = _make_task()
@@ -315,6 +322,6 @@ def test_unknown_filter_keys_ignored_safely(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 202
-    result_url = task_repo_mock["mark_completed"].call_args.kwargs["result_url"]
+    result_url = admin_task_runner_mock.spawn_audit_export.call_args.args[1]
     assert "injection" not in result_url
     assert "actor_sub=x" in result_url

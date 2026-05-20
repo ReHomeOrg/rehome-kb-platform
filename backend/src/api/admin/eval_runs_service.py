@@ -21,6 +21,7 @@ from src.api.admin.eval_runs_schemas import (
     EvalRunStartRequest,
     EvalRunSummary,
 )
+from src.api.admin.task_runner import AdminTaskRunner
 from src.api.admin.tasks_models import AdminTask
 from src.api.admin.tasks_repository import AdminTaskRepository
 from src.api.chat.llm.mock import MockProvider
@@ -48,10 +49,19 @@ class EvalRunValidationError(ValueError):
 
 
 class EvalRunsService:
-    """Executes eval runs + projects admin_tasks rows to OpenAPI shape."""
+    """Executes eval runs + projects admin_tasks rows to OpenAPI shape.
 
-    def __init__(self, task_repo: AdminTaskRepository) -> None:
+    Per ADR-0020 Вариант B (#268): runner spawns background coroutine
+    для actual execution. Service just creates PENDING row + delegates.
+    """
+
+    def __init__(
+        self,
+        task_repo: AdminTaskRepository,
+        runner: AdminTaskRunner | None = None,
+    ) -> None:
         self._task_repo = task_repo
+        self._runner = runner
 
     async def start_run(
         self,
@@ -59,9 +69,11 @@ class EvalRunsService:
         *,
         actor_sub: str,
     ) -> AdminTask:
-        """Validate + create admin_task + execute synchronously.
+        """Validate + create PENDING task + spawn background runner.
 
-        Real async execution — backlog (см. CS.11 admin_tasks async worker).
+        Background execution: см. `task_runner._run_eval`. На completion
+        results записываются inline в task.params (получаются через
+        GET /admin/llm/eval-runs).
         """
         self._validate(request)
         pairs = self._load_pairs(request)
@@ -75,21 +87,10 @@ class EvalRunsService:
                 "pair_count": len(pairs),
             },
         )
-        await self._task_repo.mark_running(task.id)
 
-        try:
-            results = await self._execute_per_provider(request.providers, pairs)
-        except Exception as exc:
-            logger.exception("eval_run.execution_failed", extra={"task_id": str(task.id)})
-            await self._task_repo.mark_failed(task.id, error=str(exc))
-            raise
-
-        # Merge results back в params для GET retrieval.
-        # Merge через _refresh-pattern: read row, update JSONB, flush.
-        row = await self._task_repo.get(task.id)
-        if row is not None:
-            row.params = {**row.params, "results": [r.model_dump() for r in results]}
-        await self._task_repo.mark_completed(task.id)
+        # ADR-0020 B: spawn off-request.
+        if self._runner is not None:
+            self._runner.spawn_eval_run(task.id, request.providers, pairs, actor_sub)
         return task
 
     @staticmethod
