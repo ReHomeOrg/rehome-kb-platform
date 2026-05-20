@@ -489,9 +489,10 @@ design-needed, требуют writable runtime config storage):
   system-config (одна из конкретных keys); same ADR покроет оба.
 
 **Backlog (требует доработки имплементации):**
-- Real async worker для admin_tasks (Dramatiq + Redis ADR'a) — сейчас
-  reindex / export / eval-runs выполняются sync в request (acceptable
-  на dev volumes, не production-scale).
+- ~~Real async worker для admin_tasks~~ ✅ DONE (#268, ADR-0020 B):
+  `asyncio.create_task` spawn + `task_reaper` (15-min stale window).
+  Phased migration к Dramatiq+Redis осталась backlog'ом при traffic
+  ≥10 task/s или payloads ≥10MB.
 - Real LLM providers в eval-runs (нужны env credentials).
 - Cache layer (если landit — DELETE /admin/cache wires automatically).
 
@@ -519,21 +520,24 @@ UI implementations.**
 Открытые задачи требующие design decision (architect input):
 1. ~~PATCH /admin/system-config + PUT /admin/llm/active~~ ✅ DONE
    (#264 backend ADR-0019; #265 + #266 frontend forms).
-2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design.
+2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design
+   (ADR-0021 Proposed, awaits architect approval).
 3. **POST /documents create endpoint** — нужен в OpenAPI?
+   (ADR-0023 Proposed, awaits architect approval).
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
-5. **Real async worker для admin_tasks** — Redis (Dramatiq) vs
-   asyncio.create_task; production-scale gate для reindex / export /
-   eval-runs (сейчас sync execution).
+5. ~~Real async worker для admin_tasks~~ ✅ DONE (#268, ADR-0020 B):
+   `asyncio.create_task` spawn + reaper для crash recovery. Phased
+   migration к Dramatiq+Redis — backlog при ≥10 task/s.
 6. **Keycloak step-up auth** для X-MFA-Token validation (#264 — пока
    honest stub; presence logged в audit но не verified).
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration (M, fresh). Нужен
-   ADR для ceremony flow.
+   ADR для ceremony flow (ADR-0022 Proposed, awaits architect approval).
 2. **Grafana dashboards** — JSON configs для существующих метрик
    (alert rules уже landit в #241/#293; dashboards — companion).
-   Best built against running Grafana instance.
+   Best built against running Grafana instance (PR #267 landed starter
+   set, validation на running Grafana — backlog).
 3. ~~Real `IndexerService.reindex_all_articles`~~ ✅ DONE (#240/#292).
 4. ~~POST/GET /admin/llm/eval-runs~~ ✅ DONE MVP (#244/#297; mock+smoke).
 5. ~~Frontend admin UI (read-only)~~ ✅ DONE (PRs #301-#307).
