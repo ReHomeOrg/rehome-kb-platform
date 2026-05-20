@@ -61,6 +61,16 @@ def _make_log_row(security_incident_id: Any = None) -> VaultEmergencyUnlockLog:
     return row
 
 
+def test_detected_by_value_matches_security_incidents_check_constraint() -> None:
+    """Drift guard: SecurityIncident created в service MUST use detected_by
+    из DETECTED_BY enum (DB CHECK constraint). Без этой проверки production
+    INSERT упал бы IntegrityError'ом — Reviewer C-1 catch."""
+    from src.api.admin.security_incidents_models import DETECTED_BY
+    from src.api.vault.emergency_service import _DETECTED_BY_STAFF
+
+    assert _DETECTED_BY_STAFF in DETECTED_BY
+
+
 @pytest.mark.asyncio
 async def test_record_emergency_unlock_creates_incident_and_log() -> None:
     target_user = uuid4()
@@ -89,6 +99,10 @@ async def test_record_emergency_unlock_creates_incident_and_log() -> None:
     assert incident.severity == "high"
     assert incident.rkn_notification_required is True
     assert incident.affected_resources == [{"type": "vault_user", "id": str(target_user)}]
+    # Lock-test для Reviewer C-1: detected_by must be in CHECK enum.
+    from src.api.admin.security_incidents_models import DETECTED_BY
+
+    assert incident.detected_by in DETECTED_BY
 
     # Log row создан.
     emergency_repo.log.assert_awaited_once()

@@ -22,7 +22,9 @@ from __future__ import annotations
 from typing import Final
 from uuid import UUID
 
-from src.api.admin.security_incidents_models import SecurityIncident
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.admin.security_incidents_models import DETECTED_BY, SecurityIncident
 from src.api.audit.actions import (
     ACTION_VAULT_EMERGENCY_UNLOCK,
     RESOURCE_VAULT_USER,
@@ -30,6 +32,16 @@ from src.api.audit.actions import (
 from src.api.audit.repository import AuditRepository
 from src.api.vault.emergency_repository import VaultEmergencyRepository
 from src.api.vault.models import EMERGENCY_REASON_CATEGORIES, VaultEmergencyUnlockLog
+
+# detected_by value для всех emergency_access incidents. Staff-initiated
+# event (admin manually triggers ceremony) — bound to DETECTED_BY CHECK
+# constraint enum в security_incidents table. Import константы для drift
+# safety: если кто-то изменит set allowed values без обновления здесь,
+# the assert на module load (ниже) сразу fail'ит.
+_DETECTED_BY_STAFF: Final = "staff"
+assert (
+    _DETECTED_BY_STAFF in DETECTED_BY
+), f"DETECTED_BY enum lost {_DETECTED_BY_STAFF!r}; update emergency_service.py"
 
 # Mapping reason_category → SecurityIncident.severity (Architect 2026-05-21).
 _SEVERITY_BY_REASON: Final[dict[str, str]] = {
@@ -64,13 +76,11 @@ async def record_emergency_unlock(
     reason_text: str,
     emergency_repo: VaultEmergencyRepository,
     audit_repo: AuditRepository,
-    session: object,
+    session: AsyncSession,
 ) -> VaultEmergencyUnlockLog:
     """Atomic orchestration: incident + unlock log + audit row.
 
-    `session` parameter typed as object для loose coupling (caller передаёт
-    AsyncSession). Все три write happen в caller's transaction; caller
-    commit'ит.
+    Все три write happen в caller's transaction; caller commit'ит.
 
     Returns the unlock log row (с populated security_incident_id).
     """
@@ -84,19 +94,21 @@ async def record_emergency_unlock(
 
     # Create SecurityIncident manually (не через repo.create) чтобы explicit
     # control над rkn_notification_required (Architect policy != severity-
-    # derived default).
+    # derived default). `detected_by="staff"` — admin manually triggered
+    # ceremony; must match DETECTED_BY CHECK constraint (drift-guarded
+    # выше).
     incident = SecurityIncident(
         incident_type="emergency_access",
         severity=severity,
         status="OPEN",
-        detected_by="emergency_unlock_endpoint",
+        detected_by=_DETECTED_BY_STAFF,
         affected_resources=[
             {"type": "vault_user", "id": str(target_user_id)},
         ],
         rkn_notification_required=rkn_required,
     )
-    session.add(incident)  # type: ignore[attr-defined]
-    await session.flush()  # type: ignore[attr-defined]
+    session.add(incident)
+    await session.flush()
 
     log_row = await emergency_repo.log(
         user_id=target_user_id,

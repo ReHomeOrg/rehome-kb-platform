@@ -23,6 +23,7 @@ Refs:
 
 from __future__ import annotations
 
+import base64
 import hmac
 import secrets
 from hashlib import sha256
@@ -185,15 +186,11 @@ def share_to_base32(share: bytes) -> str:
     наборе. Length = ⌈len(share) * 8 / 5⌉; для 32-byte secret share:
     1 (idx) + 32 (vals) + 8 (hmac) = 41 bytes → 66 base32 chars (с padding).
     """
-    import base64
-
     return base64.b32encode(share).decode("ascii").rstrip("=")
 
 
 def base32_to_share(s: str) -> bytes:
     """Inverse of `share_to_base32`. Tolerant к пробелам / case (human input)."""
-    import base64
-
     cleaned = "".join(s.upper().split())
     padding = "=" * (-len(cleaned) % 8)
     try:

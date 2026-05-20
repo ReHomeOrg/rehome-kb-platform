@@ -64,6 +64,7 @@ def upgrade() -> None:
         sa.Column(
             "security_incident_id",
             postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("security_incidents.id", ondelete="RESTRICT"),
             nullable=True,
         ),
         sa.Column(

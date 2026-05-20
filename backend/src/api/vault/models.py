@@ -293,7 +293,11 @@ class VaultEmergencyUnlockLog(Base):
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
     reason_category: Mapped[str] = mapped_column(String(32), nullable=False)
     reason_text: Mapped[str] = mapped_column(Text, nullable=False)
-    security_incident_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    security_incident_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("security_incidents.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     rkn_notify_required: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

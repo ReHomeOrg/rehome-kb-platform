@@ -198,12 +198,32 @@ async def emergency_unlock(
     )
 
     await session.commit()
-    assert log_row.security_incident_id is not None
+    # Service contract: security_incident_id always populated (orchestration
+    # creates incident before log row). Explicit guard вместо assert
+    # (которое stripped в -O mode → 500 далее в Pydantic).
+    if log_row.security_incident_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Internal: emergency unlock log missing security_incident_id",
+        )
+    severity = severity_for_reason(payload.reason_category)
+    logger.warning(
+        "vault.emergency.unlock",
+        extra={
+            "target_user_id": str(payload.target_user_id),
+            "requested_by": requested_by,
+            "reason_category": payload.reason_category,
+            "severity": severity,
+            "rkn_notify_required": log_row.rkn_notify_required,
+            "unlock_log_id": str(log_row.id),
+            "security_incident_id": str(log_row.security_incident_id),
+        },
+    )
     return VaultEmergencyUnlockResponse(
         unlock_log_id=log_row.id,
         security_incident_id=log_row.security_incident_id,
         rkn_notify_required=log_row.rkn_notify_required,
-        severity=severity_for_reason(payload.reason_category),
+        severity=severity,
         created_at=log_row.created_at,
         vault=payload_resp,
     )
