@@ -527,8 +527,14 @@ UI implementations.**
 Открытые задачи требующие design decision (architect input):
 1. ~~PATCH /admin/system-config + PUT /admin/llm/active~~ ✅ DONE
    (#264 backend ADR-0019; #265 + #266 frontend forms).
-2. **Vault Stage 2 emergency access** (2-of-2 escrow) — крипто-design
-   (ADR-0021 Proposed, awaits architect approval).
+2. ~~Vault Stage 2 emergency access~~ ✅ ADR-0021 принят (Вариант A,
+   2026-05-21). Backend foundation landit в #333: Shamir SSS over GF(256)
+   (split/combine с HMAC integrity), vault_users.escrow_wrap + vault_
+   emergency_unlock_log, POST /vault/setup-escrow + POST /admin/vault/
+   emergency-unlock, severity-by-reason mapping + РКН policy (только
+   incident category). Frontend ceremony UI — PR 2 backlog. Production
+   gate: physical инфра (sealed envelopes + физ. сейфы у директора и
+   юр. фирмы) — Architect responsibility, не blocker code merge.
 3. **POST /documents create endpoint** — нужен в OpenAPI?
    (ADR-0023 Proposed, awaits architect approval).
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.

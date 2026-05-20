@@ -78,6 +78,16 @@ ACTION_VAULT_FIDO2_REVOKED: Final = "vault.fido2.revoked"
 ACTION_VAULT_FIDO2_ASSERT_SUCCESS: Final = "vault.fido2.assert.success"
 ACTION_VAULT_FIDO2_ASSERT_FAILED: Final = "vault.fido2.assert.failed"
 
+# Emergency access actions (ADR-0021 A). Metadata содержит
+# `reason_category` + `requested_by`; reason_text НЕ дублируется в audit
+# (он в vault_emergency_unlock_log table — primary source).
+# `vault.escrow.setup` — owner setup'нул escrow ceremony (запись
+# escrow_wrap в vault_users). Operational event.
+# `vault.emergency.unlock` — admin combined shares + получил access.
+# Всегда paired с auto-created security_incident (severity по reason).
+ACTION_VAULT_ESCROW_SETUP: Final = "vault.escrow.setup"
+ACTION_VAULT_EMERGENCY_UNLOCK: Final = "vault.emergency.unlock"
+
 # Document file actions (#214, ADR-0012). Metadata machine-level only —
 # no filename / no content (анти-leak PII в audit_log JSONB).
 RESOURCE_DOCUMENT: Final = "document"
