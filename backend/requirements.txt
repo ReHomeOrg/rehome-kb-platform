@@ -21,4 +21,9 @@ minio==7.2.10
 # requirement когда роутер использует File/Form. Pin 0.0.27 — фикс
 # CVE-2026-24486 / -40347 / -42561 (DoS на malformed multipart).
 python-multipart==0.0.27
+# FIDO2 / WebAuthn server-side ceremony (ADR-0022 A). MIT-licensed,
+# self-hosted, no external service. Provides challenge generation +
+# attestation / assertion verification (COSE_Key decode, signature
+# verify against authenticator-provided public key).
+webauthn==2.5.2
 
