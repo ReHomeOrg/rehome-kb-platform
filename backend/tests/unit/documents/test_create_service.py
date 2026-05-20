@@ -164,13 +164,16 @@ async def test_create_document_emits_audit_and_webhook() -> None:
         "status": "DRAFT",
         "confidentiality": "INTERNAL",
     }
-    # Webhook dispatched.
+    # Webhook dispatched. Payload — machine-level only (ADR-0023 B,
+    # Architect 2026-05-20): `title` masked to avoid PII leak в external
+    # subscribers.
     dispatcher.dispatch.assert_awaited_once()
     dispatch_kwargs = dispatcher.dispatch.call_args.kwargs
     assert dispatch_kwargs["event_type"] == "document.created"
     payload = dispatch_kwargs["payload"]
     assert payload["document_id"] == str(doc.id)
-    assert payload["title"] == doc.title
+    assert "title" not in payload
+    assert "counterparty" not in payload
     assert payload["category"] == "B"
     assert payload["status"] == "DRAFT"
     assert payload["confidentiality"] == "INTERNAL"
