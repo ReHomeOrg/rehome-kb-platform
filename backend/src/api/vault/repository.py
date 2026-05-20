@@ -9,6 +9,7 @@ repository; собственно encryption / decryption — на клиенте
 Caller отвечает за commit (consistent с другими репозиториями).
 """
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Depends
@@ -75,14 +76,30 @@ class VaultRepository:
         `None` → disable TOTP. Returns updated row или None если
         vault_user не существует (caller → 404).
         """
-        from datetime import UTC
-        from datetime import datetime as _dt
-
         user = await self.get_user(user_id)
         if user is None:
             return None
         user.totp_secret_encrypted = totp_secret_encrypted
-        user.updated_at = _dt.now(UTC)
+        user.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return user
+
+    async def set_escrow_wrap(
+        self,
+        user_id: UUID,
+        escrow_wrap: bytes | None,
+    ) -> VaultUser | None:
+        """Set or clear `escrow_wrap` (ADR-0021 A).
+
+        Caller sends client-built AES-GCM(KEK, escrow_key) blob — server
+        treats opaque. `None` clears previous escrow setup (rotation flow).
+        Returns updated row или None если vault не существует.
+        """
+        user = await self.get_user(user_id)
+        if user is None:
+            return None
+        user.escrow_wrap = escrow_wrap
+        user.updated_at = datetime.now(UTC)
         await self._session.flush()
         return user
 

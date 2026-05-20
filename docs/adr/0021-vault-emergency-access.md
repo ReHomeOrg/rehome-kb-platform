@@ -2,15 +2,43 @@
 
 ## Статус
 
-- [x] **Предложено**
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант A — Shamir 2-of-2) — 2026-05-21 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
-- **Дата:** 2026-05-23
+- **Дата:** 2026-05-23 (предложено), 2026-05-21 (approved)
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Требуется approve Архитектора:** выбор Варианта (A / B / C) + escrow
-  политика (M-of-N threshold + восстановление SLA).
+- **Approve note (2026-05-21, Architect Evgeniy):**
+  - **Variant**: A (Shamir 2-of-2). Upgrade на B (3-of-5) только при
+    incident'е потери envelope.
+  - **Share holders**: директор (физ. сейф офиса) + юрист (физ. сейф
+    юр.фирмы). Юрист — внешняя сторона, обеспечивает разделение полномочий.
+  - **Recovery SLA**: 24h (факт) / 72h (состав) — ФЗ-152 §17.1 dictate,
+    не дискреционно.
+  - **`reason_category` enum (5)**: `incident` / `legal_order` /
+    `employee_departure` / `forensic_audit` / `password_lost`.
+  - **Auto-create security_incident**: YES, severity per category:
+    - `incident`, `forensic_audit` → high
+    - `legal_order` → medium
+    - `employee_departure`, `password_lost` → low
+  - **РКН notification**: только для `reason_category=incident` (это
+    реальный breach по §17.1). Остальные — logged, не auto-notify.
+    `legal_order` часто имеет non-disclosure clauses; auto-notify РКН
+    нарушит судебное решение. Staff manually triggers если
+    обнаруживают actual PII compromise.
+  - **Implementation split**: PR 1 backend (storage + endpoints + Shamir
+    SSS + audit + incident wiring), PR 2 frontend (setup-escrow ceremony
+    page + admin emergency-unlock UI с client-side SSS combine + decrypt).
+  - **Architecture clarification**: zero-knowledge preserved — Shamir
+    combine + KEK decrypt происходит **client-side (admin browser)**.
+    Backend хранит только `escrow_wrap` (opaque blob) и логирует event +
+    создаёт security_incident. Backend никогда не видит escrow_key или
+    shares.
+  - **Production gate**: code shipped не равно prod-ready. Mass-deploy
+    на real vaults — после Architect OK что физ. инфра готова (sealed
+    envelopes + физ. сейфы у директора + юр. фирмы). См. ADR-0018 для
+    аналогичного pattern.
 
 ## Контекст
 
