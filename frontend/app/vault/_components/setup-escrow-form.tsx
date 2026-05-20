@@ -99,6 +99,10 @@ export default function SetupEscrowForm({
       const shareBlobs = await splitSecret(escrowKey, { threshold: 2 });
       const director = shareToBase32(shareBlobs[0]);
       const lawyer = shareToBase32(shareBlobs[1]);
+      // Wipe raw binary share blobs (defense-in-depth — base32 strings
+      // в React state живут до handleConfirm; raw bytes больше не нужны).
+      shareBlobs[0].fill(0);
+      shareBlobs[1].fill(0);
 
       await setupEscrow({ escrow_wrap_b64: toBase64(escrowWrap) });
       setShares({ director, lawyer });
