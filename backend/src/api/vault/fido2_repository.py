@@ -1,14 +1,16 @@
-"""VaultFIDO2Repository — CRUD над vault_fido2_credentials (ADR-0022 A).
+"""VaultFIDO2Repository / VaultFIDO2ChallengeRepository — storage (ADR-0022 A).
 
 Storage-only. Caller (router / service) owns commit.
 
 Cap на multiple keys per user (MAX_KEYS_PER_USER = 5) enforced в `create`
 — anti-abuse + UX clarity (primary + 4 backups).
+
+Challenge repository персистит ceremony state (begin→complete), TTL 5 min.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Final
 from uuid import UUID
 
@@ -17,7 +19,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.db import get_session
-from src.api.vault.models import VaultFIDO2Credential
+from src.api.vault.models import VaultFIDO2Challenge, VaultFIDO2Credential
 
 # Max registered FIDO2 keys per user (ADR-0022 §approve-defaults).
 MAX_KEYS_PER_USER: Final = 5
@@ -136,9 +138,86 @@ def get_fido2_repository(
     return VaultFIDO2Repository(session)
 
 
+# Challenge TTL — 5 min достаточно: ceremony завершается обычно за секунды,
+# 5 min покрывает user delay (поиск device, biometric prompt).
+CHALLENGE_TTL: Final = timedelta(minutes=5)
+
+
+class VaultFIDO2ChallengeRepository:
+    """Storage layer для vault_fido2_challenges."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        challenge: bytes,
+        user_id: UUID,
+        ceremony: str,
+        ttl: timedelta = CHALLENGE_TTL,
+        now: datetime | None = None,
+    ) -> VaultFIDO2Challenge:
+        """INSERT row. Caller commit'ит."""
+        if ceremony not in ("registration", "authentication"):
+            raise ValueError(f"Invalid ceremony: {ceremony!r}")
+        issued_at = now or datetime.now(UTC)
+        row = VaultFIDO2Challenge(
+            challenge=challenge,
+            user_id=user_id,
+            ceremony=ceremony,
+            expires_at=issued_at + ttl,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def consume(
+        self,
+        *,
+        challenge: bytes,
+        user_id: UUID,
+        ceremony: str,
+        now: datetime | None = None,
+    ) -> bool:
+        """Verify + delete (single-use). Returns True if challenge was
+        valid (matched user + ceremony, not expired). Idempotency-safe:
+        повторный complete с тем же challenge → False (no replay).
+        """
+        current = now or datetime.now(UTC)
+        stmt = select(VaultFIDO2Challenge).where(
+            VaultFIDO2Challenge.challenge == challenge,
+            VaultFIDO2Challenge.user_id == user_id,
+            VaultFIDO2Challenge.ceremony == ceremony,
+        )
+        result = await self._session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None or row.expires_at < current:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
+    async def reap_expired(self, *, now: datetime | None = None) -> int:
+        """Bulk DELETE expired rows. Returns count. Idempotent."""
+        current = now or datetime.now(UTC)
+        stmt = delete(VaultFIDO2Challenge).where(VaultFIDO2Challenge.expires_at < current)
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
+
+
+def get_fido2_challenge_repository(
+    session: AsyncSession = Depends(get_session),
+) -> VaultFIDO2ChallengeRepository:
+    return VaultFIDO2ChallengeRepository(session)
+
+
 __all__ = [
+    "CHALLENGE_TTL",
     "MAX_KEYS_PER_USER",
     "VaultFIDO2CapacityError",
+    "VaultFIDO2ChallengeRepository",
     "VaultFIDO2Repository",
+    "get_fido2_challenge_repository",
     "get_fido2_repository",
 ]
