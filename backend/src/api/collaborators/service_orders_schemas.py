@@ -63,6 +63,18 @@ class ServiceOrderCancelInput(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class ServiceOrderTransitionInput(BaseModel):
+    """POST `/{id}/accept | /complete | /fail` body (optional).
+
+    `notes` опционально записывается в `collaborator_notes` (для FAILED —
+    причина; для COMPLETED — комментарий исполнителя).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class ServiceOrderResponse(BaseModel):
     """OpenAPI 04 `ServiceOrder` schema response."""
 
@@ -103,4 +115,5 @@ __all__ = [
     "ServiceOrderListResponse",
     "ServiceOrderResponse",
     "ServiceOrderStatus",
+    "ServiceOrderTransitionInput",
 ]
