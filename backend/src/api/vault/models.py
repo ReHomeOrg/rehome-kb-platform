@@ -223,3 +223,31 @@ class VaultFIDO2Credential(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_vault_fido2_credentials_user", "user_id"),)
+
+
+class VaultFIDO2Challenge(Base):
+    """WebAuthn ceremony challenge (ADR-0022 A).
+
+    Server-side state linking begin → complete steps. Challenge bytes
+    issued by py_webauthn (64 random bytes) are the PK; collision risk
+    cryptographically negligible.
+    """
+
+    __tablename__ = "vault_fido2_challenges"
+
+    challenge: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    ceremony: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "ceremony IN ('registration', 'authentication')",
+            name="ck_vault_fido2_challenges_ceremony",
+        ),
+        Index("ix_vault_fido2_challenges_user", "user_id"),
+        Index("ix_vault_fido2_challenges_expires_at", "expires_at"),
+    )
