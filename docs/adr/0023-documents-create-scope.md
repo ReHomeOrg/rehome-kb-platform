@@ -13,6 +13,13 @@
   only, wire `document.created` webhook via internal
   `DocumentRepository.create()` + `documents.service.create_document`.
   POST /api/v1/documents намеренно НЕ exposed на HTTP surface.
+- **Follow-up decision 2026-05-20:** `title` (и `counterparty`) НЕ
+  включаются в `document.created` webhook payload — machine-level only
+  (document_id + category + status + confidentiality + created_at).
+  Reason: external subscribers могут быть вне trust boundary
+  (1C/CRM/partner integrations); document titles могут содержать имена
+  контрагентов (ПДн). Subscriber retrieves full Document по
+  `document_id` через GET /documents/{id} с собственным scope-фильтром.
 
 ## Контекст
 
