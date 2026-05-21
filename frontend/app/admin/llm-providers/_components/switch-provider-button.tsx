@@ -3,13 +3,14 @@
 /**
  * Switch active LLM provider button (#265). PUT /admin/llm/active.
  *
- * Required reason + optional X-MFA-Token (honest stub в backend
- * пока не landит Keycloak step-up). На success → router.refresh().
+ * Required reason + X-MFA-Token via Keycloak step-up flow (ADR-0019,
+ * #336 backend / #337 frontend). На success → router.refresh().
  */
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import MfaStepUpButton from "@/app/_components/mfa-step-up-button";
 import { ApiError } from "@/lib/api/client";
 import { setActiveLlmProvider } from "@/lib/api/admin-llm-providers";
 
@@ -31,6 +32,11 @@ export default function SwitchProviderButton({ providerId }: Props): JSX.Element
     setError(undefined);
     if (!reason.trim()) {
       setError("Reason обязателен (audit trail).");
+      setBusy(false);
+      return;
+    }
+    if (!mfaToken.trim()) {
+      setError("MFA token обязателен (нажмите кнопку step-up выше).");
       setBusy(false);
       return;
     }
@@ -84,18 +90,15 @@ export default function SwitchProviderButton({ providerId }: Props): JSX.Element
           placeholder="A/B test до пятницы"
         />
       </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-gray-600">X-MFA-Token (honest stub)</span>
-        <input
-          type="text"
-          value={mfaToken}
-          onChange={(e) => setMfaToken(e.target.value)}
-          maxLength={500}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-          aria-label="MFA token"
-          placeholder="(necessary в production когда Keycloak step-up landит)"
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-600">
+          Step-up MFA (acr=2 required для switch)
+        </span>
+        <MfaStepUpButton
+          onTokenAcquired={setMfaToken}
+          hasToken={mfaToken.length > 0}
         />
-      </label>
+      </div>
       {error ? (
         <div
           role="alert"
