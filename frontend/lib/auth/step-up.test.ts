@@ -219,6 +219,26 @@ describe("requestStepUpToken", () => {
     await expect(promise).rejects.toThrow(/Popup closed/);
   });
 
+  it("rejects при empty idToken (closes nonce-bypass surface)", async () => {
+    const promise = requestStepUpToken();
+    await new Promise((r) => setTimeout(r, 10));
+    const storedState = sessionStorage.getItem("mfa_step_up_state")!;
+    const accessToken = _encodeJwtForTest({ acr: "2" });
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: "rehome-mfa-step-up",
+          accessToken,
+          idToken: "",
+          state: storedState,
+          acr: "2",
+        },
+        origin: ORIGIN,
+      }),
+    );
+    await expect(promise).rejects.toThrow(/Missing id_token/);
+  });
+
   it("rejects при nonce mismatch (OIDC replay guard)", async () => {
     const promise = requestStepUpToken();
     await new Promise((r) => setTimeout(r, 10));
