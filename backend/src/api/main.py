@@ -29,6 +29,7 @@ from src.api.observability import (
     render_metrics,
 )
 from src.api.v1.router import router as v1_router
+from src.api.webhooks.cleanup_worker import WebhookCleanupWorker
 from src.api.webhooks.worker import WebhookDeliveryWorker
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         )
         chat_worker.start()
         logger.info("chat_cleanup.worker.started")
+
+    # #342: Webhook config cleanup (ФЗ-152 §21, soft-deleted past retention).
+    webhook_cleanup: WebhookCleanupWorker | None = None
+    if settings.webhook_cleanup_worker_enabled:
+        webhook_cleanup = WebhookCleanupWorker(
+            session_factory=session_factory,
+            settings=settings,
+        )
+        webhook_cleanup.start()
+        logger.info("webhook_cleanup.worker.started")
     try:
         yield
     finally:
@@ -95,6 +106,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         if chat_worker is not None:
             await chat_worker.stop()
             logger.info("chat_cleanup.worker.stopped")
+        if webhook_cleanup is not None:
+            await webhook_cleanup.stop()
+            logger.info("webhook_cleanup.worker.stopped")
 
 
 app = FastAPI(
