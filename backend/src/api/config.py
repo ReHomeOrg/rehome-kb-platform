@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Issue #21 (E1.3.4) добавил mapper и включил verify_aud по умолчанию.
     keycloak_audience: str = Field(default="rehome-platform-m2m", alias="KC_AUDIENCE")
     verify_aud: bool = Field(default=True, alias="KC_VERIFY_AUD")
+    # ADR-0019 §"X-MFA-Token validation" / RFC 9470 step-up auth. Token's
+    # `acr` claim must equal this value to gate MFA-protected admin
+    # endpoints (PATCH /admin/system-config, PUT /admin/llm/active).
+    # Keycloak default `acr=2` means MFA-verified; some realms emit
+    # `aal2` / `loa2` — override per realm.
+    kc_mfa_required_acr: str = Field(default="2", alias="KC_MFA_REQUIRED_ACR")
 
     # PostgreSQL для articles/documents/... (ADR-0008). Отдельная БД от
     # Keycloak'овской (postgres-keycloak). asyncpg-драйвер обязателен для

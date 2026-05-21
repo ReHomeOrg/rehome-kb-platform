@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.admin.llm_providers import build_provider_catalog
 from src.api.admin.schemas import (
@@ -52,6 +52,7 @@ from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
 )
+from src.api.auth.mfa import require_step_up_mfa
 from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
 
@@ -253,15 +254,16 @@ async def update_system_config(
     settings: Settings = Depends(get_settings),
     repo: SystemConfigRepository = Depends(get_system_config_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
-    x_mfa_token: str | None = Header(default=None, alias="X-MFA-Token"),
+    mfa_claims: dict[str, Any] = Depends(require_step_up_mfa),
 ) -> SystemConfig:
     """`PATCH /api/v1/admin/system-config` (#264, ADR-0019).
 
     Updates allow-listed mutable keys (см. `MUTABLE_KEYS` в repo).
     Unknown keys → 422 honest reject.
 
-    X-MFA-Token: header принимается + logged в audit. Real validation
-    (Keycloak step-up acr=2) — backlog ADR-0019 explicit.
+    X-MFA-Token: required header containing Keycloak step-up token с
+    `acr=2` (см. `auth/mfa.py`). 403 если missing / invalid / wrong sub /
+    insufficient acr.
     """
     _require_staff_admin(access_levels)
     actor_sub = str(claims.get("sub", "unknown"))
@@ -279,7 +281,7 @@ async def update_system_config(
         resource_id="1",
         metadata={
             "keys": sorted(updates.keys()),
-            "mfa_token_provided": x_mfa_token is not None,
+            "mfa_acr": str(mfa_claims.get("acr", "")),
         },
     )
 
@@ -307,7 +309,7 @@ async def set_active_llm_provider(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: SystemConfigRepository = Depends(get_system_config_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
-    x_mfa_token: str | None = Header(default=None, alias="X-MFA-Token"),
+    mfa_claims: dict[str, Any] = Depends(require_step_up_mfa),
 ) -> SetActiveLlmProviderResponse:
     """`PUT /api/v1/admin/llm/active` (#264, ADR-0019).
 
@@ -315,7 +317,7 @@ async def set_active_llm_provider(
     через repo allowlist (`llm_provider` ∈ MUTABLE_KEYS); value validation
     (must be one of known providers) — backlog (см. build_provider_catalog).
 
-    X-MFA-Token — honest stub, см. PATCH endpoint.
+    X-MFA-Token — required (step-up MFA per ADR-0019), см. PATCH endpoint.
     """
     _require_staff_admin(access_levels)
     actor_sub = str(claims.get("sub", "unknown"))
@@ -337,7 +339,7 @@ async def set_active_llm_provider(
             "keys": ["llm_provider"],
             "provider_id": payload.provider_id,
             "reason": payload.reason,
-            "mfa_token_provided": x_mfa_token is not None,
+            "mfa_acr": str(mfa_claims.get("acr", "")),
         },
     )
 
