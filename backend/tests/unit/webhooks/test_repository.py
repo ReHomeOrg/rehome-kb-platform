@@ -1,6 +1,6 @@
 """Unit-тесты WebhookRepository (E5.1 #87)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -133,3 +133,49 @@ async def test_soft_delete_idempotent() -> None:
     repo = WebhookRepository(session)
     result = await repo.soft_delete(uuid4(), "owner")
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# hard_delete_soft_deleted (#342, ФЗ-152 §21)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_soft_deleted_returns_rowcount() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=3))
+    repo = WebhookRepository(session)
+    n = await repo.hard_delete_soft_deleted(retention=timedelta(days=30))
+    assert n == 3
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_soft_deleted_zero_rowcount() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    repo = WebhookRepository(session)
+    assert await repo.hard_delete_soft_deleted(retention=timedelta(days=30)) == 0
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_soft_deleted_sql_targets_only_soft_deleted() -> None:
+    """SQL должен filter'ить deleted_at IS NOT NULL AND deleted_at < cutoff
+    — никогда не trigger'ит на live webhooks (deleted_at IS NULL)."""
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    repo = WebhookRepository(session)
+    await repo.hard_delete_soft_deleted(retention=timedelta(days=30))
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": False})).lower()
+    assert "delete from webhooks" in sql
+    assert "deleted_at is not null" in sql
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_soft_deleted_rowcount_none_returns_zero() -> None:
+    """SQLAlchemy может вернуть rowcount=None; coalesce."""
+    session = MagicMock()
+    result = MagicMock()
+    result.rowcount = None
+    session.execute = AsyncMock(return_value=result)
+    repo = WebhookRepository(session)
+    assert await repo.hard_delete_soft_deleted(retention=timedelta(days=30)) == 0
