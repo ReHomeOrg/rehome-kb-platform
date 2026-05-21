@@ -19,7 +19,9 @@ import { ApiError } from "@/lib/api/client";
 
 import Fido2RegisterForm from "./fido2-register-form";
 
-const MAX_KEYS = 5;
+// Configurable cap — must mirror backend `Settings.vault_fido2_max_keys_per_user`
+// (#339). Backend enforces authoritative limit via 409; frontend hints UX.
+const MAX_KEYS = parseInt(process.env.NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS ?? "5", 10);
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) return `${err.status}: ${err.message}`;

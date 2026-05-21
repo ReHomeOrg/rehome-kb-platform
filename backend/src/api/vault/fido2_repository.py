@@ -2,8 +2,11 @@
 
 Storage-only. Caller (router / service) owns commit.
 
-Cap на multiple keys per user (MAX_KEYS_PER_USER = 5) enforced в `create`
-— anti-abuse + UX clarity (primary + 4 backups).
+Cap на multiple keys per user (default DEFAULT_MAX_KEYS_PER_USER = 5)
+enforced в `create` — anti-abuse + UX clarity (primary + 4 backups).
+Configurable через `VAULT_FIDO2_MAX_KEYS_PER_USER` env (Settings),
+caller passes value в `create(max_keys=...)`. Default preserved для
+backward compat (старые tests passing `max_keys` неявно).
 
 Challenge repository персистит ceremony state (begin→complete), TTL 5 min.
 """
@@ -21,8 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.db import get_session
 from src.api.vault.models import VaultFIDO2Challenge, VaultFIDO2Credential
 
-# Max registered FIDO2 keys per user (ADR-0022 §approve-defaults).
-MAX_KEYS_PER_USER: Final = 5
+# Default max registered FIDO2 keys per user (ADR-0022 §approve-defaults).
+# Override через Settings.vault_fido2_max_keys_per_user → caller passes
+# в `create(max_keys=...)`.
+DEFAULT_MAX_KEYS_PER_USER: Final = 5
+
+# Backward-compat alias — used by callers без settings injection.
+MAX_KEYS_PER_USER: Final = DEFAULT_MAX_KEYS_PER_USER
 
 
 class VaultFIDO2CapacityError(ValueError):
@@ -78,16 +86,18 @@ class VaultFIDO2Repository:
         aaguid: bytes | None = None,
         nickname: str | None = None,
         sign_count: int = 0,
+        max_keys: int = DEFAULT_MAX_KEYS_PER_USER,
     ) -> VaultFIDO2Credential:
-        """INSERT credential. Enforces MAX_KEYS_PER_USER cap.
+        """INSERT credential. Enforces `max_keys` cap.
 
-        Raises VaultFIDO2CapacityError если user уже на cap'е.
-        Caller responsible за `await session.commit()`.
+        `max_keys` — caller-provided (typically `settings.vault_fido2_max_keys_per_user`);
+        default preserved для backward compat. Raises VaultFIDO2CapacityError
+        если user уже на cap'е. Caller responsible за `await session.commit()`.
         """
         existing = await self.count_by_user(user_id)
-        if existing >= MAX_KEYS_PER_USER:
+        if existing >= max_keys:
             raise VaultFIDO2CapacityError(
-                f"Max {MAX_KEYS_PER_USER} FIDO2 keys per user; revoke an existing key first."
+                f"Max {max_keys} FIDO2 keys per user; revoke an existing key first."
             )
 
         row = VaultFIDO2Credential(

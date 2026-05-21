@@ -75,11 +75,10 @@ async def start_registration(
     existing = await cred_repo.list_by_user(user_id)
     # Fail-fast если user at-cap — иначе ceremony завершится 409 на complete
     # (плохой UX: пользователь делает biometric prompt, потом получает отказ).
-    from src.api.vault.fido2_repository import MAX_KEYS_PER_USER
-
-    if len(existing) >= MAX_KEYS_PER_USER:
+    max_keys = settings.vault_fido2_max_keys_per_user
+    if len(existing) >= max_keys:
         raise VaultFIDO2CapacityError(
-            f"Max {MAX_KEYS_PER_USER} FIDO2 keys per user; revoke an existing key first."
+            f"Max {max_keys} FIDO2 keys per user; revoke an existing key first."
         )
     exclude = [PublicKeyCredentialDescriptor(id=c.credential_id, transports=None) for c in existing]
 
@@ -144,6 +143,7 @@ async def complete_registration(
             aaguid=_aaguid_to_bytes(verified.aaguid),
             nickname=nickname,
             sign_count=verified.sign_count,
+            max_keys=settings.vault_fido2_max_keys_per_user,
         )
     except VaultFIDO2CapacityError:
         raise

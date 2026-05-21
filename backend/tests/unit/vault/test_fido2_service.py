@@ -33,6 +33,7 @@ def _settings() -> Any:
     s.webauthn_rp_name = "Test"
     s.webauthn_user_verification = "preferred"
     s.webauthn_origin_list = ("http://localhost:3000",)
+    s.vault_fido2_max_keys_per_user = 5
     return s
 
 

@@ -160,15 +160,25 @@ export async function requestStepUpToken(): Promise<string> {
           );
           return;
         }
-        // OIDC nonce check — defense against id_token replay.
-        if (data.idToken) {
-          const idClaims = decodeOrThrow(data.idToken);
-          if (idClaims.nonce !== nonce) {
-            resolved = true;
-            cleanup();
-            reject(new StepUpError("Nonce mismatch (OIDC replay guard)"));
-            return;
-          }
+        // OIDC nonce check — defense against id_token replay. SPA requests
+        // `response_type=token id_token`, so missing/empty id_token is a
+        // protocol violation; reject hard (closes nonce-bypass surface).
+        if (!data.idToken) {
+          resolved = true;
+          cleanup();
+          reject(
+            new StepUpError(
+              "Missing id_token — protocol expected token+id_token response",
+            ),
+          );
+          return;
+        }
+        const idClaims = decodeOrThrow(data.idToken);
+        if (idClaims.nonce !== nonce) {
+          resolved = true;
+          cleanup();
+          reject(new StepUpError("Nonce mismatch (OIDC replay guard)"));
+          return;
         }
       } catch (err) {
         resolved = true;
