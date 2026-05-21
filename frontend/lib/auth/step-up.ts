@@ -27,6 +27,7 @@
  */
 
 import { buildIssuerUrl, getAuthConfig } from "./config";
+import { decodeJwtClaims } from "./jwt";
 
 const POPUP_TIMEOUT_MS = 5 * 60 * 1000; // 5 min — matches typical MFA UX.
 const STATE_SESSION_KEY = "mfa_step_up_state";
@@ -55,12 +56,13 @@ function randomHex(bytes: number): string {
     .join("");
 }
 
-function decodeJwtPayload(token: string): Record<string, unknown> {
-  const parts = token.split(".");
-  if (parts.length < 2) throw new StepUpError("Malformed JWT");
-  const padded = parts[1] + "=".repeat((4 - (parts[1].length % 4)) % 4);
-  const b64 = padded.replace(/-/g, "+").replace(/_/g, "/");
-  return JSON.parse(atob(b64)) as Record<string, unknown>;
+function decodeOrThrow(token: string): {
+  acr?: string | number;
+  nonce?: string;
+} {
+  const claims = decodeJwtClaims(token);
+  if (claims === null) throw new StepUpError("Malformed JWT");
+  return claims;
 }
 
 function getRequiredAcr(): string {
@@ -143,20 +145,30 @@ export async function requestStepUpToken(): Promise<string> {
         return;
       }
 
-      // Verify acr in token matches requirement.
+      // Verify acr in access_token matches requirement + nonce in id_token
+      // matches stored value (OIDC replay protection).
       try {
-        const payload = decodeJwtPayload(data.accessToken);
-        const acr = payload.acr;
+        const accessClaims = decodeOrThrow(data.accessToken);
         const required = getRequiredAcr();
-        if (acr === undefined || String(acr) !== required) {
+        if (accessClaims.acr === undefined || String(accessClaims.acr) !== required) {
           resolved = true;
           cleanup();
           reject(
             new StepUpError(
-              `Token acr=${String(acr)} does not match required ${required}`,
+              `Token acr=${String(accessClaims.acr)} does not match required ${required}`,
             ),
           );
           return;
+        }
+        // OIDC nonce check — defense against id_token replay.
+        if (data.idToken) {
+          const idClaims = decodeOrThrow(data.idToken);
+          if (idClaims.nonce !== nonce) {
+            resolved = true;
+            cleanup();
+            reject(new StepUpError("Nonce mismatch (OIDC replay guard)"));
+            return;
+          }
         }
       } catch (err) {
         resolved = true;
@@ -217,13 +229,9 @@ export function postStepUpCallbackMessage(): void {
   const state = params.get("state") ?? "";
 
   let acr: string | null = null;
-  try {
-    if (idToken) {
-      const payload = decodeJwtPayload(idToken);
-      acr = payload.acr === undefined ? null : String(payload.acr);
-    }
-  } catch {
-    acr = null;
+  if (idToken) {
+    const claims = decodeJwtClaims(idToken);
+    acr = claims?.acr === undefined || claims.acr === null ? null : String(claims.acr);
   }
 
   const msg: StepUpMessage = {

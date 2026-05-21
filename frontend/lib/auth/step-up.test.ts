@@ -98,19 +98,22 @@ describe("requestStepUpToken", () => {
     await expect(promise).rejects.toThrow(/State mismatch/);
   });
 
-  it("happy path: resolves с access token при valid acr + state", async () => {
+  it("happy path: resolves с access token при valid acr + state + nonce", async () => {
     const promise = requestStepUpToken();
     await new Promise((r) => setTimeout(r, 10));
     const storedState = sessionStorage.getItem("mfa_step_up_state");
+    const storedNonce = sessionStorage.getItem("mfa_step_up_nonce");
     expect(storedState).toBeTruthy();
+    expect(storedNonce).toBeTruthy();
 
     const accessToken = _encodeJwtForTest({ acr: "2", sub: "user-1" });
+    const idToken = _encodeJwtForTest({ acr: "2", nonce: storedNonce });
     window.dispatchEvent(
       new MessageEvent("message", {
         data: {
           type: "rehome-mfa-step-up",
           accessToken,
-          idToken: accessToken,
+          idToken,
           state: storedState!,
           acr: "2",
         },
@@ -147,6 +150,7 @@ describe("requestStepUpToken", () => {
     const promise = requestStepUpToken();
     await new Promise((r) => setTimeout(r, 10));
     const storedState = sessionStorage.getItem("mfa_step_up_state")!;
+    const storedNonce = sessionStorage.getItem("mfa_step_up_nonce")!;
     // Send unrelated message — should be ignored.
     window.dispatchEvent(
       new MessageEvent("message", {
@@ -156,12 +160,13 @@ describe("requestStepUpToken", () => {
     );
     // Then send valid one.
     const accessToken = _encodeJwtForTest({ acr: "2" });
+    const idToken = _encodeJwtForTest({ acr: "2", nonce: storedNonce });
     window.dispatchEvent(
       new MessageEvent("message", {
         data: {
           type: "rehome-mfa-step-up",
           accessToken,
-          idToken: accessToken,
+          idToken,
           state: storedState,
           acr: "2",
         },
@@ -171,16 +176,69 @@ describe("requestStepUpToken", () => {
     await expect(promise).resolves.toBe(accessToken);
   });
 
-  it("rejects при cross-origin message (origin mismatch)", async () => {
+  it("ignores message with non-matching origin (CSRF guard)", async () => {
     const promise = requestStepUpToken();
     await new Promise((r) => setTimeout(r, 10));
-    // Simulate a message from foreign origin — should be ignored.
-    // jsdom's postMessage sets origin от current window; нет простого
-    // способа эмулировать другой origin. Test instead: timeout fires
-    // if no valid message arrives.
+    const storedState = sessionStorage.getItem("mfa_step_up_state")!;
+    const storedNonce = sessionStorage.getItem("mfa_step_up_nonce")!;
+    const accessToken = _encodeJwtForTest({ acr: "2" });
+    const idToken = _encodeJwtForTest({ acr: "2", nonce: storedNonce });
+    // Foreign origin — should be ignored by listener.
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: "rehome-mfa-step-up",
+          accessToken,
+          idToken,
+          state: storedState,
+          acr: "2",
+        },
+        origin: "https://evil.example.com",
+      }),
+    );
+    // Now legit same-origin message — should resolve.
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: "rehome-mfa-step-up",
+          accessToken,
+          idToken,
+          state: storedState,
+          acr: "2",
+        },
+        origin: ORIGIN,
+      }),
+    );
+    await expect(promise).resolves.toBe(accessToken);
+  });
+
+  it("rejects on popup close before MFA completion", async () => {
+    const promise = requestStepUpToken();
+    await new Promise((r) => setTimeout(r, 10));
     popupMock.closed = true;
-    await new Promise((r) => setTimeout(r, 600));
     await expect(promise).rejects.toThrow(/Popup closed/);
+  });
+
+  it("rejects при nonce mismatch (OIDC replay guard)", async () => {
+    const promise = requestStepUpToken();
+    await new Promise((r) => setTimeout(r, 10));
+    const storedState = sessionStorage.getItem("mfa_step_up_state")!;
+    const accessToken = _encodeJwtForTest({ acr: "2", nonce: "ignored" });
+    // id_token с tampered nonce → reject.
+    const idTokenBadNonce = _encodeJwtForTest({ acr: "2", nonce: "tampered" });
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: {
+          type: "rehome-mfa-step-up",
+          accessToken,
+          idToken: idTokenBadNonce,
+          state: storedState,
+          acr: "2",
+        },
+        origin: ORIGIN,
+      }),
+    );
+    await expect(promise).rejects.toThrow(/Nonce mismatch/);
   });
 });
 

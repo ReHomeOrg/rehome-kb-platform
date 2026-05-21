@@ -16,6 +16,10 @@ export interface JwtClaims {
   /** Issued-at (Unix seconds). */
   iat?: number;
   sub?: string;
+  /** ADR-0019: step-up Authentication Context Class Reference. */
+  acr?: string | number;
+  /** OIDC nonce — replay-protection (must match nonce sent в `/auth`). */
+  nonce?: string;
 }
 
 function _b64urlDecode(str: string): string | null {
