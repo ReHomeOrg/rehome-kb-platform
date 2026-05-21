@@ -121,8 +121,6 @@ class WebhookRepository:
 
         Returns count rows deleted. Caller commit'ит.
         """
-        from src.api.webhooks.models import Webhook
-
         current = now or datetime.now(UTC)
         cutoff = current - retention
         stmt = delete(Webhook).where(
