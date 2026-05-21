@@ -90,7 +90,7 @@ def _user_name_from_claims(claims: dict[str, Any]) -> str:
     responses={
         200: {"description": "Options сгенерированы"},
         401: {"description": "Не аутентифицирован"},
-        409: {"description": "Превышен лимит ключей (MAX_KEYS_PER_USER)"},
+        409: {"description": "Превышен лимит ключей (VAULT_FIDO2_MAX_KEYS_PER_USER)"},
     },
 )
 async def register_begin(

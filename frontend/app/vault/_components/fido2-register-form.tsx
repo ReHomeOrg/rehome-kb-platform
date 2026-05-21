@@ -34,7 +34,10 @@ interface Props {
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 409) return "Достигнут лимит ключей (макс. 5). Удалите ненужный ключ.";
+    if (err.status === 409) {
+      const max = process.env.NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS ?? "5";
+      return `Достигнут лимит ключей (макс. ${max}). Удалите ненужный ключ.`;
+    }
     return `${err.status}: ${err.message}`;
   }
   if (err instanceof DOMException) {

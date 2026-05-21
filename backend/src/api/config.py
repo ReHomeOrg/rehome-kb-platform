@@ -207,6 +207,15 @@ class Settings(BaseSettings):
         default="preferred",
         alias="WEBAUTHN_USER_VERIFICATION",
     )
+    # Max FIDO2 credentials per vault user. ADR-0022 §approve note: 5 = primary
+    # + 4 backups. Env-overridable для realms с different threat models.
+    # Frontend mirror через NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS (#339).
+    vault_fido2_max_keys_per_user: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        alias="VAULT_FIDO2_MAX_KEYS_PER_USER",
+    )
 
     model_config = SettingsConfigDict(
         env_file=None,
