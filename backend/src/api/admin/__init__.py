@@ -18,10 +18,12 @@ landing'ится incremental по мере merge'а PR'ов:
   inline в admin_task.params per ADR-0013)
 - #264: PATCH /admin/system-config + PUT /admin/llm/active per
   ADR-0019 (writable runtime config storage, JSONB single row +
-  Settings overlay + X-MFA-Token honest stub).
+  Settings overlay).
+- #336: Keycloak step-up MFA validation (X-MFA-Token JWT verified
+  via Keycloak JWKS + acr claim check; replaces #264 honest stub).
 
 Backlog (отдельные PR'ы):
 - Real provider support в eval-runs (нужны env credentials)
-- Real async worker для admin_tasks (сейчас sync-completion)
-- Keycloak step-up auth (acr=2) для X-MFA-Token validation
+- Real async worker для admin_tasks (#268 landed asyncio MVP;
+  Dramatiq+Redis при scale)
 """
