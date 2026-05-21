@@ -431,3 +431,54 @@ async def test_set_feedback_overwrites_existing_feedback() -> None:
         comment="bad",
     )
     assert msg.feedback == {"rating": "down", "comment": "bad"}
+
+
+# ---------------------------------------------------------------------------
+# hard_delete_stale_sessions (#341, ФЗ-152 §21)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_stale_sessions_returns_rowcount() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=5))
+    repo = ChatRepository(session)
+    n = await repo.hard_delete_stale_sessions(
+        soft_delete_retention=timedelta(days=30),
+    )
+    assert n == 5
+    session.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_stale_sessions_zero_rowcount() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    repo = ChatRepository(session)
+    assert await repo.hard_delete_stale_sessions(soft_delete_retention=timedelta(days=30)) == 0
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_stale_sessions_sql_uses_or_clause() -> None:
+    """SQL должен включать OR(soft_deleted past retention, expired-and-not-deleted)."""
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
+    repo = ChatRepository(session)
+    await repo.hard_delete_stale_sessions(soft_delete_retention=timedelta(days=30))
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": False})).lower()
+    # DELETE statement targeting chat_sessions.
+    assert "delete from chat_sessions" in sql
+    # OR clause includes both deleted_at and expires_at checks.
+    assert "deleted_at is not null" in sql
+    assert "expires_at" in sql
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_stale_sessions_rowcount_none_returns_zero() -> None:
+    """SQLAlchemy may return rowcount=None; coalesce to 0."""
+    session = MagicMock()
+    result = MagicMock()
+    result.rowcount = None
+    session.execute = AsyncMock(return_value=result)
+    repo = ChatRepository(session)
+    assert await repo.hard_delete_stale_sessions(soft_delete_retention=timedelta(days=30)) == 0
