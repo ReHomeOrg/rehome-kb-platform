@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.api.admin.pd_overdue_worker import PdOverdueWorker
 from src.api.admin.task_reaper import reap_stale_tasks
 from src.api.admin.task_runner import init_runner
+from src.api.chat.cleanup_worker import ChatCleanupWorker
 from src.api.config import get_settings
 from src.api.db import get_engine
 from src.api.observability import (
@@ -72,6 +73,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         )
         pd_worker.start()
         logger.info("pd_overdue.worker.started")
+
+    # #341: Chat session cleanup (ФЗ-152 §21 right-to-forget).
+    chat_worker: ChatCleanupWorker | None = None
+    if settings.chat_cleanup_worker_enabled:
+        chat_worker = ChatCleanupWorker(
+            session_factory=session_factory,
+            settings=settings,
+        )
+        chat_worker.start()
+        logger.info("chat_cleanup.worker.started")
     try:
         yield
     finally:
@@ -81,6 +92,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         if pd_worker is not None:
             await pd_worker.stop()
             logger.info("pd_overdue.worker.stopped")
+        if chat_worker is not None:
+            await chat_worker.stop()
+            logger.info("chat_cleanup.worker.stopped")
 
 
 app = FastAPI(

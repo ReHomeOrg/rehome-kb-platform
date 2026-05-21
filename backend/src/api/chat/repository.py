@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import Depends
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
@@ -137,6 +137,38 @@ class ChatRepository:
         await self._session.flush()
         await self._session.commit()
         return True
+
+    async def hard_delete_stale_sessions(
+        self,
+        *,
+        soft_delete_retention: timedelta,
+        now: datetime | None = None,
+    ) -> int:
+        """Background-helper: physical-DELETE chat_sessions, которые:
+        - soft-deleted past retention (deleted_at < now - soft_delete_retention),
+          ИЛИ
+        - expired без soft-delete (expires_at < now AND deleted_at IS NULL).
+
+        ФЗ-152 §21 right-to-forget: soft-deleted records должны быть
+        physically removed после reasonable retention window (default 30d).
+        Expired sessions — garbage cleanup (никто не читает их past
+        expires_at filter).
+
+        chat_messages удаляются автоматически через ForeignKey CASCADE.
+        Returns count rows deleted. Caller commit'ит.
+        """
+        current = now or datetime.now(UTC)
+        retention_cutoff = current - soft_delete_retention
+        stmt = delete(ChatSession).where(
+            or_(
+                # Soft-deleted past retention.
+                (ChatSession.deleted_at.is_not(None)) & (ChatSession.deleted_at < retention_cutoff),
+                # Expired without explicit deletion.
+                (ChatSession.deleted_at.is_(None)) & (ChatSession.expires_at < current),
+            )
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
 
     async def list_messages(
         self,
