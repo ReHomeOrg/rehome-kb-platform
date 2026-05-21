@@ -511,7 +511,7 @@ design-needed, требуют writable runtime config storage):
 | ФЗ-152 §17.1 — security incidents | ✅ MVP (#231) | `/admin/security-incidents` registry + state machine + РКН notification fields (24h факт / 72h состав) |
 | ФЗ-152 §19 — encryption в покое (HR ПДн) | ✅ MVP (#234, ADR-0018) | Fernet symmetric, env-managed key, MultiFernet rotation, 4 ПДн поля; ProductionReadinessGates: SOPS, runbook, физ.сейф (явно зафиксированы в ADR) |
 | ФЗ-152 §22 — audit_log retention | ✅ MVP | 5-year retention default (через ADR-0009 backup tooling) |
-| Маскировка ПДн в LLM context | ⏳ Stage 2 | RAG retrieval не подмешивает HR PII (физическая разделённость access_level); pre-processor masking — backlog |
+| Маскировка ПДн в LLM context | ✅ DONE (#338) | RAG retrieval physically separates HR PII (access_level filter); chat pre-processor (`src/api/chat/pii_masking.py`) masks phone / email / СНИЛС / passport / ИНН / card в chunk text перед отправкой external LLM API. Wired в `build_rag_system_prompt`; observability через structured log `chat.rag_pii_masked` с counts. |
 | Уведомление РКН подано | ❌ Org task | Юр.процедура, не разработка |
 | Назначение ответственного за ПДн | ❌ Org task | Приказ в ООО «РЕХОМ» |
 
