@@ -5,11 +5,19 @@ Hardcoded в этом эпике. Configurable через config DB / admin — 
 
 #136: добавлен `build_rag_system_prompt` для chat RAG integration —
 augment'ит base prompt retrieved chunks как numbered context block.
+
+#338 (ФЗ-152 Stage 2): retrieved chunks pass'ятся через
+`mask_pii` перед включением в system prompt — защита от leak ПДн в
+external LLM API (phones / emails / СНИЛС / passport / ИНН / cards).
 """
 
+import logging
 from typing import Any
 
+from src.api.chat.pii_masking import mask_pii
 from src.api.search.repository import RetrievalHit
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Ты — AI-ассистент платформы reHome, помогающий
 нанимателям, собственникам и сотрудникам поддержки разобраться в
@@ -57,10 +65,23 @@ def build_rag_system_prompt(chunks: list[RetrievalHit]) -> str:
         "об этом и не выдумывай.",
         "",
     ]
+    # #338 ФЗ-152 Stage 2: mask ПДн в chunk text перед отправкой в LLM.
+    # Titles tend to be safe (article titles, не ПДн), но text может
+    # содержать example phones / emails / etc. Mask aggressively —
+    # false positives acceptable (over-masking безопаснее под-маски).
+    total_masks: dict[str, int] = {}
     for idx, hit in enumerate(chunks, start=1):
+        result = mask_pii(hit.text)
+        for category, count in result.counts.items():
+            total_masks[category] = total_masks.get(category, 0) + count
         lines.append(f"[{idx}] **{hit.title}** (slug: {hit.slug}, chunk {hit.chunk_index}):")
-        lines.append(hit.text)
+        lines.append(result.text)
         lines.append("")
+    if total_masks:
+        logger.info(
+            "chat.rag_pii_masked",
+            extra={"counts": total_masks, "chunks": len(chunks)},
+        )
     return "\n".join(lines)
 
 
