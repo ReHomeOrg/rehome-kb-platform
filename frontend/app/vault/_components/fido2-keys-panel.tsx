@@ -21,7 +21,13 @@ import Fido2RegisterForm from "./fido2-register-form";
 
 // Configurable cap — must mirror backend `Settings.vault_fido2_max_keys_per_user`
 // (#339). Backend enforces authoritative limit via 409; frontend hints UX.
-const MAX_KEYS = parseInt(process.env.NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS ?? "5", 10);
+// Defensive fallback: parseInt("abc") = NaN → silently disables UI cap;
+// Number.isFinite-guard returns to default 5 so cap displays correctly.
+function _parseMaxKeys(): number {
+  const parsed = parseInt(process.env.NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS ?? "5", 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : 5;
+}
+const MAX_KEYS = _parseMaxKeys();
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) return `${err.status}: ${err.message}`;
