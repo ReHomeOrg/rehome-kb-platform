@@ -159,15 +159,25 @@ JWT secret, DB passwords) НИКОГДА не в этом списке.
 
 ### X-MFA-Token validation
 
-**MVP:** header принимается, value записывается в audit_log metadata.
-**Real validation** — backlog (нужен Keycloak step-up flow integration:
-caller получает `acr=2` token через `/protocol/openid-connect/auth?
-acr_values=2`, мы validate'им `acr` claim в `require_step_up_auth`
-dependency).
+**MVP (#264, honest stub):** header принимался, value записывалась в
+audit_log metadata, validation не выполнялся.
 
-В MVP без validation endpoint — `request authenticated + audited
-without 2nd-factor enforcement`. Это honest stub с явной marker'кой
-`x-implementation-note` в OpenAPI.
+**Stage 2 (#336, landed):** `src/api/auth/mfa.py::validate_mfa_token` +
+FastAPI dependency `require_step_up_mfa`. Validates X-MFA-Token JWT:
+- RS256 signature через same Keycloak JWKS as main bearer.
+- `sub` claim matches main user's sub (anti-token-swap).
+- `acr` claim equals `settings.kc_mfa_required_acr` (default `"2"`,
+  configurable env override для realms emitting `aal2` / `loa2`).
+- Not expired (verifier handles via `verify_exp`).
+
+403 на missing / invalid / mismatched / insufficient acr. Audit row
+теперь содержит `mfa_acr` value (was `mfa_token_provided` boolean).
+RFC 9470 step-up auth pattern.
+
+Frontend flow для получения acr=2 token: caller redirects user к
+Keycloak `/protocol/openid-connect/auth?acr_values=2&prompt=login`,
+gets fresh token with elevated acr, sends в X-MFA-Token header.
+Frontend integration — backlog отдельный PR.
 
 ### Reload semantics
 
