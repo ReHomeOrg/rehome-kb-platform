@@ -134,4 +134,27 @@ describe("cross-impl compat (lock format)", () => {
     const shares = await splitSecret(new Uint8Array(2), { threshold: 2, n: 3 });
     expect(shares.map((s) => s[0])).toEqual([1, 2, 3]);
   });
+
+  /**
+   * Golden vector generated via `backend/src/api/vault/escrow.py` с
+   * monkey-patched `secrets.randbelow → random.randint(0, n-1)` под
+   * `random.seed(42)`. Lock-test cross-impl format compatibility:
+   * Python-generated shares decode + combine в TS → original secret.
+   *
+   * Если этот тест fail'ит — либо HMAC tag сместился, либо GF math
+   * расходится, либо base32 format ломается. Любая из трёх ситуаций
+   * блокирует emergency recovery в production.
+   */
+  it("combines Python-generated shares back to original secret", async () => {
+    const SECRET_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+    const SHARE1_B32 = "AE4Q3DT6OZBDEK6QDECSIY32ANVMMYPXTULUJTVZSZLHJNZIGLOC5AFSYCMBBJ6LSU";
+    const SHARE2_B32 = "AJZBSAPZ4CFW4X5DFEKFLUXDCTC2P4ODCQJLPPKQD6D4MWDUIOAX2QSJH7QDDTNBPI";
+
+    const share1 = base32ToShare(SHARE1_B32);
+    const share2 = base32ToShare(SHARE2_B32);
+    const recovered = await combineShares([share1, share2]);
+
+    const expected = new Uint8Array(SECRET_HEX.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
+    expect(Array.from(recovered)).toEqual(Array.from(expected));
+  });
 });
