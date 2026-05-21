@@ -542,8 +542,12 @@ UI implementations.**
 5. ~~Real async worker для admin_tasks~~ ✅ DONE (#268, ADR-0020 B):
    `asyncio.create_task` spawn + reaper для crash recovery. Phased
    migration к Dramatiq+Redis — backlog при ≥10 task/s.
-6. **Keycloak step-up auth** для X-MFA-Token validation (#264 — пока
-   honest stub; presence logged в audit но не verified).
+6. ~~Keycloak step-up auth~~ ✅ DONE (#336): `src/api/auth/mfa.py`
+   validates X-MFA-Token JWT через same Keycloak JWKS как main bearer.
+   Checks acr claim (configurable threshold, default "2"), sub match
+   (anti-swap), signature, expiry. 403 на любое нарушение. Audit
+   row теперь содержит `mfa_acr` value. RFC 9470 step-up pattern.
+   Frontend integration для acr=2 token получения — separate concern.
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration. ADR-0022 принят
