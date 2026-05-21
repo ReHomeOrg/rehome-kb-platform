@@ -17,6 +17,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import MfaStepUpButton from "@/app/_components/mfa-step-up-button";
 import { ApiError } from "@/lib/api/client";
 import {
   patchSystemConfig,
@@ -102,6 +103,11 @@ export default function SystemConfigEditForm({ initial }: Props): JSX.Element {
     }
 
     if (Object.keys(patch).length === 0) {
+      setBusy(false);
+      return;
+    }
+    if (!mfaToken.trim()) {
+      setError("MFA token обязателен (нажмите кнопку step-up выше).");
       setBusy(false);
       return;
     }
@@ -195,17 +201,15 @@ export default function SystemConfigEditForm({ initial }: Props): JSX.Element {
         </div>
       </fieldset>
 
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-gray-600">X-MFA-Token (honest stub)</span>
-        <input
-          type="text"
-          value={mfaToken}
-          onChange={(e) => setMfaToken(e.target.value)}
-          maxLength={500}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-          aria-label="MFA token"
+      <div className="flex flex-col gap-1 text-xs">
+        <span className="text-gray-600">
+          Step-up MFA (acr=2 token required для PATCH)
+        </span>
+        <MfaStepUpButton
+          onTokenAcquired={setMfaToken}
+          hasToken={mfaToken.length > 0}
         />
-      </label>
+      </div>
 
       {error ? (
         <div

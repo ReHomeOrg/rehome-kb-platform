@@ -542,12 +542,17 @@ UI implementations.**
 5. ~~Real async worker для admin_tasks~~ ✅ DONE (#268, ADR-0020 B):
    `asyncio.create_task` spawn + reaper для crash recovery. Phased
    migration к Dramatiq+Redis — backlog при ≥10 task/s.
-6. ~~Keycloak step-up auth~~ ✅ DONE (#336): `src/api/auth/mfa.py`
-   validates X-MFA-Token JWT через same Keycloak JWKS как main bearer.
-   Checks acr claim (configurable threshold, default "2"), sub match
-   (anti-swap), signature, expiry. 403 на любое нарушение. Audit
-   row теперь содержит `mfa_acr` value. RFC 9470 step-up pattern.
-   Frontend integration для acr=2 token получения — separate concern.
+6. ~~Keycloak step-up auth~~ ✅ DONE (#336 backend + #337 frontend):
+   - Backend: `src/api/auth/mfa.py` validates X-MFA-Token JWT через
+     Keycloak JWKS. Checks acr / sub / signature / expiry. 403 на
+     любое нарушение. Audit row содержит `mfa_acr` value.
+   - Frontend: `lib/auth/step-up.ts` + `MfaStepUpButton` open popup
+     к Keycloak `/auth?acr_values=2&prompt=login&response_type=token+id_token`.
+     CSRF-guard через state param. Token validated client-side (acr +
+     signature decode). Wired в admin/system-config + admin/llm-providers
+     forms (manual text input заменён на step-up button).
+   - Production readiness gate: Keycloak realm config needs SPA client
+     с Implicit Flow + redirect_uri `/auth/step-up-callback` whitelisted.
 
 Self-serve M-sized items без design дополнительного:
 1. **Vault Stage 2 FIDO2** — WebAuthn integration. ADR-0022 принят
