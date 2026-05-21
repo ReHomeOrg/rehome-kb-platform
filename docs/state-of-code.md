@@ -507,7 +507,7 @@ design-needed, требуют writable runtime config storage):
 
 | Требование | Состояние | Реализация |
 |---|---|---|
-| ФЗ-152 §15 — субъектные запросы (SAR) | ✅ MVP (#232) | `/admin/personal-data/requests` registry + state machine (NEW→IN_PROGRESS→COMPLETED/REJECTED/OVERDUE) + 30-day SLA |
+| ФЗ-152 §15 — субъектные запросы (SAR) | ✅ MVP (#232) + auto-OVERDUE (#340) | `/admin/personal-data/requests` registry + state machine (NEW→IN_PROGRESS→COMPLETED/REJECTED/OVERDUE) + 30-day SLA. `PdOverdueWorker` (hourly poll, env-gated) auto-transitions NEW/IN_PROGRESS → OVERDUE при истечении `due_at` — no manual admin intervention needed. |
 | ФЗ-152 §17.1 — security incidents | ✅ MVP (#231) | `/admin/security-incidents` registry + state machine + РКН notification fields (24h факт / 72h состав) |
 | ФЗ-152 §19 — encryption в покое (HR ПДн) | ✅ MVP (#234, ADR-0018) | Fernet symmetric, env-managed key, MultiFernet rotation, 4 ПДн поля; ProductionReadinessGates: SOPS, runbook, физ.сейф (явно зафиксированы в ADR) |
 | ФЗ-152 §22 — audit_log retention | ✅ MVP | 5-year retention default (через ADR-0009 backup tooling) |
