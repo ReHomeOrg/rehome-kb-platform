@@ -32,7 +32,8 @@ describe("SwitchProviderButton", () => {
     render(<SwitchProviderButton providerId="gigachat" />);
     fireEvent.click(screen.getByText("Switch"));
     expect(screen.getByLabelText("Switch reason")).toBeInTheDocument();
-    expect(screen.getByLabelText("MFA token")).toBeInTheDocument();
+    // Step-up MFA button (#337) replaces manual input.
+    expect(screen.getByText(/Получить MFA token/)).toBeInTheDocument();
   });
 
   it("blocks submit without reason", async () => {
@@ -45,24 +46,17 @@ describe("SwitchProviderButton", () => {
     expect(setActiveMock).not.toHaveBeenCalled();
   });
 
-  it("submits PUT with reason + optional MFA token", async () => {
-    setActiveMock.mockResolvedValueOnce({ active_provider: "gigachat" });
+  it("blocks submit без MFA token (step-up required #337)", async () => {
     render(<SwitchProviderButton providerId="gigachat" />);
     fireEvent.click(screen.getByText("Switch"));
     fireEvent.change(screen.getByLabelText("Switch reason"), {
       target: { value: "A/B test" },
     });
-    fireEvent.change(screen.getByLabelText("MFA token"), {
-      target: { value: "mfa-x" },
-    });
     fireEvent.click(screen.getByText("Подтвердить"));
     await waitFor(() => {
-      expect(setActiveMock).toHaveBeenCalledWith(
-        { provider_id: "gigachat", reason: "A/B test" },
-        "mfa-x",
-      );
+      expect(screen.getByRole("alert")).toHaveTextContent(/MFA token обязателен/);
     });
-    expect(refreshMock).toHaveBeenCalled();
+    expect(setActiveMock).not.toHaveBeenCalled();
   });
 
   it("cancel returns to compact button", () => {
