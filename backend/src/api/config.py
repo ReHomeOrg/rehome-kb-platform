@@ -249,6 +249,25 @@ class Settings(BaseSettings):
         alias="CHAT_CLEANUP_POLL_INTERVAL_SECONDS",
     )
 
+    # Webhook cleanup worker (ФЗ-152 §21, #342). Mirrors chat cleanup pattern
+    # but only handles soft-deleted webhook configs (no expires_at equivalent).
+    # Deliveries CASCADE через FK ondelete=CASCADE.
+    webhook_cleanup_worker_enabled: bool = Field(
+        default=False, alias="WEBHOOK_CLEANUP_WORKER_ENABLED"
+    )
+    webhook_cleanup_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        alias="WEBHOOK_CLEANUP_RETENTION_DAYS",
+    )
+    webhook_cleanup_poll_interval_seconds: float = Field(
+        default=86400.0,
+        ge=60.0,
+        le=604800.0,
+        alias="WEBHOOK_CLEANUP_POLL_INTERVAL_SECONDS",
+    )
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,

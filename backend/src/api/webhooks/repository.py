@@ -7,11 +7,11 @@ ADR-0008 — Repository pattern.
 """
 
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.db import get_session
@@ -106,6 +106,31 @@ class WebhookRepository:
         await self._session.flush()
         await self._session.commit()
         return True
+
+    async def hard_delete_soft_deleted(
+        self,
+        *,
+        retention: timedelta,
+        now: datetime | None = None,
+    ) -> int:
+        """Background-helper: physical-DELETE webhooks с deleted_at < cutoff.
+
+        ФЗ-152 §21: soft-deleted webhook configs (owner отозвал subscription)
+        физически удаляются после retention window. Deliveries CASCADE через
+        ForeignKey ondelete=CASCADE (см. webhooks/models.py).
+
+        Returns count rows deleted. Caller commit'ит.
+        """
+        from src.api.webhooks.models import Webhook
+
+        current = now or datetime.now(UTC)
+        cutoff = current - retention
+        stmt = delete(Webhook).where(
+            Webhook.deleted_at.is_not(None),
+            Webhook.deleted_at < cutoff,
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
 
 
 def get_webhook_repository(
