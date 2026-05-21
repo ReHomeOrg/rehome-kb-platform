@@ -230,6 +230,25 @@ class Settings(BaseSettings):
         alias="PD_OVERDUE_WORKER_POLL_INTERVAL_SECONDS",
     )
 
+    # Chat cleanup worker (ФЗ-152 §21 right-to-forget, #341).
+    # Periodic physical-delete soft-deleted chat_sessions past retention
+    # window + expired (expires_at < now) sessions без soft-delete.
+    # CASCADE на chat_messages через FK. Daily granularity default;
+    # 30-day retention default (operational review window).
+    chat_cleanup_worker_enabled: bool = Field(default=False, alias="CHAT_CLEANUP_WORKER_ENABLED")
+    chat_cleanup_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        alias="CHAT_CLEANUP_RETENTION_DAYS",
+    )
+    chat_cleanup_poll_interval_seconds: float = Field(
+        default=86400.0,  # daily
+        ge=60.0,
+        le=604800.0,  # weekly upper bound
+        alias="CHAT_CLEANUP_POLL_INTERVAL_SECONDS",
+    )
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
