@@ -217,6 +217,19 @@ class Settings(BaseSettings):
         alias="VAULT_FIDO2_MAX_KEYS_PER_USER",
     )
 
+    # PD requests OVERDUE worker (ФЗ-152 §15 SLA enforcement, #340).
+    # Periodic check sets `personal_data_requests.status = OVERDUE` для
+    # NEW/IN_PROGRESS заявок с `due_at < now`. Hourly default — granularity
+    # достаточная для 30-day SLA tracking. Disabled by default так же как
+    # webhook_worker_enabled (тесты не хотят asyncio loops).
+    pd_overdue_worker_enabled: bool = Field(default=False, alias="PD_OVERDUE_WORKER_ENABLED")
+    pd_overdue_worker_poll_interval_seconds: float = Field(
+        default=3600.0,
+        ge=60.0,
+        le=86400.0,
+        alias="PD_OVERDUE_WORKER_POLL_INTERVAL_SECONDS",
+    )
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,

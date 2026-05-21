@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from src.api.admin.pd_overdue_worker import PdOverdueWorker
 from src.api.admin.task_reaper import reap_stale_tasks
 from src.api.admin.task_runner import init_runner
 from src.api.config import get_settings
@@ -61,12 +62,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         )
         worker.start()
         logger.info("webhook.worker.started")
+
+    # #340: PD requests OVERDUE auto-transition (ФЗ-152 §15 SLA).
+    pd_worker: PdOverdueWorker | None = None
+    if settings.pd_overdue_worker_enabled:
+        pd_worker = PdOverdueWorker(
+            session_factory=session_factory,
+            settings=settings,
+        )
+        pd_worker.start()
+        logger.info("pd_overdue.worker.started")
     try:
         yield
     finally:
         if worker is not None:
             await worker.stop()
             logger.info("webhook.worker.stopped")
+        if pd_worker is not None:
+            await pd_worker.stop()
+            logger.info("pd_overdue.worker.stopped")
 
 
 app = FastAPI(
