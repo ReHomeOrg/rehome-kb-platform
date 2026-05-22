@@ -61,7 +61,7 @@ def task_repo_mock() -> Iterator[dict[str, AsyncMock]]:
     mark_running = AsyncMock()
     mark_completed = AsyncMock()
     mark_failed = AsyncMock()
-    list_recent = AsyncMock(return_value=[])
+    list_recent = AsyncMock(return_value=([], False))
 
     class _FakeRepo:
         def __init__(self) -> None:
@@ -256,11 +256,13 @@ def test_get_returns_empty_list(
     make_jwt: Callable[..., str],
     task_repo_mock: dict[str, AsyncMock],
 ) -> None:
-    task_repo_mock["list_recent"].return_value = []
+    task_repo_mock["list_recent"].return_value = ([], False)
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
-    assert resp.json() == {"data": []}
+    body = resp.json()
+    assert body["data"] == []
+    assert body["pagination"] == {"cursor_next": None, "has_more": False}
 
 
 def test_get_returns_projected_runs(
@@ -269,7 +271,7 @@ def test_get_returns_projected_runs(
     task_repo_mock: dict[str, AsyncMock],
 ) -> None:
     task = _make_task()
-    task_repo_mock["list_recent"].return_value = [task]
+    task_repo_mock["list_recent"].return_value = ([task], False)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
@@ -282,6 +284,8 @@ def test_get_returns_projected_runs(
     assert run["test_set"] == "smoke"
     assert len(run["results"]) == 1
     assert run["results"][0]["provider"] == "mock"
+    assert body["pagination"]["has_more"] is False
+    assert body["pagination"]["cursor_next"] is None
 
 
 def test_get_filters_by_provider(
@@ -294,7 +298,7 @@ def test_get_filters_by_provider(
     task_other = _make_task(
         params={"providers": ["fake-other"], "test_set": "smoke", "results": []}
     )
-    task_repo_mock["list_recent"].return_value = [task_mock, task_other]
+    task_repo_mock["list_recent"].return_value = ([task_mock, task_other], False)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
@@ -313,7 +317,7 @@ def test_get_status_mapping_pending_to_running(
 ) -> None:
     """admin_task.PENDING → EvalRun.RUNNING (sync MVP gap)."""
     task = _make_task(status="PENDING", params={"providers": ["mock"], "test_set": "smoke"})
-    task_repo_mock["list_recent"].return_value = [task]
+    task_repo_mock["list_recent"].return_value = ([task], False)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
@@ -328,12 +332,92 @@ def test_get_status_mapping_cancelled_to_failed(
 ) -> None:
     """admin_task.CANCELLED → EvalRun.FAILED (OpenAPI не имеет CANCELLED)."""
     task = _make_task(status="CANCELLED", params={"providers": ["mock"], "test_set": "smoke"})
-    task_repo_mock["list_recent"].return_value = [task]
+    task_repo_mock["list_recent"].return_value = ([task], False)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
     body = resp.json()
     assert body["data"][0]["status"] == "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# Cursor pagination (#343)
+
+
+def test_get_has_more_returns_cursor_next(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """has_more=True ⇒ cursor_next encoded из последней row.
+
+    `decode_cursor` round-trips: (created_at, id) последней row.
+    """
+    from src.api.articles.cursor import decode_cursor
+
+    task = _make_task()
+    task_repo_mock["list_recent"].return_value = ([task], True)
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
+    body = resp.json()
+    assert body["pagination"]["has_more"] is True
+    cursor_next = body["pagination"]["cursor_next"]
+    assert cursor_next is not None
+    decoded_dt, decoded_id = decode_cursor(cursor_next)
+    assert decoded_id == task.id
+    assert decoded_dt == task.created_at
+
+
+def test_get_passes_decoded_cursor_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """?cursor=... → decode + pass tuple в repo.list_recent."""
+    from src.api.articles.cursor import encode_cursor
+
+    cursor_dt = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
+    cursor_id = uuid4()
+    cursor_str = encode_cursor(cursor_dt, cursor_id)
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/admin/llm/eval-runs?cursor={cursor_str}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    task_repo_mock["list_recent"].assert_awaited_once()
+    kwargs = task_repo_mock["list_recent"].call_args.kwargs
+    assert kwargs["cursor"] == (cursor_dt, cursor_id)
+    assert kwargs["type_"] == "eval_run"
+
+
+def test_get_invalid_cursor_returns_400(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """Битый cursor → 400 (InvalidCursorError), не 500."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/admin/llm/eval-runs?cursor=not-valid-base64-payload!!!",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+
+
+def test_get_no_cursor_passes_none_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    task_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """Без `?cursor` → repo.list_recent(cursor=None)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get("/api/v1/admin/llm/eval-runs", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    kwargs = task_repo_mock["list_recent"].call_args.kwargs
+    assert kwargs["cursor"] is None
 
 
 # ---------------------------------------------------------------------------

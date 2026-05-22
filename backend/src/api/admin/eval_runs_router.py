@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.admin.eval_runs_schemas import (
+    EvalRunListPagination,
     EvalRunListResponse,
     EvalRunStartRequest,
     EvalRunStartResponse,
@@ -27,6 +28,7 @@ from src.api.admin.tasks_repository import (
     AdminTaskRepository,
     get_admin_task_repository,
 )
+from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
@@ -103,7 +105,7 @@ async def start_eval_run(
 )
 async def list_eval_runs(
     provider: str | None = Query(default=None, max_length=64),
-    cursor: str | None = Query(default=None, max_length=200),  # noqa: ARG001 — backlog
+    cursor: str | None = Query(default=None, max_length=1024),
     limit: int = Query(default=_LIST_LIMIT_DEFAULT, ge=1, le=_LIST_LIMIT_MAX),
     _claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
@@ -112,17 +114,38 @@ async def list_eval_runs(
     """`GET /api/v1/admin/llm/eval-runs` (OpenAPI 04 §listEvalRuns).
 
     Lists eval_run admin_tasks DESC по created_at. Optional `?provider=X`
-    filters runs где X в params.providers list.
+    filters runs где X в params.providers list (post-filter — provider
+    список лежит в params jsonb, индекса нет; для admin-стенда ок).
 
-    Cursor pagination — backlog (admin UI MVP полностью fits в limit=200).
+    Cursor pagination — opaque `(created_at, id)` keyset. `has_more=True`
+    в pagination envelope означает дальше есть страница; `cursor_next`
+    подаётся обратно в `?cursor=`.
     """
     _require_staff_admin(access_levels)
-    rows = await repo.list_recent(type_="eval_run", limit=limit)
+
+    decoded = decode_cursor(cursor) if cursor else None
+    rows, has_more = await repo.list_recent(
+        type_="eval_run",
+        cursor=decoded,
+        limit=limit,
+    )
 
     summaries = [EvalRunsService.project_to_summary(r) for r in rows]
     if provider is not None:
         summaries = [s for s in summaries if provider in s.providers]
-    return EvalRunListResponse(data=summaries)
+
+    cursor_next: str | None = None
+    if rows and has_more:
+        last = rows[-1]
+        cursor_next = encode_cursor(last.created_at, last.id)
+
+    return EvalRunListResponse(
+        data=summaries,
+        pagination=EvalRunListPagination(
+            cursor_next=cursor_next,
+            has_more=has_more,
+        ),
+    )
 
 
 __all__ = ["router"]

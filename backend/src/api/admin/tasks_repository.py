@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.tasks_models import (
@@ -96,22 +96,38 @@ class AdminTaskRepository:
         *,
         type_: str | None = None,
         statuses: tuple[str, ...] | None = None,
+        cursor: tuple[datetime, UUID] | None = None,
         limit: int = 50,
-    ) -> list[AdminTask]:
-        """Admin listing — DESC по created_at."""
+    ) -> tuple[list[AdminTask], bool]:
+        """Admin listing — DESC по (created_at, id) для stable keyset.
+
+        Returns `(rows, has_more)` via +1-fetch overshoot pattern.
+        Cursor — `(created_at, id)` tuple от последнего returned row.
+        """
         if type_ and type_ not in TASK_TYPES:
             raise ValueError(f"Unknown task type: {type_}")
         if statuses:
             unknown = set(statuses) - set(TASK_STATUSES)
             if unknown:
                 raise ValueError(f"Unknown task statuses: {unknown}")
-        stmt = select(AdminTask).order_by(AdminTask.created_at.desc()).limit(limit)
+        stmt = select(AdminTask)
         if type_:
             stmt = stmt.where(AdminTask.type == type_)
         if statuses:
             stmt = stmt.where(AdminTask.status.in_(statuses))
+        if cursor is not None:
+            cursor_dt, cursor_id = cursor
+            stmt = stmt.where(
+                or_(
+                    AdminTask.created_at < cursor_dt,
+                    (AdminTask.created_at == cursor_dt) & (AdminTask.id < cursor_id),
+                )
+            )
+        stmt = stmt.order_by(AdminTask.created_at.desc(), AdminTask.id.desc()).limit(limit + 1)
         result = await self._session.execute(stmt)
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        has_more = len(rows) > limit
+        return rows[:limit], has_more
 
 
 async def get_admin_task_repository(
