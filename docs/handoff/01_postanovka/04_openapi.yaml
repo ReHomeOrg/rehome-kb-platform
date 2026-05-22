@@ -2067,6 +2067,8 @@ paths:
                       type: array
                       items:
                         $ref: '#/components/schemas/EvalRun'
+                    pagination:
+                      $ref: '#/components/schemas/Pagination'
     post:
       tags:
       - Admin
