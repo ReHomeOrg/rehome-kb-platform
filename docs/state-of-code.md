@@ -492,7 +492,10 @@ audit-log export и eval-runs.
 id)` DESC + `(rows, has_more)` tuple via +1 overshoot. Same pattern что
 у `KbUserRepository.list_filtered`. Wired в `GET /admin/llm/eval-runs`
 с opaque base64 cursor через `articles/cursor.py::encode_cursor` /
-`decode_cursor` — единый module-wide cursor format.
+`decode_cursor` — единый module-wide cursor format. **Known perf-debt:**
+композитного индекса `(created_at DESC, id DESC)` на `admin_tasks` пока
+нет; для admin-стенда (низкий QPS, table малый) приемлемо, добавим при
+росте usage.
 
 **Remaining unimplemented OpenAPI admin endpoints** (2 — оба
 design-needed, требуют writable runtime config storage):
