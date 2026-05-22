@@ -17,17 +17,18 @@ from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.api.audit import (
     ACTION_CHAT_ESCALATED,
-    ANON_ACTOR_TOKEN_PREFIX_LEN,
     RESOURCE_CHAT_SESSION,
     AuditRepository,
+    format_anon_actor_sub,
     get_audit_repository,
 )
 from src.api.auth.dependency import get_current_access_levels, get_current_scope
 from src.api.auth.scope import AccessLevel, Scope
+from src.api.chat.idempotency import process_chat_idempotency_key
 from src.api.chat.llm import LLMMessage, LLMProvider, get_llm_provider
 from src.api.chat.llm.base import LLMRole
 from src.api.chat.metrics import (
@@ -50,6 +51,7 @@ from src.api.chat.schemas import (
 from src.api.chat.sse import format_sse_event
 from src.api.chat.system_prompt import build_rag_system_prompt, hits_to_citations
 from src.api.config import Settings, get_settings
+from src.api.idempotency import IdempotencyResult
 from src.api.search.repository import RetrievalHit
 from src.api.search.retrieval import RetrievalService, get_retrieval_service
 from src.api.webhooks.dispatcher import (
@@ -496,7 +498,8 @@ async def post_escalate(
     repo: ChatRepository = Depends(get_chat_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
-) -> EscalateResponse:
+    idempotency: IdempotencyResult = Depends(process_chat_idempotency_key),
+) -> Any:
     """`POST /chat/sessions/{id}/escalate` — создать ticket эскалации.
 
     Body optional: пустой POST → priority='normal', reason=None.
@@ -504,9 +507,23 @@ async def post_escalate(
     Owner-gate через `create_escalation`. 404 mask если session не owned.
 
     Multiple escalations allowed — каждый POST создаёт новый ticket с
-    уникальным id. Webhook delivery в support system — backlog
-    (E5 webhooks эпик).
+    уникальным id. Idempotency-Key (UUID header) делает endpoint retry-
+    safe: повторный request с тем же key + body возвращает cached response
+    (тот же ticket_id), no duplicate ticket / audit row / webhook fire.
+
+    Webhook delivery в support system — backlog (E5 webhooks эпик).
     """
+    if idempotency.replay is not None:
+        # JSONResponse bypass'ит response_model re-validation на replay
+        # path — защищает от schema drift между cached body и текущей
+        # `EscalateResponse` shape (cache TTL = 24h, схема может
+        # эволюционировать). Same pattern что в admin/users / articles.
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     user_id, session_token = owner
     reason = payload.reason if payload is not None else None
     priority = payload.priority if payload is not None else "normal"
@@ -524,11 +541,7 @@ async def post_escalate(
     # E4.x #104: audit trail. Actor:
     #   - JWT sub (UUID) для authenticated пользователей.
     #   - "anon:<session_token-prefix>" для anon-flow (нет PII в audit).
-    actor_sub = (
-        str(user_id)
-        if user_id is not None
-        else f"anon:{str(session_token)[:ANON_ACTOR_TOKEN_PREFIX_LEN]}"
-    )
+    actor_sub = str(user_id) if user_id is not None else format_anon_actor_sub(session_token)
     await audit_repo.record(
         actor_sub=actor_sub,
         action=ACTION_CHAT_ESCALATED,
@@ -551,7 +564,13 @@ async def post_escalate(
         },
     )
 
-    return EscalateResponse(
+    result = EscalateResponse(
         ticket_id=escalation.id,
         estimated_response_time_minutes=_ESTIMATED_RESPONSE_BY_PRIORITY[escalation.priority],
     )
+    body = result.model_dump(mode="json")
+    await idempotency.save(status_code=status.HTTP_201_CREATED, body=body)
+    # JSONResponse напрямую — same pattern что и replay path; consistent
+    # bypass response_model re-validation (cache TTL = 24h может пережить
+    # schema drift).
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=body)

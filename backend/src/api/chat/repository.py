@@ -336,8 +336,10 @@ class ChatRepository:
         `user_id` (если есть) сохраняется в `requested_by_user_id` для
         audit. Anon — NULL.
 
-        Multiple escalations allowed (без dedupe) — каждый вызов
-        создаёт новый ticket с уникальным id. Idempotency-Key — backlog.
+        Multiple escalations allowed (без dedupe) на repo-level — каждый
+        вызов создаёт новый ticket с уникальным id. Idempotency-Key
+        обрабатывается на router-level через `process_chat_idempotency_key`
+        (см. `chat/idempotency.py`).
         """
         session = await self.get_session_by_owner(
             session_id, user_id=user_id, session_token=session_token
