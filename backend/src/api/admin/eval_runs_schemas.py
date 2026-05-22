@@ -74,15 +74,26 @@ class EvalRunSummary(BaseModel):
     results: list[EvalRunProviderResult] = Field(default_factory=list)
 
 
+class EvalRunListPagination(BaseModel):
+    """Keyset pagination envelope (см. cursor.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cursor_next: str | None = None
+    has_more: bool = False
+
+
 class EvalRunListResponse(BaseModel):
     """GET /admin/llm/eval-runs response envelope."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: list[EvalRunSummary]
+    pagination: EvalRunListPagination = Field(default_factory=EvalRunListPagination)
 
 
 __all__ = [
+    "EvalRunListPagination",
     "EvalRunListResponse",
     "EvalRunProviderResult",
     "EvalRunStartRequest",
