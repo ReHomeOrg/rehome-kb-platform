@@ -100,6 +100,18 @@ ACTION_DOCUMENTS_FILE_ARCHIVED: Final = "documents.file.archived"
 # of entropy — достаточно для audit uniqueness, минимально раскрывает токен.
 ANON_ACTOR_TOKEN_PREFIX_LEN: Final = 8
 
+
+def format_anon_actor_sub(token: object) -> str:
+    """`anon:<prefix>` actor_sub representation для chat anon flow.
+
+    Single source of truth — должен возвращать ту же строку для audit-log
+    (`router.py::post_escalate`) и idempotency PK (`chat/idempotency.py`),
+    иначе lookup'ы desync'нутся. `token` принимается как opaque object
+    (обычно UUID) — рендерится через `str(token)`.
+    """
+    return f"anon:{str(token)[:ANON_ACTOR_TOKEN_PREFIX_LEN]}"
+
+
 # Collaborators actions (ADR-0014, ТЗ §10). Metadata содержит type/group
 # — для audit поиска по типам коллаборантов. ПДн (контактные ФИО,
 # юр.реквизиты) в audit НЕ пишем (есть в `collaborators.audit_log`

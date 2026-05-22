@@ -1196,7 +1196,8 @@ paths:
       summary: Эскалация на оператора поддержки
       operationId: escalateChatSession
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline
+      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан
+        (anon flow через X-Chat-Session-Token + auth flow через JWT)
       parameters:
       - name: session_id
         in: path
@@ -1205,6 +1206,7 @@ paths:
           type: string
           format: uuid
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: false
         content:

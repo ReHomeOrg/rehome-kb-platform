@@ -52,6 +52,7 @@ from src.api.audit.actions import (
     RESOURCE_VAULT_SECRET,
     RESOURCE_VAULT_USER,
     RESOURCE_WEBHOOK,
+    format_anon_actor_sub,
 )
 from src.api.audit.models import AuditLog
 from src.api.audit.repository import AuditRepository, get_audit_repository
@@ -101,6 +102,7 @@ __all__ = [
     "ACTION_WEBHOOKS_DELETED",
     "ACTION_WEBHOOKS_TESTED",
     "ANON_ACTOR_TOKEN_PREFIX_LEN",
+    "format_anon_actor_sub",
     "AuditLog",
     "AuditRepository",
     "audit_router",
