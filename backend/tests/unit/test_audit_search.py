@@ -504,3 +504,89 @@ def test_get_audit_repository_factory_returns_repo_with_session() -> None:
     repo = get_audit_repository(fake_session)
     assert isinstance(repo, AuditRepository)
     assert repo._session is fake_session
+
+
+# ---------------------------------------------------------------------------
+# list_records_keyset (#343)
+
+
+def _stub_session(rows: list[object]) -> Any:
+    from unittest.mock import MagicMock
+
+    session = MagicMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    session.execute = AsyncMock(return_value=result)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_list_records_keyset_returns_tuple_no_overshoot() -> None:
+    """Repo возвращает <limit rows → has_more=False."""
+    session = _stub_session([])
+    repo = AuditRepository(session)
+    rows, has_more = await repo.list_records_keyset(limit=10)
+    assert rows == []
+    assert has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_records_keyset_detects_overshoot() -> None:
+    """limit=2 + DB returns 3 (limit+1) → rows[:2], has_more=True."""
+    fake_rows = [object(), object(), object()]
+    session = _stub_session(fake_rows)
+    repo = AuditRepository(session)
+    rows, has_more = await repo.list_records_keyset(limit=2)
+    assert len(rows) == 2
+    assert has_more is True
+
+
+@pytest.mark.asyncio
+async def test_list_records_keyset_sql_orders_desc_with_id_tiebreaker() -> None:
+    """ORDER BY created_at DESC, id DESC — обязательно для keyset стабильности."""
+    session = _stub_session([])
+    repo = AuditRepository(session)
+    await repo.list_records_keyset(limit=10)
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile()).lower()
+    assert "order by audit_log.created_at desc, audit_log.id desc" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_records_keyset_cursor_applies_where_predicate() -> None:
+    """Cursor `(dt, uuid)` → WHERE (created_at < :dt OR (created_at = :dt AND id < :uuid))."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    session = _stub_session([])
+    repo = AuditRepository(session)
+    cursor_dt = datetime(2026, 5, 1, tzinfo=UTC)
+    cursor_id = uuid4()
+    await repo.list_records_keyset(cursor=(cursor_dt, cursor_id), limit=10)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat = list(compiled.params.values())
+    assert cursor_dt in flat
+    assert cursor_id in flat
+    sql = str(compiled).lower()
+    # OR keyset condition присутствует.
+    assert "created_at <" in sql or "audit_log.created_at <" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_records_keyset_filters_combine_with_cursor() -> None:
+    """actor_sub + cursor → оба WHERE предиката применяются (combined AND)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    session = _stub_session([])
+    repo = AuditRepository(session)
+    await repo.list_records_keyset(
+        actor_sub="user-x",
+        cursor=(datetime(2026, 5, 1, tzinfo=UTC), uuid4()),
+        limit=10,
+    )
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    flat = list(compiled.params.values())
+    assert "user-x" in flat

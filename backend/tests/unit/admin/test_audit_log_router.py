@@ -1,8 +1,7 @@
-"""Unit tests для GET /api/v1/admin/audit-log (#237)."""
+"""Unit tests для GET /api/v1/admin/audit-log (#237, keyset cursor #343)."""
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -12,41 +11,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.admin.audit_log_router import _decode_cursor, _encode_cursor
+from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.audit.models import AuditLog
 from src.api.audit.repository import get_audit_repository
 from src.api.main import app
-
-# ---------------------------------------------------------------------------
-# Pure: cursor encode/decode
-
-
-def test_decode_cursor_empty_returns_zero() -> None:
-    assert _decode_cursor(None) == 0
-    assert _decode_cursor("") == 0
-
-
-def test_encode_decode_roundtrip() -> None:
-    for offset in (0, 1, 50, 1234, 999999):
-        assert _decode_cursor(_encode_cursor(offset)) == offset
-
-
-def test_decode_cursor_invalid_raises_422() -> None:
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as exc:
-        _decode_cursor("not-base64-!@#$")
-    assert exc.value.status_code == 422
-
-
-def test_decode_cursor_negative_raises_422() -> None:
-    from fastapi import HTTPException
-
-    bad = base64.urlsafe_b64encode(b"-5").decode("ascii")
-    with pytest.raises(HTTPException) as exc:
-        _decode_cursor(bad)
-    assert exc.value.status_code == 422
-
 
 # ---------------------------------------------------------------------------
 # Router endpoint
@@ -59,6 +27,7 @@ def _make_row(
     resource_type: str = "article",
     resource_id: str | None = "art-1",
     metadata: dict[str, Any] | None = None,
+    created_at: datetime | None = None,
 ) -> AuditLog:
     row = AuditLog(
         actor_sub=actor_sub,
@@ -68,21 +37,21 @@ def _make_row(
         audit_metadata=metadata or {"k": "v"},
     )
     row.id = uuid4()
-    row.created_at = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
+    row.created_at = created_at or datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
     return row
 
 
 @pytest.fixture
 def repo_mock() -> Iterator[AsyncMock]:
     """Override AuditRepository — мы тестируем router, не storage."""
-    mock_list = AsyncMock(return_value=[])
+    mock_keyset = AsyncMock(return_value=([], False))
 
     class _FakeRepo:
         def __init__(self) -> None:
-            self.list_records = mock_list
+            self.list_records_keyset = mock_keyset
 
     app.dependency_overrides[get_audit_repository] = lambda: _FakeRepo()
-    yield mock_list
+    yield mock_keyset
     app.dependency_overrides.pop(get_audit_repository, None)
 
 
@@ -128,7 +97,9 @@ def test_staff_admin_returns_200(
     assert body["data"] == []
     assert body["pagination"]["has_more"] is False
     assert body["pagination"]["cursor_next"] is None
+    # Keyset не поддерживает backward navigation — cursor_prev всегда null.
     assert body["pagination"]["cursor_prev"] is None
+    assert body["pagination"]["total_estimate"] == 0
 
 
 def test_staff_legal_returns_200(
@@ -158,7 +129,7 @@ def test_row_projection_maps_to_openapi_shape(
         resource_id="slug-x",
         metadata={"slug": "slug-x"},
     )
-    repo_mock.return_value = [row]
+    repo_mock.return_value = ([row], False)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
@@ -244,62 +215,108 @@ def test_invalid_severity_returns_422(
     assert resp.status_code == 422
 
 
-def test_pagination_has_more_when_limit_exceeded(
+def test_pagination_has_more_returns_cursor_next(
     client: TestClient,
     make_jwt: Callable[..., str],
     repo_mock: AsyncMock,
 ) -> None:
-    """limit=2 + repo returns 3 (limit+1) → has_more=True + cursor_next set."""
-    rows = [_make_row(action=f"a-{i}") for i in range(3)]
-    repo_mock.return_value = rows
+    """has_more=True ⇒ cursor_next encoded из (created_at, id) последней row."""
+    last_row = _make_row(action="a-last")
+    rows = [_make_row(action=f"a-{i}") for i in range(2)] + [last_row]
+    # Repo возвращает (rows[:limit], has_more=True) — здесь limit=3, всё видимо.
+    repo_mock.return_value = (rows, True)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
         "/api/v1/admin/audit-log",
-        params={"limit": 2},
+        params={"limit": 3},
         headers={"Authorization": f"Bearer {token}"},
     )
     body = resp.json()
-    assert len(body["data"]) == 2
+    assert len(body["data"]) == 3
     assert body["pagination"]["has_more"] is True
     assert body["pagination"]["cursor_next"] is not None
-    assert _decode_cursor(body["pagination"]["cursor_next"]) == 2  # offset 0 + limit 2
+    decoded_dt, decoded_id = decode_cursor(body["pagination"]["cursor_next"])
+    assert decoded_id == last_row.id
+    assert decoded_dt == last_row.created_at
+    # cursor_prev keyset не поддерживается — всегда null.
+    assert body["pagination"]["cursor_prev"] is None
+    # total_estimate = len(rows) + 1 (есть ещё одна страница).
+    assert body["pagination"]["total_estimate"] == 4
 
 
-def test_invalid_cursor_returns_422(
+def test_pagination_no_more_no_cursor_next(
     client: TestClient,
     make_jwt: Callable[..., str],
     repo_mock: AsyncMock,
 ) -> None:
+    rows = [_make_row(action=f"a-{i}") for i in range(2)]
+    repo_mock.return_value = (rows, False)
+
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
         "/api/v1/admin/audit-log",
-        params={"cursor": "!!!not-base64!!!"},
+        params={"limit": 50},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 422
+    body = resp.json()
+    assert body["pagination"]["has_more"] is False
+    assert body["pagination"]["cursor_next"] is None
+    assert body["pagination"]["total_estimate"] == 2
 
 
-def test_cursor_advances_offset(
+def test_invalid_cursor_returns_400(
     client: TestClient,
     make_jwt: Callable[..., str],
     repo_mock: AsyncMock,
 ) -> None:
-    """Caller'ovsky cursor → offset → repo call с правильным offset."""
-    cursor = _encode_cursor(100)
-    repo_mock.return_value = []
+    """Битый opaque cursor → 400 (InvalidCursorError)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/admin/audit-log",
+        params={"cursor": "not-valid-base64-payload!!!"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+
+
+def test_cursor_passes_decoded_tuple_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    repo_mock: AsyncMock,
+) -> None:
+    """?cursor=... → decode → repo.list_records_keyset(cursor=(dt, uuid))."""
+    cursor_dt = datetime(2026, 5, 15, 10, 0, tzinfo=UTC)
+    cursor_id = uuid4()
+    cursor_str = encode_cursor(cursor_dt, cursor_id)
 
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     resp = client.get(
         "/api/v1/admin/audit-log",
-        params={"cursor": cursor, "limit": 25},
+        params={"cursor": cursor_str, "limit": 25},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
     kwargs = repo_mock.call_args.kwargs
-    assert kwargs["offset"] == 100
-    # limit+1 для has_more detection.
-    assert kwargs["limit"] == 26
+    assert kwargs["cursor"] == (cursor_dt, cursor_id)
+    # +1 overshoot живёт в repo, не в router'е.
+    assert kwargs["limit"] == 25
+
+
+def test_no_cursor_passes_none_to_repo(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    repo_mock: AsyncMock,
+) -> None:
+    """Без `?cursor` → repo.list_records_keyset(cursor=None)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/admin/audit-log",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    kwargs = repo_mock.call_args.kwargs
+    assert kwargs["cursor"] is None
 
 
 def test_limit_over_max_returns_422(

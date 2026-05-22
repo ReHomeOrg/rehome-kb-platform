@@ -57,6 +57,14 @@ class AuditLog(Base):
             "resource_id",
             "created_at",
         ),
+        # Composite DESC index для unfiltered keyset cursor pagination
+        # (`GET /admin/audit-log` → `list_records_keyset`). См. migration
+        # 0028_audit_log_keyset_index.
+        Index(
+            "ix_audit_log_created_at_id_desc",
+            created_at.desc(),
+            id.desc(),
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover (debug only)

@@ -12,9 +12,10 @@ ADR-0008 Repository pattern.
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import Text, cast, select
+from sqlalchemy import Text, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.audit.models import AuditLog
@@ -112,6 +113,69 @@ class AuditRepository:
         stmt = stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_records_keyset(
+        self,
+        *,
+        actor_sub: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        action: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        q: str | None = None,
+        cursor: tuple[datetime, UUID] | None = None,
+        limit: int = 50,
+    ) -> tuple[list[AuditLog], bool]:
+        """Keyset-paginated search для admin compliance UI (`GET /admin/audit-log`).
+
+        Same фильтры что и `list_records`, но stable cursor вместо offset.
+        Cursor — opaque `(created_at, id)` tuple от последней returned row.
+
+        Ordering: `(created_at DESC, id DESC)` — стабильный sort key,
+        ties по `created_at` (audit log может писать batch с одинаковым
+        timestamp) разрешаются через `id`.
+
+        Returns `(rows, has_more)` через +1-fetch overshoot pattern;
+        caller энкодит `cursor_next = encode_cursor(last.created_at,
+        last.id)` если `has_more`.
+
+        Performance: unfiltered queries используют
+        `ix_audit_log_created_at_id_desc` (см. migration 0028).
+        Filtered queries (по actor / resource) могут использовать
+        существующие composite indices с created_at lead — но keyset
+        WHERE применяется к main ordering, не к prefix-индексу, поэтому
+        на больших filtered наборах PG может выбрать prefix index +
+        filter row vs. seq scan. Acceptable для admin compliance UI.
+        """
+        stmt = select(AuditLog)
+        if actor_sub is not None:
+            stmt = stmt.where(AuditLog.actor_sub == actor_sub)
+        if resource_type is not None:
+            stmt = stmt.where(AuditLog.resource_type == resource_type)
+        if resource_id is not None:
+            stmt = stmt.where(AuditLog.resource_id == resource_id)
+        if action is not None:
+            stmt = stmt.where(AuditLog.action == action)
+        if since is not None:
+            stmt = stmt.where(AuditLog.created_at >= since)
+        if until is not None:
+            stmt = stmt.where(AuditLog.created_at < until)
+        if q:
+            stmt = stmt.where(cast(AuditLog.audit_metadata, Text).ilike(f"%{q}%"))
+        if cursor is not None:
+            cursor_dt, cursor_id = cursor
+            stmt = stmt.where(
+                or_(
+                    AuditLog.created_at < cursor_dt,
+                    (AuditLog.created_at == cursor_dt) & (AuditLog.id < cursor_id),
+                )
+            )
+        stmt = stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit + 1)
+        result = await self._session.execute(stmt)
+        rows = list(result.scalars().all())
+        has_more = len(rows) > limit
+        return rows[:limit], has_more
 
 
 def get_audit_repository(

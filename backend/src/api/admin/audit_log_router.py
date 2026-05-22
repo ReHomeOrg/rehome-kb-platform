@@ -1,9 +1,10 @@
 """`/api/v1/admin/audit-log` (#237, OpenAPI 04 §getAuditLog).
 
-Adapter поверх существующего `AuditRepository.list_records` —
-адаптирует OpenAPI 04 параметризацию (`actor_id` / `entity_type` /
-`entity_id` / `from` / `to` / `cursor`) к внутренней модели audit_log
-(`actor_sub` / `resource_type` / `resource_id` / since/until / offset).
+Adapter поверх `AuditRepository.list_records_keyset` — адаптирует OpenAPI
+04 параметризацию (`actor_id` / `entity_type` / `entity_id` / `from` /
+`to` / `cursor`) к внутренней модели audit_log (`actor_sub` /
+`resource_type` / `resource_id` / since/until / `(created_at, id)`
+keyset cursor).
 
 Существующий публичный `/api/v1/audit-log` остаётся (LEGAL access),
 этот alias — admin UI surface с staff_admin gate per OpenAPI.
@@ -20,14 +21,15 @@ Mapping notes:
   нет в `audit_log` (миграция #102 — minimal schema). Сериализуются
   null'ами. Полный набор полей — backlog (требует ALTER TABLE +
   middleware capture point).
-- Cursor pagination: opaque base64-encoded offset (simple для MVP;
-  proper keyset на `(created_at, id)` — backlog после миграции
-  index'а).
+- Cursor pagination: opaque keyset `(created_at, id)` через общий
+  `articles/cursor.py::encode_cursor` / `decode_cursor`. `cursor_prev`
+  null'ится — keyset back-navigation требует отдельного reversed query,
+  admin UI обходится browser history. `total_estimate` — len(visible) +
+  (1 if has_more); точный COUNT(*) overkill для compliance review.
 """
 
 from __future__ import annotations
 
-import base64
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
@@ -49,6 +51,7 @@ from src.api.admin.tasks_schemas import (
     AuditLogExportRequest,
     AuditLogExportResponse,
 )
+from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.audit.actions import (
     ACTION_ADMIN_AUDIT_LOG_EXPORTED,
     RESOURCE_ADMIN_TASK,
@@ -73,30 +76,6 @@ _MAX_LIMIT = 500
 _DEFAULT_LIMIT = 50
 
 
-def _decode_cursor(cursor: str | None) -> int:
-    """Cursor → offset. Empty/None → 0. Invalid → 422.
-
-    Простой opaque base64-encoded integer offset. Switch на keyset
-    cursor `(created_at DESC, id DESC)` — backlog (нужен composite
-    index + repo support).
-    """
-    if not cursor:
-        return 0
-    try:
-        decoded = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("ascii")
-        value = int(decoded)
-        if value < 0:
-            raise ValueError("negative offset")
-        return value
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid cursor: {exc}") from exc
-
-
-def _encode_cursor(offset: int) -> str:
-    """Offset → opaque cursor (base64 of decimal int)."""
-    return base64.urlsafe_b64encode(str(offset).encode("ascii")).decode("ascii")
-
-
 def _require_staff_admin_or_legal(access_levels: frozenset[AccessLevel]) -> None:
     """staff_admin или staff_legal scope per OpenAPI.
 
@@ -118,9 +97,10 @@ def _require_staff_admin_or_legal(access_levels: frozenset[AccessLevel]) -> None
     response_model_by_alias=True,
     summary="Аудит-лог системы (staff_admin / staff_legal)",
     responses={
+        400: {"description": "Невалидный cursor"},
         401: {"description": "Не аутентифицирован"},
         403: {"description": "Требуется staff_admin или staff_legal scope"},
-        422: {"description": "Невалидный cursor / параметр"},
+        422: {"description": "Невалидный параметр"},
     },
 )
 async def get_admin_audit_log(
@@ -131,7 +111,7 @@ async def get_admin_audit_log(
     severity: AdminAuditLogSeverity | None = Query(default=None),  # noqa: ARG001 — honest stub
     from_: datetime | None = Query(default=None, alias="from"),
     to: datetime | None = Query(default=None),
-    cursor: str | None = Query(default=None, max_length=200),
+    cursor: str | None = Query(default=None, max_length=1024),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     _claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
@@ -140,8 +120,9 @@ async def get_admin_audit_log(
     """`GET /api/v1/admin/audit-log` (OpenAPI 04 §getAuditLog).
 
     Same data что и `/audit-log`, но с OpenAPI-compliant param names и
-    cursor pagination. Существующий `/audit-log` остаётся для backward
-    compat (используется через LEGAL middleware напрямую).
+    keyset cursor pagination (`(created_at, id)` DESC). Существующий
+    `/audit-log` остаётся для backward compat (offset pagination, used
+    LEGAL middleware напрямую).
 
     `severity` filter — accepted но не применяется (no column; honest
     stub до landing'а severity field миграции). Response `severity`
@@ -149,10 +130,9 @@ async def get_admin_audit_log(
     """
     _require_staff_admin_or_legal(access_levels)
 
-    offset = _decode_cursor(cursor)
+    decoded = decode_cursor(cursor) if cursor else None
 
-    # Fetch limit+1 для has_more detection — стандартный паттерн.
-    rows = await repo.list_records(
+    rows, has_more = await repo.list_records_keyset(
         actor_sub=actor_id,
         resource_type=entity_type,
         resource_id=entity_id,
@@ -160,28 +140,33 @@ async def get_admin_audit_log(
         since=from_,
         until=to,
         q=None,
-        limit=limit + 1,
-        offset=offset,
+        cursor=decoded,
+        limit=limit,
     )
 
-    has_more = len(rows) > limit
-    visible = rows[:limit]
-    cursor_next = _encode_cursor(offset + limit) if has_more else None
-    cursor_prev = _encode_cursor(max(offset - limit, 0)) if offset > 0 else None
+    cursor_next: str | None = None
+    if rows and has_more:
+        last = rows[-1]
+        cursor_next = encode_cursor(last.created_at, last.id)
 
-    entries = [AuditLogEntryView.from_model(r) for r in visible]
+    entries = [AuditLogEntryView.from_model(r) for r in rows]
 
     return AdminAuditLogListResponse(
         data=entries,
         pagination=AdminAuditLogPagination(
             cursor_next=cursor_next,
-            cursor_prev=cursor_prev,
+            # Keyset не поддерживает cheap backward navigation — нужен
+            # отдельный reversed-keyset query. Admin UI обходится browser
+            # history; field оставлен в schema для OpenAPI compat (всегда
+            # null с keyset).
+            cursor_prev=None,
             has_more=has_more,
-            # `total_estimate` per OpenAPI «Приблизительная оценка». MVP:
-            # offset + len(visible) + (1 if has_more else 0). Точный count
-            # требует COUNT(*) — backlog (для admin UI достаточно
-            # «есть ещё / нет ещё»).
-            total_estimate=offset + len(visible) + (1 if has_more else 0),
+            # `total_estimate` per OpenAPI «Приблизительная оценка».
+            # Keyset не знает absolute offset; даём lower-bound оценку
+            # «есть как минимум столько rows на этой странице (+1 если
+            # is_more)». Точный count требует COUNT(*) и overkill для
+            # admin compliance review.
+            total_estimate=len(rows) + (1 if has_more else 0),
         ),
     )
 
