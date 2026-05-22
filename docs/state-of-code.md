@@ -497,6 +497,14 @@ id)` DESC + `(rows, has_more)` tuple via +1 overshoot. Same pattern что
 нет; для admin-стенда (низкий QPS, table малый) приемлемо, добавим при
 росте usage.
 
+`AuditRepository.list_records_keyset` (#343 follow-up) — keyset cursor
+для `GET /admin/audit-log` (legacy `/audit-log` остался на offset для
+backward compat). Migration 0028 добавляет composite index
+`ix_audit_log_created_at_id_desc` `(created_at DESC, id DESC)` —
+supports unfiltered keyset path efficiently. `cursor_prev` keyset не
+поддерживает (всегда null в response, admin UI использует browser
+history); `total_estimate` — lower-bound `len(visible) + has_more`.
+
 **Remaining unimplemented OpenAPI admin endpoints** (2 — оба
 design-needed, требуют writable runtime config storage):
 - PATCH /admin/system-config (updateSystemConfig) — нужен ADR'а на
