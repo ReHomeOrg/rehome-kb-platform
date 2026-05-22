@@ -110,7 +110,7 @@ class IdempotencyResult:
         )
 
 
-async def _process_for_actor(
+async def process_for_actor(
     request: Request,
     repo: IdempotencyKeyRepository,
     actor_sub: str,
@@ -201,4 +201,4 @@ async def process_idempotency_key(
     через composite PK `(key, request_path, actor_sub)`. Для anon flow
     (chat /sessions/{id}/escalate) — см. `process_chat_idempotency_key`.
     """
-    return await _process_for_actor(request, repo, claims["sub"])
+    return await process_for_actor(request, repo, claims["sub"])

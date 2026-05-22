@@ -6,6 +6,7 @@ E5.1 (Issue #44): POST /articles. Cross-cutting модуль; будущий р�
 
 from src.api.idempotency.dependency import (
     IdempotencyResult,
+    process_for_actor,
     process_idempotency_key,
 )
 from src.api.idempotency.models import IdempotencyKey
@@ -15,5 +16,6 @@ __all__ = [
     "IdempotencyKey",
     "IdempotencyKeyRepository",
     "IdempotencyResult",
+    "process_for_actor",
     "process_idempotency_key",
 ]
