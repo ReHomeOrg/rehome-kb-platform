@@ -177,3 +177,65 @@ def test_article_patch_distinguishes_unset_from_null() -> None:
     # Эту семантику оставляем future-proof для nullable полей.
     p2 = ArticlePatch(title="New")
     assert p2.model_dump(exclude_unset=True) == {"title": "New"}
+
+
+# ============================================================
+# Tags case normalization (#346)
+# ============================================================
+
+
+def test_article_input_tags_lowercased() -> None:
+    """ArticleInput.tags: Mixed-case → lowercase на validate."""
+    payload = ArticleInput(**_valid_payload(tags=["Договор", "ПАСПОРТ"]))  # type: ignore[arg-type]
+    assert payload.tags == ["договор", "паспорт"]
+
+
+def test_article_input_tags_dedup_case_insensitive() -> None:
+    """Дубли с разным case → один lowercase entry."""
+    payload = ArticleInput(  # type: ignore[arg-type]
+        **_valid_payload(tags=["Договор", "договор", "ДОГОВОР"])
+    )
+    assert payload.tags == ["договор"]
+
+
+def test_article_input_tags_strip_whitespace() -> None:
+    """Trailing / leading whitespace стрипается до lowercase."""
+    payload = ArticleInput(**_valid_payload(tags=["  Договор  ", "сервис"]))  # type: ignore[arg-type]
+    assert payload.tags == ["договор", "сервис"]
+
+
+def test_article_input_tags_drop_empty() -> None:
+    """Whitespace-only теги отбрасываются."""
+    payload = ArticleInput(**_valid_payload(tags=["", "  ", "договор"]))  # type: ignore[arg-type]
+    assert payload.tags == ["договор"]
+
+
+def test_article_input_tags_preserves_order_of_first_occurrence() -> None:
+    """Dedup сохраняет order первого появления (важно для UI consistency)."""
+    payload = ArticleInput(  # type: ignore[arg-type]
+        **_valid_payload(tags=["Сервис", "Договор", "сервис"])
+    )
+    assert payload.tags == ["сервис", "договор"]
+
+
+def test_article_patch_tags_lowercased() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    p = ArticlePatch(tags=["Договор", "ПАСПОРТ"])
+    assert p.tags == ["договор", "паспорт"]
+
+
+def test_article_patch_tags_none_passes_through() -> None:
+    """tags=None → None (не передано — `exclude_unset=True` skip'нет)."""
+    from src.api.articles.schemas import ArticlePatch
+
+    p = ArticlePatch()
+    assert p.tags is None
+
+
+def test_article_patch_tags_empty_list_normalized_to_empty() -> None:
+    """Явный `tags=[]` → нормализованный `[]` (clears all tags на UPDATE)."""
+    from src.api.articles.schemas import ArticlePatch
+
+    p = ArticlePatch(tags=[])
+    assert p.tags == []
