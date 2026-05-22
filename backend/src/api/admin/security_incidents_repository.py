@@ -1,8 +1,16 @@
 """SecurityIncidentRepository (#231) — CRUD + state machine.
 
-`create` API запланирована для wiring'а audit.security_event emitter
-(#223) — backlog: wire после merges обоих PR'ов. Этот PR landит чистый
-CRUD (list + get + patch).
+Router endpoints: list / get / patch (NO POST per OpenAPI — incidents
+spawn'аются автоматически, not via human admin action).
+
+`create` API public surface для будущего wiring'а из
+`audit.security.report_security_event` (#223 emitter сейчас только
+fires webhook, без persistence — см. security_incidents_router
+docstring). Vault emergency unlock использует direct
+`SecurityIncident(...)` instantiation вместо `repo.create` чтобы
+explicit attach FK к unlock_log row (см. vault/emergency_service.py).
+Текущий status: `create` метод unused в production code; integration
+test через test_security_incidents_repository.py.
 """
 
 from __future__ import annotations
