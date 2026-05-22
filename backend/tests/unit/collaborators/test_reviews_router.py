@@ -122,13 +122,42 @@ def test_list_reviews_404_when_collaborator_not_visible(
     assert resp.status_code == 404
 
 
+def _stub_list_reviews_calls(
+    session: MagicMock,
+    *,
+    collab: Collaborator | None,
+    reviews: list[CollaboratorReview],
+    total_count: int | None = None,
+) -> None:
+    """Helper для GET /reviews execute side_effect: collab → list → count.
+
+    `total_count` defaults to `len(reviews)` если не передан.
+    """
+    if total_count is None:
+        total_count = len(reviews)
+    results: list[Any] = []
+    # Call 1: collab visibility.
+    r_collab = MagicMock()
+    r_collab.scalar_one_or_none = MagicMock(return_value=collab)
+    results.append(r_collab)
+    # Call 2: list reviews.
+    r_list = MagicMock()
+    r_list.scalars = MagicMock(return_value=MagicMock(all=lambda: reviews))
+    results.append(r_list)
+    # Call 3: COUNT(*).
+    r_count = MagicMock()
+    r_count.scalar_one = MagicMock(return_value=total_count)
+    results.append(r_count)
+    session.execute.side_effect = results
+
+
 def test_list_reviews_returns_masked_authors(client: TestClient, fake_session: MagicMock) -> None:
     cid = uuid4()
     collab = _make_collab("D")
     collab.id = cid
     r1 = _make_review(cid, rating=5, name="Иван Петров")
     r2 = _make_review(cid, rating=4, name=None)
-    _stub_execute_for(fake_session, collab, [r1, r2])
+    _stub_list_reviews_calls(fake_session, collab=collab, reviews=[r1, r2])
     resp = client.get(f"/api/v1/collaborators/{cid}/reviews")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -137,6 +166,67 @@ def test_list_reviews_returns_masked_authors(client: TestClient, fake_session: M
     masked = {item["author_masked"] for item in body["data"]}
     assert "Ив***" in masked
     assert "Аноним" in masked
+    # No cursor — has_more=False, cursor_next=null.
+    assert body["pagination"]["has_more"] is False
+    assert body["pagination"]["cursor_next"] is None
+
+
+# ---------------------------------------------------------------------------
+# Cursor pagination (#347)
+
+
+def test_list_reviews_has_more_returns_cursor_next(
+    client: TestClient, fake_session: MagicMock
+) -> None:
+    """`limit=2` + repo возвращает 3 rows (limit+1) → has_more=True, cursor_next encoded."""
+    from src.api.articles.cursor import decode_cursor
+
+    cid = uuid4()
+    collab = _make_collab("D")
+    collab.id = cid
+    rows = [_make_review(cid) for _ in range(3)]
+    # Last visible — rows[1] (limit=2 → rows[:2], has_more from rows[2]).
+    _stub_list_reviews_calls(fake_session, collab=collab, reviews=rows, total_count=10)
+    resp = client.get(f"/api/v1/collaborators/{cid}/reviews?limit=2")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["data"]) == 2
+    assert body["pagination"]["has_more"] is True
+    cursor_next = body["pagination"]["cursor_next"]
+    assert cursor_next is not None
+    decoded_dt, decoded_id = decode_cursor(cursor_next)
+    assert decoded_id == rows[1].id  # last visible row
+    # Total count via aggregate — independent от page size.
+    assert body["aggregate"]["count"] == 10
+
+
+def test_list_reviews_invalid_cursor_returns_400(
+    client: TestClient, fake_session: MagicMock
+) -> None:
+    """Битый opaque cursor → 400 (InvalidCursorError)."""
+    cid = uuid4()
+    collab = _make_collab("D")
+    collab.id = cid
+    # Cursor decode'ится ДО session execute — собирать stub не нужно,
+    # но collab call всё равно может произойти; защитим side_effect.
+    _stub_list_reviews_calls(fake_session, collab=collab, reviews=[])
+    resp = client.get(f"/api/v1/collaborators/{cid}/reviews?cursor=not-valid!!!")
+    assert resp.status_code == 400
+
+
+def test_list_reviews_total_count_separate_from_page(
+    client: TestClient, fake_session: MagicMock
+) -> None:
+    """`aggregate.count` == total в БД, не len(returned page)."""
+    cid = uuid4()
+    collab = _make_collab("D")
+    collab.id = cid
+    rows = [_make_review(cid) for _ in range(2)]
+    _stub_list_reviews_calls(fake_session, collab=collab, reviews=rows, total_count=42)
+    resp = client.get(f"/api/v1/collaborators/{cid}/reviews?limit=5")
+    body = resp.json()
+    assert len(body["data"]) == 2
+    assert body["aggregate"]["count"] == 42
 
 
 # ---------------------------------------------------------------------------
