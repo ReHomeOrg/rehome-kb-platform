@@ -251,7 +251,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | `collaborators` | ✅ Epic | Slices 1-6: CRUD, lifecycle, public onboarding form, portal access, reviews, metrics, premises junction (PR #226-#246) |
 | `documents` | ✅ MVP | MinIO upload + signed URL + audit + frontend upload UI |
 | `hr` | ✅ MVP | Employee CRUD + frontend create/edit/archive (Stage 1 — ПДн encryption deferred) |
-| `idempotency` | ✅ Foundation | Idempotency-Key header support for POST endpoints |
+| `idempotency` | ✅ Foundation | Idempotency-Key header support for POST endpoints. Shared `_process_for_actor` core; chat anon flow через `process_chat_idempotency_key` (actor_sub = JWT sub | "anon:<token-prefix>"). Wired в POST /chat/sessions/{id}/escalate (#345). |
 | `observability` | ✅ Foundation | Prometheus middleware + /metrics endpoint + readiness probe |
 | `premises` | ✅ MVP | Per-scope projection + CRUD + tenant info + collaborators junction UI |
 | `search` (kb-search) | ✅ Stage 1 | Hybrid retrieval (pgvector + BM25 + RRF) + HF embedding provider + cross-encoder rerank (PR #261-#262) |

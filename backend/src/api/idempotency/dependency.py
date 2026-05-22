@@ -110,29 +110,20 @@ class IdempotencyResult:
         )
 
 
-async def process_idempotency_key(
+async def _process_for_actor(
     request: Request,
-    claims: dict[str, Any] = Depends(require_authenticated),
-    repo: IdempotencyKeyRepository = Depends(get_idempotency_repository),
+    repo: IdempotencyKeyRepository,
+    actor_sub: str,
 ) -> IdempotencyResult:
-    """Dependency для Idempotency-Key header.
-
-    Сценарии:
-    1. Header отсутствует → return `IdempotencyResult.noop()` (no-op).
-    2. Header невалидный UUID → 422.
-    3. Существует cache с тем же body_hash → return `IdempotencyResult`
-       с `replay` (router immediate return).
-    4. Существует cache с другим body_hash → 409 «reused with different body».
-    5. Cache отсутствует → return `IdempotencyResult` с save_callback;
-       router выполняет логику и потом сохраняет.
+    """Shared core: assumes caller derived `actor_sub` (от auth flow или
+    chat owner). Handles header presence, UUID validation, lock + lookup.
 
     Order (R2 plan revision):
     1. Parse + UUID validation.
-    2. actor_sub из claims.
-    3. body_hash = sha256(await request.body()).
-    4. acquire_lock (advisory xact).
-    5. Lookup existing.
-    6. Branch: replay / 409 / new.
+    2. body_hash = sha256(await request.body()).
+    3. acquire_lock (advisory xact).
+    4. Lookup existing.
+    5. Branch: replay / 409 / new.
     """
     raw_key = request.headers.get("Idempotency-Key")
     if raw_key is None:
@@ -149,7 +140,6 @@ async def process_idempotency_key(
             detail="Idempotency-Key must be a valid UUID",
         ) from exc
 
-    actor_sub = claims["sub"]
     request_path = request.url.path
 
     # R3: hash raw bytes (Stripe pattern). Starlette caches body — повторный
@@ -189,3 +179,26 @@ async def process_idempotency_key(
         _request_path=request_path,
         _actor_sub=actor_sub,
     )
+
+
+async def process_idempotency_key(
+    request: Request,
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: IdempotencyKeyRepository = Depends(get_idempotency_repository),
+) -> IdempotencyResult:
+    """Dependency для Idempotency-Key header (authenticated callers).
+
+    Сценарии:
+    1. Header отсутствует → return `IdempotencyResult.noop()` (no-op).
+    2. Header невалидный UUID → 422.
+    3. Существует cache с тем же body_hash → return `IdempotencyResult`
+       с `replay` (router immediate return).
+    4. Существует cache с другим body_hash → 409 «reused with different body».
+    5. Cache отсутствует → return `IdempotencyResult` с save_callback;
+       router выполняет логику и потом сохраняет.
+
+    `actor_sub` derives от JWT `sub` claim — cross-actor leakage protected
+    через composite PK `(key, request_path, actor_sub)`. Для anon flow
+    (chat /sessions/{id}/escalate) — см. `process_chat_idempotency_key`.
+    """
+    return await _process_for_actor(request, repo, claims["sub"])
