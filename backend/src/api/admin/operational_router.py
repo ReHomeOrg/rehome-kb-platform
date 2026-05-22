@@ -11,11 +11,10 @@ OpenAPI 04:
 - `GET /api/v1/admin/tasks/{task_id}` (getTaskStatus) — universal task
   status lookup.
 
-Execution model: sync execution в самом router'е (нет Dramatiq worker —
-см. tasks_models docstring). Task row создаётся в PENDING, переходит в
-RUNNING → COMPLETED/FAILED в одной транзакции. Это даёт consistent
-task_id surface, но не освобождает request thread'а до завершения
-operation. Switch на real async runner — backlog.
+Execution model (ADR-0020 B): handler создаёт PENDING task row +
+spawn'ит background coroutine через `AdminTaskRunner` (asyncio task +
+`task_reaper` для crash recovery). Handler возвращает 202 + task_id
+сразу — client poll'ит `/admin/tasks/{id}` для status updates.
 
 RBAC: staff_admin (STAFF + LEGAL). Cache invalidation и reindex —
 operational операции с высокой стоимостью; не должны быть доступны

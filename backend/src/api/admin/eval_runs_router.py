@@ -81,8 +81,9 @@ async def start_eval_run(
     Real providers / full dataset / custom_questions — backlog (см.
     ADR-0013 + eval_runs_service docstring).
 
-    Sync execution — running task сразу marks COMPLETED после
-    aggregation. Switch на real async worker — backlog.
+    Execution: создаёт PENDING task + spawn'ит background coroutine
+    через `AdminTaskRunner.spawn_eval_run` (ADR-0020 B). Handler возвращает
+    202 immediately; client poll'ит `/admin/tasks/{run_id}` для finalstatus.
     """
     _require_staff_admin(access_levels)
     actor_sub = claims.get("sub", "unknown")

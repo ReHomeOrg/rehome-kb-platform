@@ -6,8 +6,16 @@ OpenAPI 04 §1752-1837 — 3 endpoints:
 - PATCH /admin/security-incidents/{id} — update status / resolution / РКН.
 
 NO POST endpoint per OpenAPI — incidents создаются автоматически:
-- audit.security_event emitter (wiring backlog после merge #223).
-- Monitoring systems / automated_scan (external).
+- Vault emergency unlock (ADR-0021, vault/emergency_service.py) —
+  instantiates `SecurityIncident(...)` напрямую (bypass repo.create
+  чтобы explicit attach FK к unlock_log) на каждый unlock event.
+- `audit.security.report_security_event` (#223) — fires
+  `audit.security_event` webhook на access-level escalation attempts
+  (см. `articles/router.py`). NB: webhook-only, incident row не
+  персистится — это observability surface; persistence wiring
+  оставлен backlog'ом до решения «нужно ли вообще persist'ить escalation
+  attempts отдельно от webhook'а».
+- Monitoring systems / automated_scan (external) — backlog.
 
 RBAC: staff_admin (STAFF + LEGAL) per OpenAPI «scope = staff_admin».
 audit_log на update (incident lifecycle — compliance trail).
