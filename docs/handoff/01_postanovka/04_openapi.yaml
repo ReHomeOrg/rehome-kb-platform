@@ -2733,8 +2733,16 @@ paths:
       parameters:
       - name: cursor
         in: query
+        description: Opaque keyset cursor `(created_at, id)` DESC (см. articles/cursor.py)
         schema:
           type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
       responses:
         '200':
           description: OK

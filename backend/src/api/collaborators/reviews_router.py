@@ -18,13 +18,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.audit import (
     AuditRepository,
     get_audit_repository,
@@ -39,6 +40,9 @@ from src.api.webhooks.dispatcher import (
     get_webhook_event_dispatcher,
 )
 from src.api.webhooks.events import WebhookEvent
+
+_LIST_LIMIT_DEFAULT = 50
+_LIST_LIMIT_MAX = 100
 
 router = APIRouter(prefix="/collaborators/{collaborator_id}/reviews", tags=["Collaborators"])
 
@@ -71,9 +75,19 @@ class ReviewView(BaseModel):
     created_at: Any
 
 
+class ReviewsPagination(BaseModel):
+    """Keyset pagination envelope per `Pagination` schema (#347)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cursor_next: str | None = None
+    has_more: bool = False
+
+
 class ReviewsListResponse(BaseModel):
     data: list[ReviewView]
     aggregate: dict[str, Any]
+    pagination: ReviewsPagination = Field(default_factory=ReviewsPagination)
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +156,16 @@ async def _recompute_rating(session: AsyncSession, collaborator_id: UUID) -> Non
     "",
     response_model=ReviewsListResponse,
     summary="Отзывы о коллаборанте (public)",
+    responses={
+        200: {"description": "OK"},
+        400: {"description": "Невалидный cursor"},
+        404: {"description": "Collaborator out-of-scope или не существует"},
+    },
 )
 async def list_reviews(
     collaborator_id: UUID = Path(...),
+    cursor: str | None = Query(default=None, max_length=1024),
+    limit: int = Query(default=_LIST_LIMIT_DEFAULT, ge=1, le=_LIST_LIMIT_MAX),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewsListResponse:
@@ -153,29 +174,61 @@ async def list_reviews(
     Публично доступны с маскированием author_display_name. 404 mask
     если коллаборант out-of-scope.
 
-    Aggregate: count + avg_rating (denormalized для frontend convenience).
+    Keyset cursor pagination `(created_at, id)` DESC — общий
+    `articles/cursor.py` opaque format. `?cursor=...` paging'ит дальше;
+    `pagination.cursor_next` возвращается когда есть следующая страница.
+
+    Aggregate: `count` = total reviews (separate COUNT query — не page
+    size); `avg_rating` — denormalized из `collaborators.rating`.
     """
     allowed_groups = compute_visible_groups(access_levels)
     collab = await _check_collaborator_visible(session, collaborator_id, allowed_groups)
     if collab is None:
         raise HTTPException(status_code=404, detail="Collaborator not found")
 
-    list_stmt = (
-        select(CollaboratorReview)
-        .where(CollaboratorReview.collaborator_id == collaborator_id)
-        .order_by(CollaboratorReview.created_at.desc())
-        .limit(100)  # MVP — без cursor pagination, backlog
+    decoded = decode_cursor(cursor) if cursor else None
+
+    list_stmt = select(CollaboratorReview).where(
+        CollaboratorReview.collaborator_id == collaborator_id
     )
+    if decoded is not None:
+        cursor_dt, cursor_id = decoded
+        list_stmt = list_stmt.where(
+            or_(
+                CollaboratorReview.created_at < cursor_dt,
+                (CollaboratorReview.created_at == cursor_dt) & (CollaboratorReview.id < cursor_id),
+            )
+        )
+    list_stmt = list_stmt.order_by(
+        CollaboratorReview.created_at.desc(),
+        CollaboratorReview.id.desc(),
+    ).limit(limit + 1)
     result = await session.execute(list_stmt)
-    reviews = list(result.scalars().all())
+    rows = list(result.scalars().all())
+    has_more = len(rows) > limit
+    reviews = rows[:limit]
+
+    # Total count — отдельный COUNT(*) для aggregate. Reviews per collab
+    # bounded (<1k worst case), index по collaborator_id — query дешёвый.
+    count_stmt = select(func.count(CollaboratorReview.id)).where(
+        CollaboratorReview.collaborator_id == collaborator_id
+    )
+    count_result = await session.execute(count_stmt)
+    total_count = count_result.scalar_one()
+
+    cursor_next: str | None = None
+    if reviews and has_more:
+        last = reviews[-1]
+        cursor_next = encode_cursor(last.created_at, last.id)
 
     aggregate = {
-        "count": len(reviews),
+        "count": total_count,
         "avg_rating": float(collab.rating) if collab.rating is not None else None,
     }
     return ReviewsListResponse(
         data=[_to_view(r) for r in reviews],
         aggregate=aggregate,
+        pagination=ReviewsPagination(cursor_next=cursor_next, has_more=has_more),
     )
 
 
@@ -264,5 +317,6 @@ __all__ = [
     "ReviewCreateInput",
     "ReviewView",
     "ReviewsListResponse",
+    "ReviewsPagination",
     "router",
 ]
