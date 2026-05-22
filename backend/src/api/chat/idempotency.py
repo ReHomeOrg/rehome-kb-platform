@@ -22,11 +22,11 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
-from src.api.audit.actions import ANON_ACTOR_TOKEN_PREFIX_LEN
+from src.api.audit.actions import format_anon_actor_sub
 from src.api.chat.owner import extract_chat_owner
 from src.api.idempotency.dependency import (
     IdempotencyResult,
-    _process_for_actor,
+    process_for_actor,
 )
 from src.api.idempotency.repository import (
     IdempotencyKeyRepository,
@@ -36,11 +36,16 @@ from src.api.idempotency.repository import (
 
 def _chat_actor_sub(user_id: UUID | None, session_token: UUID | None) -> str | None:
     """Derive actor_sub из owner pair. None если нет identifier'а
-    (idempotency не активируется — header игнорируется)."""
+    (idempotency не активируется — header игнорируется).
+
+    Должен совпадать с audit-log actor_sub в `chat/router.py::post_escalate`,
+    иначе idempotency lookup desync'нется с trail'ом. Anon формат —
+    через shared `audit.actions.format_anon_actor_sub`.
+    """
     if user_id is not None:
         return str(user_id)
     if session_token is not None:
-        return f"anon:{str(session_token)[:ANON_ACTOR_TOKEN_PREFIX_LEN]}"
+        return format_anon_actor_sub(session_token)
     return None
 
 
@@ -61,7 +66,7 @@ async def process_chat_idempotency_key(
         # Нет identifier'а — idempotency не применяется (нечего использовать
         # как PK actor_sub). Equivalent to header отсутствует.
         return IdempotencyResult.noop()
-    return await _process_for_actor(request, repo, actor_sub)
+    return await process_for_actor(request, repo, actor_sub)
 
 
 __all__ = ["process_chat_idempotency_key"]
