@@ -7,9 +7,27 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth.scope import AccessLevel
+
+
+def _normalize_tags(values: list[str]) -> list[str]:
+    """Strip + lowercase + dedupe (case-insensitive) preserving order.
+
+    `Договор != договор` was a known case-sensitivity gotcha (см. backlog
+    маркер из articles/router.py). Нормализуем на input boundary:
+    storage всегда lowercase, queries lowercase'ятся в `_parse_tags`
+    router'е — search идемпотентен по case.
+
+    Empty strings dropped (whitespace-only теги невалидны как identifier).
+    """
+    seen: list[str] = []
+    for raw in values:
+        normalized = raw.strip().lower()
+        if normalized and normalized not in seen:
+            seen.append(normalized)
+    return seen
 
 
 class ArticleResponse(BaseModel):
@@ -108,6 +126,11 @@ class ArticleInput(BaseModel):
     language: str = Field(default="ru", min_length=1, max_length=8)
     tags: list[str] = Field(default_factory=list)
 
+    @field_validator("tags", mode="after")
+    @classmethod
+    def _normalize_tags_input(cls, v: list[str]) -> list[str]:
+        return _normalize_tags(v)
+
 
 class ArticleVersionResponse(BaseModel):
     """История изменений статьи (OpenAPI `ArticleVersion`).
@@ -160,6 +183,11 @@ class ArticlePatch(BaseModel):
     # `status` пока str (drift OpenAPI, как audience в ArticleInput) —
     # backlog #28 для enum-rollout. DB CHECK всё равно отсечёт невалид.
     status: str | None = Field(default=None, min_length=1, max_length=16)
+
+    @field_validator("tags", mode="after")
+    @classmethod
+    def _normalize_tags_patch(cls, v: list[str] | None) -> list[str] | None:
+        return _normalize_tags(v) if v is not None else None
 
 
 class SearchInput(BaseModel):

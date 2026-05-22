@@ -243,7 +243,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 
 | Модуль | Статус | Кратко |
 |---|---|---|
-| `articles` | ✅ MVP | CRUD + версионирование + Postgres FTS поиск + tags + categories + frontend admin форма |
+| `articles` | ✅ MVP | CRUD + версионирование + Postgres FTS поиск + tags (case-insensitive #346) + categories + frontend admin форма |
 | `audit` | ✅ MVP | Centralized audit_log table + repository + viewer page |
 | `auth` | ✅ MVP | Keycloak JWT verify + scope mapper (ADR-0003 access_levels) + roles/scopes endpoint |
 | `categories` | ✅ MVP | Иерархия + counts |

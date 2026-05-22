@@ -168,7 +168,9 @@ paths:
           $ref: '#/components/schemas/Audience'
       - name: tags
         in: query
-        description: Список тегов через запятую
+        description: Список тегов через запятую. Case-insensitive — query
+          lowercase'ится сервером перед matching'ом (storage всегда lowercase
+          per migration 0029).
         schema:
           type: string
           example: сервисный-платёж,оплата

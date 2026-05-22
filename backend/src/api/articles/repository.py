@@ -121,8 +121,10 @@ class ArticleRepository:
 
         `tags` — JSONB AND-semantics: статья должна содержать ВСЕ
         переданные теги (`tags @> ARRAY[...]::jsonb`). GIN-индекс
-        `ix_articles_tags_gin` ускоряет containment-запросы. Сравнение
-        case-sensitive — нормализация tags (lowercase/stemming) backlog.
+        `ix_articles_tags_gin` ускоряет containment-запросы. Tags
+        нормализуются в lowercase на input boundary (Pydantic validator
+        + router `_parse_tags` + migration 0029); SQL match case-sensitive
+        по нормализованным значениям.
 
         Пагинация — keyset по композитному ключу `(updated_at DESC, id DESC)`.
         Если `cursor` задан, добавляется row-value предикат
