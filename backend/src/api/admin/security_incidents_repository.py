@@ -1,8 +1,12 @@
 """SecurityIncidentRepository (#231) — CRUD + state machine.
 
-`create` API запланирована для wiring'а audit.security_event emitter
-(#223) — backlog: wire после merges обоих PR'ов. Этот PR landит чистый
-CRUD (list + get + patch).
+`create` API используется через `audit.security.report_security_event`
+(#223) — application code triggers incident creation + parallel
+webhook fire. Также vault emergency unlock (ADR-0021) auto-creates
+incident на unlock event.
+
+Router endpoints: list / get / patch (NO POST per OpenAPI — incidents
+spawn'аются автоматически, not via human admin action).
 """
 
 from __future__ import annotations

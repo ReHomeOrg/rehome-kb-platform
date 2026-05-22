@@ -6,8 +6,11 @@ OpenAPI 04 §1752-1837 — 3 endpoints:
 - PATCH /admin/security-incidents/{id} — update status / resolution / РКН.
 
 NO POST endpoint per OpenAPI — incidents создаются автоматически:
-- audit.security_event emitter (wiring backlog после merge #223).
+- `audit.security.report_security_event` (#223) — call'ится из
+  application code (access-level escalation attempts, etc.) и параллельно
+  создаёт security_incident row + fires `audit.security_event` webhook.
 - Monitoring systems / automated_scan (external).
+- Vault emergency unlock (ADR-0021) — auto-creates incident на unlock.
 
 RBAC: staff_admin (STAFF + LEGAL) per OpenAPI «scope = staff_admin».
 audit_log на update (incident lifecycle — compliance trail).
