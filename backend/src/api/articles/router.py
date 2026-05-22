@@ -75,21 +75,25 @@ SLUG_PATTERN = r"^[a-z0-9-]+$"
 # - max 50 символов на тег (sensible upper bound, OpenAPI пример
 #   `сервисный-платёж` — 16 chars)
 # Случай повторных запятых / пробелов — нормализуется (strip + filter empty).
-# Case-sensitive: `Договор != договор`; нормализация — backlog.
+# Case-insensitive (#346): tags lowercase'ятся на input boundary
+# (Pydantic validator в ArticleInput/ArticlePatch + здесь для query).
 # Tag с запятой внутри не поддерживается (CSV-конфликт).
 TAGS_MAX_COUNT = 10
 TAGS_MAX_LENGTH = 50
 
 
 def _parse_tags(raw: str | None) -> list[str] | None:
-    """CSV → list[str] с dedupe + strip + drop empty.
+    """CSV → list[str] с lowercase + dedupe + strip + drop empty.
 
     None / пустая строка / только-пробелы → None (фильтр не применяется).
     >10 элементов или >50 символов → HTTPException 422 (без эха user-input).
+
+    Lowercasing matches storage normalization (см. schemas.py::_normalize_tags
+    + миграция 0029) — `?tags=Договор` matches stored `["договор"]`.
     """
     if not raw or not raw.strip():
         return None
-    items = [t.strip() for t in raw.split(",")]
+    items = [t.strip().lower() for t in raw.split(",")]
     deduped: list[str] = []
     for t in items:
         if t and t not in deduped:
