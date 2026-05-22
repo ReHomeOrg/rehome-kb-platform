@@ -482,11 +482,20 @@ Module `src/api/admin/` для `/api/v1/admin/*` endpoints. Landed в
 | POST /admin/reindex | #240 | staff_admin (real for `articles` scope) |
 | GET /admin/tasks/{id} | #238 | staff_admin |
 | POST /admin/audit-log/export | #239 | staff_admin / staff_legal |
-| POST/GET /admin/llm/eval-runs | #244 | staff_admin (mock+smoke MVP) |
+| POST/GET /admin/llm/eval-runs | #244 / cursor #343 | staff_admin (mock+smoke MVP) |
 
 `admin_tasks` table (#238) — universal async registry с lifecycle
 PENDING → RUNNING → COMPLETED/FAILED/CANCELLED, используется reindex,
 audit-log export и eval-runs.
+
+`AdminTaskRepository.list_recent` (#343) — keyset cursor `(created_at,
+id)` DESC + `(rows, has_more)` tuple via +1 overshoot. Same pattern что
+у `KbUserRepository.list_filtered`. Wired в `GET /admin/llm/eval-runs`
+с opaque base64 cursor через `articles/cursor.py::encode_cursor` /
+`decode_cursor` — единый module-wide cursor format. **Known perf-debt:**
+композитного индекса `(created_at DESC, id DESC)` на `admin_tasks` пока
+нет; для admin-стенда (низкий QPS, table малый) приемлемо, добавим при
+росте usage.
 
 **Remaining unimplemented OpenAPI admin endpoints** (2 — оба
 design-needed, требуют writable runtime config storage):
