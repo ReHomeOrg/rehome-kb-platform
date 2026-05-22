@@ -1245,6 +1245,20 @@ def test_list_articles_tags_only_commas_treated_as_none(
     assert capture["tags"] is None
 
 
+def test_list_articles_tags_lowercase_normalization(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`?tags=Договор,ДОГОВОР` → lowercase + dedup → `["договор"]` в repo (#346)."""
+    capture: dict[str, Any] = {}
+    _override_list_filtered_capture_tags(monkeypatch, capture)
+    try:
+        client.get("/api/v1/articles?tags=Договор,ДОГОВОР,Сервис")
+    finally:
+        _cleanup_session_override()
+    assert capture["tags"] == ["договор", "сервис"]
+
+
 def test_list_articles_too_many_tags_returns_422(client: TestClient) -> None:
     """>10 тегов → 422."""
     tags = ",".join(f"tag{i}" for i in range(11))
