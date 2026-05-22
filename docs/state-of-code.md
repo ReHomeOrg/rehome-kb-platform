@@ -248,7 +248,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | `auth` | ✅ MVP | Keycloak JWT verify + scope mapper (ADR-0003 access_levels) + roles/scopes endpoint |
 | `categories` | ✅ MVP | Иерархия + counts |
 | `chat` | ✅ MVP | Sessions + SSE streaming + escalation + 4 LLM providers (mock, vLLM, GigaChat, YandexGPT) |
-| `collaborators` | ✅ Epic | Slices 1-6: CRUD, lifecycle, public onboarding form, portal access, reviews, metrics, premises junction (PR #226-#246) |
+| `collaborators` | ✅ Epic | Slices 1-6: CRUD, lifecycle, public onboarding form, portal access, reviews (keyset cursor #347), metrics, premises junction (PR #226-#246) |
 | `documents` | ✅ MVP | MinIO upload + signed URL + audit + frontend upload UI |
 | `hr` | ✅ MVP | Employee CRUD + frontend create/edit/archive (Stage 1 — ПДн encryption deferred) |
 | `idempotency` | ✅ Foundation | Idempotency-Key header support for POST endpoints. Shared `_process_for_actor` core; chat anon flow через `process_chat_idempotency_key` (actor_sub = JWT sub | "anon:<token-prefix>"). Wired в POST /chat/sessions/{id}/escalate (#345). |
