@@ -17,6 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.system_config_models import SystemConfigRow
+from src.api.chat.system_prompt import (
+    SYSTEM_PROMPT_MAX_LENGTH as _CHAT_SYSTEM_PROMPT_MAX_LENGTH,
+)
+from src.api.chat.system_prompt import (
+    SYSTEM_PROMPT_OVERLAY_KEY as _CHAT_SYSTEM_PROMPT_KEY,
+)
 from src.api.db import get_session
 
 # Allow-listed mutable config keys (см. ADR-0019). Расширяется по мере
@@ -33,14 +39,11 @@ MUTABLE_KEYS: Final[frozenset[str]] = frozenset(
         "feature_flags.rag_enabled",
         "feature_flags.webhook_worker_enabled",
         "feature_flags.metrics_enabled",
-        # Chat (см. chat/system_prompt.py::SYSTEM_PROMPT_OVERLAY_KEY)
-        "chat.system_prompt",
+        # Chat — overlay key + max-length константы owned by chat module
+        # (single source of truth, см. chat/system_prompt.py).
+        _CHAT_SYSTEM_PROMPT_KEY,
     }
 )
-
-# Hard cap для chat.system_prompt overlay (см. system_prompt.py).
-# Защищает от случайного exhausting context window LLM'а.
-_CHAT_SYSTEM_PROMPT_MAX_LENGTH = 16384
 
 
 class UnknownKeyError(ValueError):
@@ -71,7 +74,7 @@ def _validate_value(key: str, value: Any) -> None:
     Сейчас validates только `chat.system_prompt` (string + length cap).
     Расширяется по мере landings новых typed overlay keys.
     """
-    if key == "chat.system_prompt":
+    if key == _CHAT_SYSTEM_PROMPT_KEY:
         if not isinstance(value, str):
             raise InvalidValueError(key, "must be string")
         if not value.strip():
