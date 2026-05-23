@@ -19,6 +19,7 @@ from src.api.admin.pd_overdue_worker import PdOverdueWorker
 from src.api.admin.task_reaper import reap_stale_tasks
 from src.api.admin.task_runner import init_runner
 from src.api.chat.cleanup_worker import ChatCleanupWorker
+from src.api.chat.llm.factory import close_llm_provider, init_llm_provider
 from src.api.config import get_settings
 from src.api.db import get_engine
 from src.api.observability import (
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     """FastAPI lifespan:
     - start/stop webhook delivery worker.
     - init AdminTaskRunner singleton.
+    - init LLMProvider singleton (#350 — connection pool reuse).
     - reap stale admin_tasks on startup (ADR-0020 §«Crash recovery»).
     """
     settings = get_settings()
@@ -49,6 +51,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
     # ADR-0020 B: initialize singleton task runner.
     init_runner(session_factory, settings)
     logger.info("admin_task_runner.initialized")
+
+    # #350: initialize LLMProvider singleton — connection pool reuse.
+    # Failures (missing creds для gigachat/yandex_gpt) логируем но не
+    # блокируем startup: lazy init попробует ещё раз на первом chat
+    # request'е, и если провалится — chat вернёт 5xx с понятной ошибкой
+    # (admin может переключиться на mock через PATCH /admin/system-config).
+    try:
+        init_llm_provider(settings)
+        logger.info("llm_provider.initialized", extra={"provider": settings.llm_provider})
+    except Exception:
+        logger.exception("llm_provider.init_failed", extra={"provider": settings.llm_provider})
 
     # ADR-0020 §Crash recovery: scan orphaned tasks (>15min stale).
     try:
@@ -109,6 +122,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         if webhook_cleanup is not None:
             await webhook_cleanup.stop()
             logger.info("webhook_cleanup.worker.stopped")
+        # #350: close LLMProvider httpx client pool. Idempotent —
+        # no-op если init не успел отработать.
+        try:
+            await close_llm_provider()
+            logger.info("llm_provider.closed")
+        except Exception:
+            logger.exception("llm_provider.close_failed")
 
 
 app = FastAPI(
