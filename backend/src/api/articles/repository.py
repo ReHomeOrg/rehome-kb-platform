@@ -243,8 +243,10 @@ class ArticleRepository:
     async def create(self, payload: ArticleInput, *, actor_sub: str) -> Article:
         """Создаёт статью + version-row (version=1, event=CREATE) atomic.
 
-        Pydantic уже проверил schema. IntegrityError по `uq_articles_slug` →
-        409 SlugConflictError. Прочие CHECK violations → 500 (backlog #28).
+        Pydantic уже проверил schema (включая Literal enums #353).
+        IntegrityError по `uq_articles_slug` → 409 SlugConflictError.
+        Прочие IntegrityError (e.g. FK на category отсутствует) → 500
+        — programmer error, не user input.
 
         `actor_sub` — Keycloak `sub` claim писателя, для audit (E4.1) и
         version (E2.3). Router передаёт из `claims["sub"]` после
@@ -316,9 +318,8 @@ class ArticleRepository:
         для audit-log дельты (см. `log_article_updated`).
 
         IntegrityError handling: consistent с `create` (E4.1) — unknown
-        IntegrityError (CHECK violations) пробрасываются → 500. Pydantic
-        валидация защищает от слов нарушения; backlog #28 для полного
-        enum-rollout, до тех пор это знаемый risk.
+        IntegrityError пробрасывается → 500. Pydantic Literal enums (#353)
+        защищают от bad audience/status/language на input boundary.
 
         Race protection (E5.0 #40): `_acquire_slug_lock(slug)` берётся
         ПЕРВЫМ — сериализует concurrent writes того же slug.
