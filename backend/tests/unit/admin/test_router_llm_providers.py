@@ -8,7 +8,10 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.admin.llm_providers import build_provider_catalog
+from src.api.admin.llm_providers import (
+    KNOWN_LLM_PROVIDER_IDS,
+    build_provider_catalog,
+)
 from src.api.config import Settings, get_settings
 from src.api.main import app
 
@@ -26,6 +29,13 @@ def test_catalog_returns_4_providers() -> None:
     assert len(catalog) == 4
     ids = {p.id for p in catalog}
     assert ids == {"mock", "vllm", "gigachat", "yandex_gpt"}
+
+
+def test_known_provider_ids_matches_catalog() -> None:
+    """`KNOWN_LLM_PROVIDER_IDS` — single source of truth для validation;
+    должен совпадать с IDs catalog'а (drift guard)."""
+    catalog = build_provider_catalog(_settings())
+    assert {p.id for p in catalog} == KNOWN_LLM_PROVIDER_IDS
 
 
 def test_catalog_marks_current_provider() -> None:

@@ -147,3 +147,57 @@ async def test_patch_invalid_value_does_not_persist() -> None:
         await repo.patch({"chat.system_prompt": ""}, actor_sub="admin-1")
     assert row.data == {"llm_provider": "mock"}
     session.flush.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# llm_provider / llm_fallback_provider value validation (#349)
+
+
+@pytest.mark.asyncio
+async def test_patch_accepts_known_llm_provider() -> None:
+    session, row = _session_with_row()
+    repo = SystemConfigRepository(session)
+    result = await repo.patch({"llm_provider": "gigachat"}, actor_sub="admin-1")
+    assert result == {"llm_provider": "gigachat"}
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_unknown_llm_provider() -> None:
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"llm_provider": "openai"}, actor_sub="admin-1")
+    assert exc.value.key == "llm_provider"
+    assert "unknown provider" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_non_string_llm_provider() -> None:
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"llm_provider": 12345}, actor_sub="admin-1")
+    assert exc.value.key == "llm_provider"
+    assert "must be string" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_patch_validates_fallback_provider_same_set() -> None:
+    """`llm_fallback_provider` валидируется по тому же allowlist."""
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"llm_fallback_provider": "anthropic"}, actor_sub="admin-1")
+    assert exc.value.key == "llm_fallback_provider"
+
+
+@pytest.mark.asyncio
+async def test_patch_accepts_all_known_providers() -> None:
+    """Drift guard — каждый ID из catalog принимается."""
+    from src.api.admin.llm_providers import KNOWN_LLM_PROVIDER_IDS
+
+    for provider_id in KNOWN_LLM_PROVIDER_IDS:
+        session, _ = _session_with_row()
+        repo = SystemConfigRepository(session)
+        result = await repo.patch({"llm_provider": provider_id}, actor_sub="admin-1")
+        assert result["llm_provider"] == provider_id

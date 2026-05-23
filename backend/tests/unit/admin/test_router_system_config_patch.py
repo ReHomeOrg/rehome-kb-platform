@@ -294,6 +294,32 @@ def test_put_active_missing_provider_id_returns_422(
     assert resp.status_code == 422
 
 
+def test_put_active_unknown_provider_returns_422(
+    client: TestClient,
+    make_jwt: Callable[..., str],
+    config_repo_mock: dict[str, AsyncMock],
+) -> None:
+    """#349: InvalidValueError из repo → 422 (не 500)."""
+    from src.api.admin.system_config_repository import InvalidValueError
+
+    config_repo_mock["patch"].side_effect = InvalidValueError(
+        "llm_provider", "unknown provider; allowed: ['gigachat', 'mock', 'vllm', 'yandex_gpt']"
+    )
+    sub = str(uuid4())
+    token = make_jwt(roles=["staff_admin"], sub=sub)
+    mfa_token = make_jwt(roles=["staff_admin"], sub=sub, extra_claims={"acr": "2"})
+    resp = client.put(
+        "/api/v1/admin/llm/active",
+        json={"provider_id": "openai"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-MFA-Token": mfa_token,
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert "unknown provider" in resp.json()["detail"]
+
+
 def test_get_system_config_includes_overlay(
     client: TestClient,
     make_jwt: Callable[..., str],

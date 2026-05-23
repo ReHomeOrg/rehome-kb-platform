@@ -1978,6 +1978,9 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/SystemConfig'
+        '422':
+          description: Unknown overlay key или невалидное значение (e.g.
+            llm_provider не из catalog'а, chat.system_prompt > 16384 chars)
   /api/v1/admin/llm/providers:
     get:
       tags:
@@ -2040,6 +2043,9 @@ paths:
       responses:
         '200':
           description: Переключено
+        '422':
+          description: Unknown provider_id (должен быть из списка
+            GET /admin/llm/providers — см. KNOWN_LLM_PROVIDER_IDS в backend)
   /api/v1/admin/llm/eval-runs:
     get:
       tags:
