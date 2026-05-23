@@ -93,6 +93,45 @@ async def test_lifespan_webhook_worker_disabled_no_op(
         assert fake_worker_class.instances == []
 
 
+@pytest.mark.asyncio
+async def test_lifespan_llm_init_failure_logged_but_does_not_block_startup(
+    patch_settings: dict[str, Any],
+    fake_worker_class: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#350: init_llm_provider raises → log warning, startup completes."""
+    init_mock = MagicMock(side_effect=ValueError("missing creds"))
+    monkeypatch.setattr("src.api.main.init_llm_provider", init_mock)
+
+    from src.api.main import lifespan
+
+    fake_app = MagicMock()
+    # Lifespan должен enter + yield + exit без exception.
+    async with lifespan(fake_app):
+        pass
+    init_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_llm_close_failure_logged_but_does_not_block_shutdown(
+    patch_settings: dict[str, Any],
+    fake_worker_class: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#350: close_llm_provider raises → log warning, shutdown completes."""
+    from unittest.mock import AsyncMock
+
+    close_mock = AsyncMock(side_effect=RuntimeError("aclose failed"))
+    monkeypatch.setattr("src.api.main.close_llm_provider", close_mock)
+
+    from src.api.main import lifespan
+
+    fake_app = MagicMock()
+    async with lifespan(fake_app):
+        pass
+    close_mock.assert_awaited_once()
+
+
 def test_log_format_json_triggers_install(monkeypatch: pytest.MonkeyPatch) -> None:
     """`LOG_FORMAT=json` → `install_json_log_formatter()` called.
 
