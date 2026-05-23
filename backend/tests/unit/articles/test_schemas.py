@@ -247,8 +247,13 @@ def test_article_patch_tags_empty_list_normalized_to_empty() -> None:
 
 
 def test_literal_enums_match_model_static_methods() -> None:
-    """Drift guard: Literal aliases синхронны с `Article.allowed_*()` tuples
-    (которые сами синхронны с DB CHECK через test_models_check_sync.py)."""
+    """Drift guard: Literal aliases синхронны с `Article.allowed_*()` tuples.
+
+    NB asymmetry: audience/status дополнительно sync'ятся с DB CHECK
+    через `test_models_check_sync.py`. Language CHECK на DB нет —
+    Pydantic Literal — единственный enforcement layer (см. docstring
+    `Article.allowed_languages`).
+    """
     from typing import get_args
 
     from src.api.articles.models import Article
@@ -260,7 +265,7 @@ def test_literal_enums_match_model_static_methods() -> None:
 
     assert set(get_args(ArticleAudience)) == set(Article.allowed_audiences())
     assert set(get_args(ArticleStatusLiteral)) == set(Article.allowed_statuses())
-    assert set(get_args(ArticleLanguage)) == {"ru", "en"}
+    assert set(get_args(ArticleLanguage)) == set(Article.allowed_languages())
 
 
 def test_article_input_rejects_unknown_audience() -> None:

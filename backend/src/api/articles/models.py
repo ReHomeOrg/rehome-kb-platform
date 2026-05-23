@@ -126,6 +126,16 @@ class Article(Base):
         return ("PUBLIC", "LOGGED", "AGENT", "STAFF", "LEGAL", "HR_RESTRICTED")
 
     @staticmethod
+    def allowed_languages() -> tuple[str, ...]:
+        """Mirror OpenAPI `Language` enum (#353). NB: нет DB CHECK
+        constraint'а на `language` column (исторически free-form String(8))
+        — Pydantic `ArticleLanguage` Literal — единственный enforcement
+        layer для input boundary. Расширение DB CHECK — отдельный backlog
+        item если потребуется (например при добавлении третьего языка).
+        """
+        return ("ru", "en")
+
+    @staticmethod
     def allowed_events() -> tuple[str, ...]:
         """Events для ArticleVersion (E2.3 #36). Sync с CHECK в миграции 0004."""
         return ("CREATE", "UPDATE", "ARCHIVE")
