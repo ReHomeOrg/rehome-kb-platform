@@ -33,8 +33,14 @@ MUTABLE_KEYS: Final[frozenset[str]] = frozenset(
         "feature_flags.rag_enabled",
         "feature_flags.webhook_worker_enabled",
         "feature_flags.metrics_enabled",
+        # Chat (см. chat/system_prompt.py::SYSTEM_PROMPT_OVERLAY_KEY)
+        "chat.system_prompt",
     }
 )
+
+# Hard cap для chat.system_prompt overlay (см. system_prompt.py).
+# Защищает от случайного exhausting context window LLM'а.
+_CHAT_SYSTEM_PROMPT_MAX_LENGTH = 16384
 
 
 class UnknownKeyError(ValueError):
@@ -45,6 +51,33 @@ class UnknownKeyError(ValueError):
             f"Unknown / non-mutable keys: {sorted(keys)}. " f"Allowed: {sorted(MUTABLE_KEYS)}"
         )
         self.keys = keys
+
+
+class InvalidValueError(ValueError):
+    """422-mapped: value не прошёл per-key validation.
+
+    Per-key rules лежат в `_validate_value`; raise с указанием key + reason.
+    """
+
+    def __init__(self, key: str, reason: str) -> None:
+        super().__init__(f"Invalid value для key '{key}': {reason}")
+        self.key = key
+        self.reason = reason
+
+
+def _validate_value(key: str, value: Any) -> None:
+    """Per-key value validation. Raise `InvalidValueError` if invalid.
+
+    Сейчас validates только `chat.system_prompt` (string + length cap).
+    Расширяется по мере landings новых typed overlay keys.
+    """
+    if key == "chat.system_prompt":
+        if not isinstance(value, str):
+            raise InvalidValueError(key, "must be string")
+        if not value.strip():
+            raise InvalidValueError(key, "must be non-empty")
+        if len(value) > _CHAT_SYSTEM_PROMPT_MAX_LENGTH:
+            raise InvalidValueError(key, f"exceeds max length {_CHAT_SYSTEM_PROMPT_MAX_LENGTH}")
 
 
 class SystemConfigRepository:
@@ -76,6 +109,8 @@ class SystemConfigRepository:
         unknown = [k for k in updates if k not in MUTABLE_KEYS]
         if unknown:
             raise UnknownKeyError(unknown)
+        for key, value in updates.items():
+            _validate_value(key, value)
         if not updates:
             return await self.read()
 
@@ -107,6 +142,7 @@ async def get_system_config_repository(
 
 
 __all__ = [
+    "InvalidValueError",
     "MUTABLE_KEYS",
     "SystemConfigRepository",
     "UnknownKeyError",

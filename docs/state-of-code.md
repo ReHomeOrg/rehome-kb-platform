@@ -530,6 +530,7 @@ design-needed, требуют writable runtime config storage):
 | ФЗ-152 §21 — physical right-to-forget (chat) | ✅ DONE (#341) | `ChatCleanupWorker` (daily poll, env-gated) physically deletes soft-deleted chat_sessions past retention (30d default, configurable) + expired sessions that were never explicitly soft-deleted; CASCADE на chat_messages. Reuses pd_overdue_worker pattern. |
 | ФЗ-152 §22 — audit_log retention | ✅ MVP | 5-year retention default (через ADR-0009 backup tooling) |
 | Маскировка ПДн в LLM context | ✅ DONE (#338) | RAG retrieval physically separates HR PII (access_level filter); chat pre-processor (`src/api/chat/pii_masking.py`) masks phone / email / СНИЛС / passport / ИНН / card в chunk text перед отправкой external LLM API. Wired в `build_rag_system_prompt`; observability через structured log `chat.rag_pii_masked` с counts. |
+| Chat system prompt configurable | ✅ DONE (#348) | `chat.system_prompt` overlay через `system_config` (ADR-0019); admin PATCH `/admin/system-config` override'ит hardcoded `DEFAULT_SYSTEM_PROMPT`. `resolve_system_prompt(overlay)` helper + length cap 16384 chars + per-key validation (InvalidValueError → 422). Defensive fallback на default при DB read failure. |
 | Уведомление РКН подано | ❌ Org task | Юр.процедура, не разработка |
 | Назначение ответственного за ПДн | ❌ Org task | Приказ в ООО «РЕХОМ» |
 
