@@ -16,6 +16,7 @@ from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.admin.llm_providers import KNOWN_LLM_PROVIDER_IDS
 from src.api.admin.system_config_models import SystemConfigRow
 from src.api.chat.system_prompt import (
     SYSTEM_PROMPT_MAX_LENGTH as _CHAT_SYSTEM_PROMPT_MAX_LENGTH,
@@ -71,8 +72,9 @@ class InvalidValueError(ValueError):
 def _validate_value(key: str, value: Any) -> None:
     """Per-key value validation. Raise `InvalidValueError` if invalid.
 
-    Сейчас validates только `chat.system_prompt` (string + length cap).
-    Расширяется по мере landings новых typed overlay keys.
+    Расширяется по мере landings новых typed overlay keys. Текущий cover:
+    - `chat.system_prompt` — string + non-empty + length cap.
+    - `llm_provider` / `llm_fallback_provider` — string + ∈ KNOWN_LLM_PROVIDER_IDS.
     """
     if key == _CHAT_SYSTEM_PROMPT_KEY:
         if not isinstance(value, str):
@@ -81,6 +83,14 @@ def _validate_value(key: str, value: Any) -> None:
             raise InvalidValueError(key, "must be non-empty")
         if len(value) > _CHAT_SYSTEM_PROMPT_MAX_LENGTH:
             raise InvalidValueError(key, f"exceeds max length {_CHAT_SYSTEM_PROMPT_MAX_LENGTH}")
+    elif key in ("llm_provider", "llm_fallback_provider"):
+        if not isinstance(value, str):
+            raise InvalidValueError(key, "must be string")
+        if value not in KNOWN_LLM_PROVIDER_IDS:
+            raise InvalidValueError(
+                key,
+                f"unknown provider; allowed: {sorted(KNOWN_LLM_PROVIDER_IDS)}",
+            )
 
 
 class SystemConfigRepository:

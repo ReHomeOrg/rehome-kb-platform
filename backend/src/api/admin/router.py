@@ -315,8 +315,9 @@ async def set_active_llm_provider(
     """`PUT /api/v1/admin/llm/active` (#264, ADR-0019).
 
     Short-hand for PATCH с key `llm_provider`. provider_id validated
-    через repo allowlist (`llm_provider` ∈ MUTABLE_KEYS); value validation
-    (must be one of known providers) — backlog (см. build_provider_catalog).
+    через repo allowlist (`llm_provider` ∈ MUTABLE_KEYS) + value match
+    против `KNOWN_LLM_PROVIDER_IDS` (см. llm_providers.py). Unknown
+    provider_id → 422 `InvalidValueError`.
 
     X-MFA-Token — required (step-up MFA per ADR-0019), см. PATCH endpoint.
     """
