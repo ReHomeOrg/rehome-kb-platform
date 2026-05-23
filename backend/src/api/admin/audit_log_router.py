@@ -176,16 +176,17 @@ async def get_admin_audit_log(
 
 
 def _build_export_url(payload: AuditLogExportRequest) -> str:
-    """Build result_url poking at существующий /audit-log/export.csv.
+    """Build result_url poking at /audit-log/export.{csv,jsonl}.
 
-    Reuses сейчас же реализованный CSV endpoint (LEGAL gated) — frontend
-    fetches result_url с тем же auth. Альтернатива (хранить blob в
-    admin_tasks) — backlog когда landит async-real worker; на текущем
-    sync-execution это excess complexity.
+    Reuses real LEGAL-gated export endpoint (frontend fetches result_url
+    с тем же auth). Альтернатива (хранить blob в admin_tasks) — out of
+    scope: текущий sync-execution model + дешевая регенерация дампа на
+    запрос — proportional к compliance use case.
 
-    Only `csv` format поддерживается — JSON export endpoint backlog'ом.
-    Спецификация (format=json) принимается но result_url всё равно
-    указывает на csv endpoint; admin UI должен handle отображение.
+    Format dispatch (#352):
+    - `csv` → /audit-log/export.csv (default, Excel-friendly).
+    - `json` → /audit-log/export.jsonl (newline-delimited, parseable
+      line-by-line; `Content-Type: application/x-ndjson`).
     """
     params: dict[str, str] = {
         "since": payload.from_.isoformat(),
@@ -195,7 +196,8 @@ def _build_export_url(payload: AuditLogExportRequest) -> str:
     for key, value in payload.filters.items():
         if key in _ALLOWED_EXPORT_FILTER_KEYS and value:
             params[key] = value
-    return f"/api/v1/audit-log/export.csv?{urlencode(params)}"
+    extension = "jsonl" if payload.format == "json" else "csv"
+    return f"/api/v1/audit-log/export.{extension}?{urlencode(params)}"
 
 
 @router.post(

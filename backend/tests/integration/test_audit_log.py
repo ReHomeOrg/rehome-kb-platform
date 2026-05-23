@@ -185,3 +185,7 @@ def test_audit_csv_export_includes_header_row(kb_client: httpx.Client, m2m_token
     assert "actor_sub" in header
     assert "action" in header
     assert "metadata" in header
+
+
+# JSONL export (#352) — unit tests в tests/unit/test_audit_search.py
+# (run against in-process FastAPI app, не требуют deployed service).
