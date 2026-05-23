@@ -456,7 +456,8 @@ async def delete_session(
     """`DELETE /chat/sessions/{id}` — soft-delete.
 
     Идемпотентно: повторный DELETE → 404 (session уже невидима после
-    soft-delete). Physical cleanup делает background worker (backlog).
+    soft-delete). Physical cleanup делает `ChatCleanupWorker` (#341,
+    env-gated daily poll) past retention window.
     """
     user_id, session_token = owner
     deleted = await repo.soft_delete_session(

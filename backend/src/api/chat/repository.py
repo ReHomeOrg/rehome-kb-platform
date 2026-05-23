@@ -125,8 +125,9 @@ class ChatRepository:
         найдена / уже удалена / не принадлежит caller'у. Идемпотентно:
         повторный вызов вернёт False (deleted_at не null → not found).
 
-        Physical cleanup делает background worker (backlog) — здесь только
-        soft-delete + CASCADE на messages при future hard-delete.
+        Physical cleanup делает `ChatCleanupWorker` (#341, daily poll, env-gated)
+        для soft-deleted sessions past retention; здесь только soft-delete
+        + CASCADE на messages при hard-delete.
         """
         session = await self.get_session_by_owner(
             session_id, user_id=user_id, session_token=session_token

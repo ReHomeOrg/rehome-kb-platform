@@ -138,10 +138,8 @@ class PersonalDataRequestRepository:
         """Background-helper: ставит OVERDUE для NEW/IN_PROGRESS с
         due_at < now. Возвращает кол-во обновлённых rows.
 
-        Используется планируемым cron worker'ом (backlog). Сам worker
-        landit'ся отдельным PR.
-
-        Caller commit'ит.
+        Вызывается из `PdOverdueWorker` (#340, ФЗ-152 §15 SLA poll,
+        hourly default, env-gated). Caller commit'ит.
         """
         now = datetime.now(UTC)
         stmt = select(PersonalDataRequest).where(
