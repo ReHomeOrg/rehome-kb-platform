@@ -32,7 +32,7 @@ from src.api.auth.scope import AccessLevel
 # Hard cap для CSV/JSONL export — anti-DoS. 10k rows × ~500 bytes = ~5 MB,
 # acceptable для one-shot download. Дальнейшие compliance dumps —
 # через DB backup / pg_dump (operational, не API surface).
-CSV_EXPORT_MAX_ROWS = 10_000
+EXPORT_MAX_ROWS = 10_000
 
 router = APIRouter(prefix="/audit-log", tags=["Audit"])
 
@@ -119,7 +119,7 @@ async def export_audit_log_csv(
 ) -> StreamingResponse:
     """CSV download of filtered audit records.
 
-    Same фильтры что и JSON endpoint. Hard cap `CSV_EXPORT_MAX_ROWS`
+    Same фильтры что и JSON endpoint. Hard cap `EXPORT_MAX_ROWS`
     (10000) для anti-DoS — caller должен narrow filters для дальнейших
     chunks (или использовать DB backup).
 
@@ -138,7 +138,7 @@ async def export_audit_log_csv(
         since=since,
         until=until,
         q=q,
-        limit=CSV_EXPORT_MAX_ROWS,
+        limit=EXPORT_MAX_ROWS,
         offset=0,
     )
 
@@ -203,7 +203,7 @@ async def export_audit_log_jsonl(
     Schema per line: `{id, ts, actor_sub, action, resource_type,
     resource_id, metadata}`. `metadata` — embedded JSONB (не stringified).
 
-    Hard cap `CSV_EXPORT_MAX_ROWS` (10000) — same anti-DoS rationale.
+    Hard cap `EXPORT_MAX_ROWS` (10000) — same anti-DoS rationale.
     UTF-8 БЕЗ BOM (consumers programmatic, Excel-compat не нужен).
     """
     rows = await repo.list_records(
@@ -214,7 +214,7 @@ async def export_audit_log_jsonl(
         since=since,
         until=until,
         q=q,
-        limit=CSV_EXPORT_MAX_ROWS,
+        limit=EXPORT_MAX_ROWS,
         offset=0,
     )
 
