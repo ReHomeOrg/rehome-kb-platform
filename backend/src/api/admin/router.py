@@ -193,9 +193,9 @@ async def list_llm_providers(
     `is_current=true` для текущего `LLM_PROVIDER` env-config'а.
 
     Используется admin UI для feature-flag переключения через PUT
-    /admin/llm/active (backlog). Eval-стенд (см. Чат-поиск ТЗ v2 §3)
-    использует endpoint чтобы перечислить available providers для
-    benchmark runs.
+    /admin/llm/active (#264, ADR-0019 + #349 provider_id validation).
+    Eval-стенд (см. Чат-поиск ТЗ v2 §3) использует endpoint чтобы
+    перечислить available providers для benchmark runs.
 
     Cost rates / health checks — null в response (no authoritative
     backend source; см. schemas docstring + llm_providers.py).
