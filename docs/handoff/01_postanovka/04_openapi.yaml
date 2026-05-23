@@ -3586,6 +3586,70 @@ paths:
                 format: binary
         '403':
           description: Требуется LEGAL scope
+  /api/v1/audit-log/export.jsonl:
+    get:
+      tags: [Audit]
+      summary: Export audit log as JSONL (LEGAL access, #352)
+      description: 'Streaming newline-delimited JSON export — same filters
+        как CSV endpoint. Hard cap 10000 rows для anti-DoS. UTF-8 без BOM
+        (consumers programmatic). Каждая строка — independent JSON object:
+        `{id, ts, actor_sub, action, resource_type, resource_id, metadata}`.
+        Admin task export с `format=json` wires сюда.'
+      operationId: exportAuditLogJsonl
+      x-implementation-status: implemented
+      x-implementation-pr: 352
+      parameters:
+      - name: actor_sub
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: resource_type
+        in: query
+        schema:
+          type: string
+          maxLength: 32
+      - name: resource_id
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: action
+        in: query
+        schema:
+          type: string
+          maxLength: 64
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: until
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: q
+        in: query
+        description: Substring search over metadata JSONB.
+        schema:
+          type: string
+          maxLength: 200
+      responses:
+        '200':
+          description: JSONL download (Content-Disposition attachment)
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="audit_log_YYYYMMDD_HHMMSS.jsonl"'
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Требуется LEGAL scope
 components:
   securitySchemes:
     BearerAuth:

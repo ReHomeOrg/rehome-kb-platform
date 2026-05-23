@@ -124,6 +124,42 @@ def test_build_export_url_drops_unknown_filter_keys() -> None:
     assert "raw_sql" not in url
 
 
+def test_build_export_url_format_csv_default() -> None:
+    """`format` omitted → default csv → .csv extension (#352)."""
+    payload = AuditLogExportRequest.model_validate(
+        {"from": "2026-05-01T00:00:00Z", "to": "2026-05-31T23:59:59Z"}
+    )
+    url = _build_export_url(payload)
+    assert url.startswith("/api/v1/audit-log/export.csv?")
+
+
+def test_build_export_url_format_json_uses_jsonl_extension() -> None:
+    """`format=json` → .jsonl endpoint (newline-delimited JSON) (#352)."""
+    payload = AuditLogExportRequest.model_validate(
+        {
+            "from": "2026-05-01T00:00:00Z",
+            "to": "2026-05-31T23:59:59Z",
+            "format": "json",
+        }
+    )
+    url = _build_export_url(payload)
+    assert url.startswith("/api/v1/audit-log/export.jsonl?")
+    assert "since=2026-05-01" in url
+
+
+def test_build_export_url_format_csv_explicit() -> None:
+    """`format=csv` explicit → .csv (idempotent с default)."""
+    payload = AuditLogExportRequest.model_validate(
+        {
+            "from": "2026-05-01T00:00:00Z",
+            "to": "2026-05-31T23:59:59Z",
+            "format": "csv",
+        }
+    )
+    url = _build_export_url(payload)
+    assert url.startswith("/api/v1/audit-log/export.csv?")
+
+
 # ---------------------------------------------------------------------------
 # Router endpoint RBAC
 

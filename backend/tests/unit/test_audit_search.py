@@ -381,6 +381,139 @@ def test_csv_export_filter_passthrough(
     assert kwargs["resource_type"] == "article"
 
 
+# ---------------------------------------------------------------------------
+# JSONL export (#352)
+
+
+def test_jsonl_export_requires_legal(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """tenant scope → 403 (no LEGAL)."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_jsonl_export_returns_ndjson_content_type(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/x-ndjson")
+    assert "attachment" in resp.headers["content-disposition"]
+    assert ".jsonl" in resp.headers["content-disposition"]
+
+
+def test_jsonl_export_no_bom(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """В отличие от CSV — без UTF-8 BOM (programmatic consumers)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert not resp.content.startswith(b"\xef\xbb\xbf")
+
+
+def test_jsonl_export_each_line_is_valid_json(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """JSONL invariant: каждая строка — parseable JSON object."""
+    import json as _json
+
+    list_mock.return_value = [
+        _make_record(action="articles.created", resource_id="slug-a"),
+        _make_record(
+            action="articles.updated",
+            resource_id="slug-b",
+            audit_metadata={"changed": ["title"]},
+        ),
+    ]
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    lines = [line for line in resp.text.splitlines() if line.strip()]
+    assert len(lines) == 2
+    for line in lines:
+        obj = _json.loads(line)
+        assert isinstance(obj, dict)
+        assert {"id", "ts", "actor_sub", "action", "resource_type", "metadata"} <= obj.keys()
+    # Embedded metadata — not stringified.
+    parsed = [_json.loads(line) for line in lines]
+    by_action = {p["action"]: p for p in parsed}
+    assert by_action["articles.updated"]["metadata"] == {"changed": ["title"]}
+
+
+def test_jsonl_export_empty_result_returns_empty_body(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Empty filter result → 200 + empty body (no header row, unlike CSV)."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.text == ""
+
+
+def test_jsonl_export_uses_max_limit(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Same anti-DoS hard cap что CSV."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log/export.jsonl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    kwargs = list_mock.call_args.kwargs
+    assert kwargs["limit"] == 10_000
+    assert kwargs["offset"] == 0
+
+
+def test_jsonl_export_filter_passthrough(
+    client: TestClient,
+    override_audit_repo: AsyncMock,
+    list_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Same filter params что CSV."""
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    client.get(
+        "/api/v1/audit-log/export.jsonl?actor_sub=u1&resource_type=article",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    kwargs = list_mock.call_args.kwargs
+    assert kwargs["actor_sub"] == "u1"
+    assert kwargs["resource_type"] == "article"
+
+
 @pytest.mark.asyncio
 async def test_repository_list_records_applies_filters() -> None:
     """Repository SQL inspection — verify фильтры попадают в bind params."""
