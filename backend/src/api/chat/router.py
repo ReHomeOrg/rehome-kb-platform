@@ -531,7 +531,9 @@ async def post_escalate(
     safe: повторный request с тем же key + body возвращает cached response
     (тот же ticket_id), no duplicate ticket / audit row / webhook fire.
 
-    Webhook delivery в support system — backlog (E5 webhooks эпик).
+    Subscribers (helpdesk / on-call systems) реализуют ticket routing
+    у себя — через `chat.escalated` webhook (#91, см. ниже). Backend не
+    делает прямую интеграцию с конкретными support tools.
     """
     if idempotency.replay is not None:
         # JSONResponse bypass'ит response_model re-validation на replay
