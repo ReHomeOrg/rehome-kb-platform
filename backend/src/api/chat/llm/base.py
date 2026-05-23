@@ -43,10 +43,11 @@ class LLMProvider(ABC):
     Подкласс должен реализовать `complete` — async вызов модели с
     conversation history + system prompt → completion.
 
-    **TODO для E3.7 (vLLM)**: complete() для vLLM будет занимать
-    секунды. Текущий E3.3 router держит DB-транзакцию через record_chat_turn
-    ПОСЛЕ LLM call — это безопасно (LLM exception → no DB write).
-    При переходе на SSE (E3.4) — стриминг chunks без полного complete'а.
+    Concrete adapters: `MockProvider` (тесты), `VLLMProvider` (self-host
+    OpenAI-compat), `GigaChatProvider` (Sber), `YandexGptProvider`
+    (Yandex Cloud). SSE streaming через `stream()` — все adapters
+    делегируют base fallback ИЛИ override'ят с native streaming
+    (vLLM делает real upstream chunking).
     """
 
     @abstractmethod
