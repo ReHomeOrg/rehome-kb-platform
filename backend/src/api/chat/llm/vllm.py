@@ -9,10 +9,9 @@ Native streaming: при `stream=true` vLLM возвращает SSE-stream с
 
 ADR-0001 — self-hosted LLM. ФЗ-152 — internal network only.
 
-**Singleton client TODO**: сейчас каждый Depends() создаёт новый
-VLLMProvider → новый httpx.AsyncClient. Для production latency
-оптимально иметь shared client (lru_cache на factory или Lifespan).
-Если станет проблемой — отдельный backlog issue.
+**Singleton client** (#350): factory.py держит module-level instance,
+initialized в FastAPI lifespan; `aclose()` вызывается на shutdown.
+Connection pool reuse через requests одной сессии.
 """
 
 import json

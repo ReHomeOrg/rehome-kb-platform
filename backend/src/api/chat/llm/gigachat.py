@@ -7,9 +7,9 @@ Auth flow:
 2. Authorization: Bearer <access_token> на POST /api/v1/chat/completions.
 
 Token caching: in-memory с refresh за 60sec до expiry (clock skew safety).
-Per-provider state — provider instance держит cache; разные Depends-instances
-дублируют OAuth calls (acceptable trade-off для now; backlog: singleton
-client через Lifespan).
+Provider instance singleton через `factory.init_llm_provider` (#350),
+initialized в FastAPI lifespan — token cache shared между requests, нет
+duplicate OAuth calls.
 
 ТЗ §1.2 / ФЗ-152 — данные не покидают РФ-инфраструктуру Сбера. Все
 sensitive (prompt, completion) — внутри Russian boundary.
