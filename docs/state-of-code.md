@@ -520,6 +520,24 @@ design-needed, требуют writable runtime config storage):
 - Real LLM providers в eval-runs (нужны env credentials).
 - Cache layer (если landit — DELETE /admin/cache wires automatically).
 
+### Singleton lifecycle pattern (runtime helpers)
+
+Несколько runtime helpers следуют единому singleton-with-lifespan pattern.
+Это runtime-state, не business state — поэтому отдельного ADR не требуют
+(подтверждено precedent'ом ADR-0020 §B / `init_runner`):
+
+| Helper | Init (lifespan startup) | Close (lifespan shutdown) | Purpose |
+|---|---|---|---|
+| `AdminTaskRunner` (#268) | `init_runner(session_factory, settings)` | n/a (asyncio task pool reaped on shutdown) | Background runner для admin_tasks PENDING→RUNNING→COMPLETED. |
+| `LLMProvider` (#350/#351) | `init_llm_provider(settings)` | `close_llm_provider()` → `provider.aclose()` (ABC method) | Shared httpx.AsyncClient connection pool (vllm/gigachat/yandex_gpt) + OAuth token cache. Failures на startup логируются но не блокируют — lazy fallback в `get_llm_provider`. |
+
+Pattern требования (для будущих singleton'ов):
+- Module-private `_instance: T | None = None`.
+- Public `init_*` идемпотентен (повторный вызов возвращает existing).
+- Public async `close_*` resets singleton + releases resources (если применимо).
+- Public `get_*` через FastAPI Depends; lazy fallback к init если singleton not set (test isolation).
+- Test infrastructure: autouse fixture в module's conftest.py resets `_instance` между tests.
+
 ## CS.10. ФЗ-152 module status (2026-05-22)
 
 | Требование | Состояние | Реализация |
