@@ -88,3 +88,15 @@ class LLMProvider(ABC):
         """
         response = await self.complete(messages, system_prompt, max_tokens)
         yield response.content
+
+    async def aclose(self) -> None:
+        """Release underlying resources (httpx client pool и т.п.).
+
+        Базовая реализация — no-op (для stateless providers типа
+        MockProvider). Adapters с httpx.AsyncClient (vllm / gigachat /
+        yandex_gpt) override'ят с `await self._client.aclose()`.
+
+        Called from `factory.close_llm_provider` в FastAPI lifespan
+        shutdown (#350).
+        """
+        return

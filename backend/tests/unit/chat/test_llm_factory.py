@@ -91,11 +91,12 @@ async def test_close_resets_singleton_to_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_close_calls_aclose_on_provider_with_method() -> None:
-    """Real providers (httpx-backed) — close вызывает aclose."""
+async def test_close_calls_aclose_on_provider() -> None:
+    """`LLMProvider.aclose` всегда defined в ABC (#350 follow-up); close
+    вызывает его — real providers override'ят с aclose pool'а."""
     fake = MockProvider()
     aclose_mock = AsyncMock()
-    fake.aclose = aclose_mock  # type: ignore[attr-defined]
+    fake.aclose = aclose_mock  # type: ignore[method-assign]
     factory_module._llm_provider_instance = fake
     await close_llm_provider()
     aclose_mock.assert_awaited_once()
@@ -103,10 +104,9 @@ async def test_close_calls_aclose_on_provider_with_method() -> None:
 
 
 @pytest.mark.asyncio
-async def test_close_skips_aclose_when_provider_has_no_method() -> None:
-    """MockProvider не имеет aclose — close() не падает."""
+async def test_close_uses_base_noop_for_stateless_provider() -> None:
+    """MockProvider не override'ит aclose — base noop вызывается без
+    падения. Singleton resets."""
     init_llm_provider(_settings("mock"))
-    # MockProvider не имеет aclose attribute — close должен gracefully
-    # skip'нуть.
     await close_llm_provider()
     assert factory_module._llm_provider_instance is None
