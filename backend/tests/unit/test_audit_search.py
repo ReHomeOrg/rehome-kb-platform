@@ -354,7 +354,7 @@ def test_csv_export_uses_max_limit(
     list_mock: AsyncMock,
     make_jwt: Callable[..., str],
 ) -> None:
-    """Export endpoint passes CSV_EXPORT_MAX_ROWS limit (anti-DoS)."""
+    """Export endpoint passes EXPORT_MAX_ROWS limit (anti-DoS)."""
     token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
     client.get(
         "/api/v1/audit-log/export.csv",
