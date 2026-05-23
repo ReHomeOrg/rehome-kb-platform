@@ -39,6 +39,7 @@ from src.api.admin.stats_repository import (
 )
 from src.api.admin.system_config import build_system_config
 from src.api.admin.system_config_repository import (
+    InvalidValueError,
     SystemConfigRepository,
     UnknownKeyError,
     get_system_config_repository,
@@ -271,7 +272,7 @@ async def update_system_config(
     updates = payload.model_dump(exclude_unset=True)
     try:
         new_overlay = await repo.patch(updates, actor_sub=actor_sub)
-    except UnknownKeyError as exc:
+    except (UnknownKeyError, InvalidValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     await audit_repo.record(
@@ -327,7 +328,7 @@ async def set_active_llm_provider(
             {"llm_provider": payload.provider_id},
             actor_sub=actor_sub,
         )
-    except UnknownKeyError as exc:
+    except (UnknownKeyError, InvalidValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     await audit_repo.record(

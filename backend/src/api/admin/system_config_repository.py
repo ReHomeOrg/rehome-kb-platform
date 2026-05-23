@@ -17,6 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.system_config_models import SystemConfigRow
+from src.api.chat.system_prompt import (
+    SYSTEM_PROMPT_MAX_LENGTH as _CHAT_SYSTEM_PROMPT_MAX_LENGTH,
+)
+from src.api.chat.system_prompt import (
+    SYSTEM_PROMPT_OVERLAY_KEY as _CHAT_SYSTEM_PROMPT_KEY,
+)
 from src.api.db import get_session
 
 # Allow-listed mutable config keys (см. ADR-0019). Расширяется по мере
@@ -33,6 +39,9 @@ MUTABLE_KEYS: Final[frozenset[str]] = frozenset(
         "feature_flags.rag_enabled",
         "feature_flags.webhook_worker_enabled",
         "feature_flags.metrics_enabled",
+        # Chat — overlay key + max-length константы owned by chat module
+        # (single source of truth, см. chat/system_prompt.py).
+        _CHAT_SYSTEM_PROMPT_KEY,
     }
 )
 
@@ -45,6 +54,33 @@ class UnknownKeyError(ValueError):
             f"Unknown / non-mutable keys: {sorted(keys)}. " f"Allowed: {sorted(MUTABLE_KEYS)}"
         )
         self.keys = keys
+
+
+class InvalidValueError(ValueError):
+    """422-mapped: value не прошёл per-key validation.
+
+    Per-key rules лежат в `_validate_value`; raise с указанием key + reason.
+    """
+
+    def __init__(self, key: str, reason: str) -> None:
+        super().__init__(f"Invalid value для key '{key}': {reason}")
+        self.key = key
+        self.reason = reason
+
+
+def _validate_value(key: str, value: Any) -> None:
+    """Per-key value validation. Raise `InvalidValueError` if invalid.
+
+    Сейчас validates только `chat.system_prompt` (string + length cap).
+    Расширяется по мере landings новых typed overlay keys.
+    """
+    if key == _CHAT_SYSTEM_PROMPT_KEY:
+        if not isinstance(value, str):
+            raise InvalidValueError(key, "must be string")
+        if not value.strip():
+            raise InvalidValueError(key, "must be non-empty")
+        if len(value) > _CHAT_SYSTEM_PROMPT_MAX_LENGTH:
+            raise InvalidValueError(key, f"exceeds max length {_CHAT_SYSTEM_PROMPT_MAX_LENGTH}")
 
 
 class SystemConfigRepository:
@@ -76,6 +112,8 @@ class SystemConfigRepository:
         unknown = [k for k in updates if k not in MUTABLE_KEYS]
         if unknown:
             raise UnknownKeyError(unknown)
+        for key, value in updates.items():
+            _validate_value(key, value)
         if not updates:
             return await self.read()
 
@@ -107,6 +145,7 @@ async def get_system_config_repository(
 
 
 __all__ = [
+    "InvalidValueError",
     "MUTABLE_KEYS",
     "SystemConfigRepository",
     "UnknownKeyError",
