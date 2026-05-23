@@ -19,6 +19,10 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.api.admin.system_config_repository import (
+    SystemConfigRepository,
+    get_system_config_repository,
+)
 from src.api.audit import (
     ACTION_CHAT_ESCALATED,
     RESOURCE_CHAT_SESSION,
@@ -49,7 +53,11 @@ from src.api.chat.schemas import (
     SendMessageInput,
 )
 from src.api.chat.sse import format_sse_event
-from src.api.chat.system_prompt import build_rag_system_prompt, hits_to_citations
+from src.api.chat.system_prompt import (
+    build_rag_system_prompt,
+    hits_to_citations,
+    resolve_system_prompt,
+)
 from src.api.config import Settings, get_settings
 from src.api.idempotency import IdempotencyResult
 from src.api.search.repository import RetrievalHit
@@ -336,6 +344,7 @@ async def send_message(
     retrieval: RetrievalService = Depends(get_retrieval_service),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     settings: Settings = Depends(get_settings),
+    system_config_repo: SystemConfigRepository = Depends(get_system_config_repository),
 ) -> ChatMessageResponse | StreamingResponse:
     """`POST /chat/sessions/{id}/messages` — JSON или SSE mode.
 
@@ -372,7 +381,17 @@ async def send_message(
         access_levels=access_levels,
         retrieval=retrieval,
     )
-    system_prompt = build_rag_system_prompt(retrieved_chunks)
+    # `chat.system_prompt` overlay (ADR-0019) — admin может override
+    # hardcoded default через PATCH /admin/system-config. Defensive: fetch
+    # overlay defaults на empty dict при failure (chat не должен fail'ить
+    # на admin-side issues).
+    try:
+        overlay = await system_config_repo.read()
+    except Exception:
+        logger.exception("chat.system_config_read_failed", extra={"session_id": str(session_id)})
+        overlay = {}
+    base_prompt = resolve_system_prompt(overlay)
+    system_prompt = build_rag_system_prompt(retrieved_chunks, base_prompt=base_prompt)
     citations = hits_to_citations(retrieved_chunks)
 
     # #222 / ТЗ §5.1: fire `chat.no_answer` если RAG включён, но не
