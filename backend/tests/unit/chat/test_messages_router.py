@@ -178,6 +178,83 @@ def test_post_message_passes_system_prompt_to_llm(
     assert len(sys_prompt) > 100  # not empty
 
 
+def test_post_message_uses_overlay_system_prompt(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """ADR-0019 chat.system_prompt overlay → используется вместо DEFAULT (#348)."""
+    from unittest.mock import MagicMock
+
+    from src.api.admin.system_config_repository import (
+        SystemConfigRepository,
+        get_system_config_repository,
+    )
+
+    custom_prompt = "Кастомный admin-конфигурируемый prompt от админа."
+    config_repo = MagicMock(spec=SystemConfigRepository)
+    config_repo.read = AsyncMock(return_value={"chat.system_prompt": custom_prompt})
+    app.dependency_overrides[get_system_config_repository] = lambda: config_repo
+
+    try:
+        get_session_mock, _, record_turn_mock = override_repo
+        session = _make_session()
+        get_session_mock.return_value = session
+        record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        client.post(
+            f"/api/v1/chat/sessions/{session.id}/messages",
+            json={"content": "q"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        sys_prompt = override_llm.call_args.args[1]
+        assert sys_prompt.startswith(custom_prompt)
+        # Default не использован.
+        assert "AI-ассистент платформы reHome" not in sys_prompt
+    finally:
+        # Restore autouse fixture default.
+        app.dependency_overrides.pop(get_system_config_repository, None)
+
+
+def test_post_message_overlay_read_failure_falls_back_to_default(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Defensive: SystemConfigRepository.read() raises → fallback на default."""
+    from unittest.mock import MagicMock
+
+    from src.api.admin.system_config_repository import (
+        SystemConfigRepository,
+        get_system_config_repository,
+    )
+
+    config_repo = MagicMock(spec=SystemConfigRepository)
+    config_repo.read = AsyncMock(side_effect=RuntimeError("db down"))
+    app.dependency_overrides[get_system_config_repository] = lambda: config_repo
+
+    try:
+        get_session_mock, _, record_turn_mock = override_repo
+        session = _make_session()
+        get_session_mock.return_value = session
+        record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/chat/sessions/{session.id}/messages",
+            json={"content": "q"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200  # chat не падает
+        sys_prompt = override_llm.call_args.args[1]
+        assert "AI-ассистент платформы reHome" in sys_prompt
+    finally:
+        app.dependency_overrides.pop(get_system_config_repository, None)
+
+
 def test_post_message_citations_always_empty_in_e33(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],

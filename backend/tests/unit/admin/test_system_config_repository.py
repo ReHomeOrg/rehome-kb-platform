@@ -9,6 +9,7 @@ import pytest
 
 from src.api.admin.system_config_repository import (
     MUTABLE_KEYS,
+    InvalidValueError,
     SystemConfigRepository,
     UnknownKeyError,
 )
@@ -87,3 +88,62 @@ def test_mutable_keys_does_not_include_secrets() -> None:
         assert "secret" not in key.lower()
         assert "key" not in key.lower() or key.startswith("feature_flags")
         assert "token" not in key.lower()
+
+
+# ---------------------------------------------------------------------------
+# chat.system_prompt value validation (#348)
+
+
+def test_mutable_keys_includes_chat_system_prompt() -> None:
+    assert "chat.system_prompt" in MUTABLE_KEYS
+
+
+@pytest.mark.asyncio
+async def test_patch_accepts_valid_chat_system_prompt() -> None:
+    session, row = _session_with_row()
+    repo = SystemConfigRepository(session)
+    result = await repo.patch({"chat.system_prompt": "Новый промпт"}, actor_sub="admin-1")
+    assert result == {"chat.system_prompt": "Новый промпт"}
+    assert row.data["chat.system_prompt"] == "Новый промпт"
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_chat_system_prompt_non_string() -> None:
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"chat.system_prompt": 12345}, actor_sub="admin-1")
+    assert exc.value.key == "chat.system_prompt"
+    assert "string" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_chat_system_prompt_empty_string() -> None:
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"chat.system_prompt": "   "}, actor_sub="admin-1")
+    assert exc.value.key == "chat.system_prompt"
+    assert "non-empty" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_chat_system_prompt_too_long() -> None:
+    session, _ = _session_with_row()
+    repo = SystemConfigRepository(session)
+    huge = "x" * 16385  # MAX_LENGTH = 16384
+    with pytest.raises(InvalidValueError) as exc:
+        await repo.patch({"chat.system_prompt": huge}, actor_sub="admin-1")
+    assert exc.value.key == "chat.system_prompt"
+    assert "max length" in exc.value.reason
+
+
+@pytest.mark.asyncio
+async def test_patch_invalid_value_does_not_persist() -> None:
+    """Validation rejects → row.data unchanged + no flush."""
+    session, row = _session_with_row({"llm_provider": "mock"})
+    repo = SystemConfigRepository(session)
+    with pytest.raises(InvalidValueError):
+        await repo.patch({"chat.system_prompt": ""}, actor_sub="admin-1")
+    assert row.data == {"llm_provider": "mock"}
+    session.flush.assert_not_called()
