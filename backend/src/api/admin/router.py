@@ -328,7 +328,7 @@ async def set_active_llm_provider(
             {"llm_provider": payload.provider_id},
             actor_sub=actor_sub,
         )
-    except UnknownKeyError as exc:
+    except (UnknownKeyError, InvalidValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     await audit_repo.record(
