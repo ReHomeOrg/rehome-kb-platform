@@ -24,8 +24,17 @@ Cost rates / health checks — null (источников нет, см. schemas 
 
 from __future__ import annotations
 
+from typing import Final
+
 from src.api.admin.schemas import LlmProviderView
 from src.api.config import Settings
+
+# Known provider IDs — single source of truth для validation на write
+# path (см. system_config_repository._validate_value). `llm_provider` /
+# `llm_fallback_provider` overlay keys должны быть в этом set'е.
+KNOWN_LLM_PROVIDER_IDS: Final[frozenset[str]] = frozenset(
+    {"mock", "vllm", "gigachat", "yandex_gpt"}
+)
 
 
 def build_provider_catalog(settings: Settings) -> list[LlmProviderView]:
@@ -84,4 +93,4 @@ def build_provider_catalog(settings: Settings) -> list[LlmProviderView]:
     ]
 
 
-__all__ = ["build_provider_catalog"]
+__all__ = ["KNOWN_LLM_PROVIDER_IDS", "build_provider_catalog"]
