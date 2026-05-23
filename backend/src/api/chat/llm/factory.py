@@ -99,15 +99,14 @@ def init_llm_provider(settings: Settings) -> LLMProvider:
 async def close_llm_provider() -> None:
     """Closes underlying httpx client pool. Called from lifespan shutdown.
 
-    No-op если singleton не был initialized или provider не имеет `aclose`
-    (e.g. MockProvider).
+    `LLMProvider.aclose` (см. base.py) — base no-op для stateless
+    providers (MockProvider), override'нут в real adapters. Idempotent
+    relative to singleton state — resets to None.
     """
     global _llm_provider_instance
     if _llm_provider_instance is None:
         return
-    aclose = getattr(_llm_provider_instance, "aclose", None)
-    if aclose is not None:
-        await aclose()
+    await _llm_provider_instance.aclose()
     _llm_provider_instance = None
 
 
