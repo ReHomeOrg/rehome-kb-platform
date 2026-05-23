@@ -239,3 +239,80 @@ def test_article_patch_tags_empty_list_normalized_to_empty() -> None:
 
     p = ArticlePatch(tags=[])
     assert p.tags == []
+
+
+# ============================================================
+# Literal enums (#353) — audience / status / language
+# ============================================================
+
+
+def test_literal_enums_match_model_static_methods() -> None:
+    """Drift guard: Literal aliases синхронны с `Article.allowed_*()` tuples.
+
+    NB asymmetry: audience/status дополнительно sync'ятся с DB CHECK
+    через `test_models_check_sync.py`. Language CHECK на DB нет —
+    Pydantic Literal — единственный enforcement layer (см. docstring
+    `Article.allowed_languages`).
+    """
+    from typing import get_args
+
+    from src.api.articles.models import Article
+    from src.api.articles.schemas import (
+        ArticleAudience,
+        ArticleLanguage,
+        ArticleStatusLiteral,
+    )
+
+    assert set(get_args(ArticleAudience)) == set(Article.allowed_audiences())
+    assert set(get_args(ArticleStatusLiteral)) == set(Article.allowed_statuses())
+    assert set(get_args(ArticleLanguage)) == set(Article.allowed_languages())
+
+
+def test_article_input_rejects_unknown_audience() -> None:
+    """Pydantic Literal — invalid audience → 422 (не 500 от DB)."""
+    with pytest.raises(ValidationError):
+        ArticleInput(**_valid_payload(audience="alien"))  # type: ignore[arg-type]
+
+
+def test_article_input_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError):
+        ArticleInput(**_valid_payload(status="DELETED"))  # type: ignore[arg-type]
+
+
+def test_article_input_rejects_unknown_language() -> None:
+    with pytest.raises(ValidationError):
+        ArticleInput(**_valid_payload(language="fr"))  # type: ignore[arg-type]
+
+
+def test_article_input_accepts_all_valid_audiences() -> None:
+    for value in ("all", "guest", "tenant", "landlord", "agent", "staff"):
+        payload = ArticleInput(**_valid_payload(audience=value))  # type: ignore[arg-type]
+        assert payload.audience == value
+
+
+def test_article_input_accepts_all_valid_statuses() -> None:
+    for value in ("DRAFT", "PUBLISHED", "ARCHIVED"):
+        payload = ArticleInput(**_valid_payload(status=value))  # type: ignore[arg-type]
+        assert payload.status == value
+
+
+def test_article_input_accepts_all_valid_languages() -> None:
+    for value in ("ru", "en"):
+        payload = ArticleInput(**_valid_payload(language=value))  # type: ignore[arg-type]
+        assert payload.language == value
+
+
+def test_article_patch_rejects_unknown_status() -> None:
+    """PATCH status — same Literal validation."""
+    from src.api.articles.schemas import ArticlePatch
+
+    with pytest.raises(ValidationError):
+        ArticlePatch(status="DELETED")  # type: ignore[arg-type]
+
+
+def test_article_patch_accepts_valid_status() -> None:
+    from src.api.articles.schemas import ArticlePatch
+
+    for value in ("DRAFT", "PUBLISHED", "ARCHIVED"):
+        p = ArticlePatch(status=value)  # type: ignore[arg-type]
+        assert p.status == value

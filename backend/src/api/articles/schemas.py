@@ -5,11 +5,20 @@
 """
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.api.auth.scope import AccessLevel
+
+# OpenAPI enum aliases — mirror DB CHECK constraints (#28 enum rollout).
+# Drift guard: `tests/unit/articles/test_schemas.py::
+# test_literal_enums_match_model_static_methods` фиксирует sync с
+# `Article.allowed_audiences/statuses/languages` tuple'ами.
+ArticleAudience = Literal["all", "guest", "tenant", "landlord", "agent", "staff"]
+ArticleStatusLiteral = Literal["DRAFT", "PUBLISHED", "ARCHIVED"]
+ArticleLanguage = Literal["ru", "en"]
 
 
 def _normalize_tags(values: list[str]) -> list[str]:
@@ -103,13 +112,15 @@ class ArticlesListResponse(BaseModel):
 class ArticleInput(BaseModel):
     """Payload для `POST /api/v1/articles`.
 
-    Соответствует OpenAPI `ArticleInput` со следующими deviation'ами от спеки:
+    Соответствует OpenAPI `ArticleInput` со следующим deviation'ом от спеки:
     - `access_level` — обязательное (OpenAPI: optional). Approved by
-      Architect в Issue #27 (issuecomment 4428692249). Backlog для спеки — #28.
+      Architect в Issue #27 (issuecomment 4428692249).
     - `extra='forbid'` — неизвестные поля отвергаются (защита от мусора в
       payload и потенциальных side-channel'ов).
-    - `audience` — `str` без enum-валидации Pydantic'ом (drift OpenAPI как
-      в read-API; CHECK constraint в БД защищает; E4.x — единый enum-rollout).
+
+    Enum fields (`audience`, `status`, `language`) validated через Pydantic
+    Literal — invalid value → 422 на input boundary, не 500 от DB CHECK
+    (#353 завершил #28 enum-rollout).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -118,12 +129,10 @@ class ArticleInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body_markdown: str = Field(min_length=1)
     category: str = Field(min_length=1, max_length=100)
-    audience: str = Field(min_length=1, max_length=16)
-    # Pydantic v2 + StrEnum → автоматическая 422 если значение не в enum.
-    # Это покрывает N2 из ревью плана: ValueError не уходит в 500.
+    audience: ArticleAudience
     access_level: AccessLevel
-    status: str = Field(default="DRAFT", min_length=1, max_length=16)
-    language: str = Field(default="ru", min_length=1, max_length=8)
+    status: ArticleStatusLiteral = "DRAFT"
+    language: ArticleLanguage = "ru"
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("tags", mode="after")
@@ -180,9 +189,9 @@ class ArticlePatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     body_markdown: str | None = Field(default=None, min_length=1)
     tags: list[str] | None = Field(default=None)
-    # `status` пока str (drift OpenAPI, как audience в ArticleInput) —
-    # backlog #28 для enum-rollout. DB CHECK всё равно отсечёт невалид.
-    status: str | None = Field(default=None, min_length=1, max_length=16)
+    # Pydantic Literal validation (#353): invalid status → 422 на input
+    # boundary вместо 500 от DB CHECK.
+    status: ArticleStatusLiteral | None = None
 
     @field_validator("tags", mode="after")
     @classmethod
