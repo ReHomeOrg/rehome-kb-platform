@@ -102,6 +102,17 @@ class Settings(BaseSettings):
     webhook_max_attempts: int = Field(default=5, alias="WEBHOOK_MAX_ATTEMPTS")
     webhook_backoff_base_seconds: float = Field(default=30.0, alias="WEBHOOK_BACKOFF_BASE_SECONDS")
 
+    # Outbox drainer (ADR-0026 Slice 0). When enabled, `WebhookEventDispatcher`
+    # routes via outbox table + drainer worker fans out to subscribers.
+    # When disabled, legacy direct dispatch (current MVP behavior) сохраняется.
+    # Default False — backward compat для текущих env'ов.
+    outbox_drainer_enabled: bool = Field(default=False, alias="OUTBOX_DRAINER_ENABLED")
+    outbox_drainer_poll_interval_seconds: float = Field(
+        default=5.0, alias="OUTBOX_DRAINER_POLL_INTERVAL_SECONDS"
+    )
+    # Hard cap на batch size — anti-DoS если outbox grows unbounded.
+    outbox_drainer_batch_size: int = Field(default=100, alias="OUTBOX_DRAINER_BATCH_SIZE")
+
     # Observability (#108). `/metrics` endpoint включается явно — safe-by-default
     # для случая, когда reverse-proxy ещё не настроен фильтровать его наружу.
     # MetricsMiddleware всегда работает (counter/histogram дешёвые); только
