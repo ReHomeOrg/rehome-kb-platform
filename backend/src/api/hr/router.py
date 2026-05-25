@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.audit import (
@@ -42,6 +43,7 @@ from src.api.hr.schemas import (
     HrEmployeeView,
     PaginationInfo,
 )
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 # Encrypted ПДн columns names (model attribute → schema attribute).
 # Mapping используется для encrypt/decrypt loops в create/patch/view.
@@ -280,9 +282,21 @@ async def patch_employee(
     audit_repo: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
-) -> HrEmployeeView:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """Stage 2 (#234): ПДн поля encrypt'аются; clearing через пустую
-    строку. Audit pii_updated с именами полей (без значений)."""
+    строку. Audit pii_updated с именами полей (без значений).
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit / pii_updated row.
+    """
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     patch_dict, pii_fields = _split_pii_for_patch(payload, settings)
     emp = await repo.update(employee_id, patch=patch_dict)
     if emp is None:
@@ -308,7 +322,9 @@ async def patch_employee(
             metadata={"fields_set": sorted(pii_fields), "via": "PATCH"},
         )
     await session.commit()
-    return _build_view(emp, settings)
+    body = _build_view(emp, settings).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 @router.delete(
