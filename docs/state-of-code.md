@@ -313,7 +313,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 - **kb-search Stage 2**: Qdrant migration при scale; вынос embedding в shared worker через Lifespan.
 - **kb-eval**: smoke run в CI с real provider'ом (требует credentials); composite score baseline measurement и dashboard.
 - **Observability**: Grafana dashboards для каждого hot path; alert rules.
-- **Documentation**: OpenAPI spec drift sync (некоторые operationId'ы помечены `planned` хотя уже реализованы).
+- ~~**Documentation**: OpenAPI spec drift sync~~ ✅ DONE (#333): добавлены 18 endpoint'ов (FIDO2 ceremony, vault emergency-unlock + escrow + wraps, service-orders accept/complete/fail, admin security-incident detail, whoami, premises-cards DELETE), исправлен PUT/UUID → PATCH/slug mismatch для premises-cards. App / spec drift: 0.
 
 ## CS.5. CI / CD
 
