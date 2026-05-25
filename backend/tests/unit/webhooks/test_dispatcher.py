@@ -25,7 +25,16 @@ def _make_dispatcher(subscribers: list[Webhook]) -> tuple[WebhookEventDispatcher
     webhook_repo.list_subscribers = AsyncMock(return_value=subscribers)
     delivery_repo = MagicMock()
     delivery_repo.enqueue = AsyncMock(return_value=MagicMock(id=uuid4()))
-    dispatcher = WebhookEventDispatcher(webhook_repo, delivery_repo)
+    # ADR-0026 Slice 0: outbox_repo + outbox_enabled added. Legacy path
+    # (outbox_enabled=False) — existing test scenarios.
+    outbox_repo = MagicMock()
+    outbox_repo.enqueue = AsyncMock()
+    dispatcher = WebhookEventDispatcher(
+        webhook_repo=webhook_repo,
+        delivery_repo=delivery_repo,
+        outbox_repo=outbox_repo,
+        outbox_enabled=False,
+    )
     return dispatcher, delivery_repo.enqueue
 
 

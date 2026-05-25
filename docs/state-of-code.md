@@ -245,6 +245,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 |---|---|---|
 | `articles` | ✅ MVP | CRUD + версионирование + Postgres FTS поиск + tags (case-insensitive #346) + categories + frontend admin форма + Pydantic Literal enums для audience/status/language (#353) |
 | `categories` | ✅ MVP | Read-only tree + admin CRUD (POST/PATCH/DELETE/GET через ADR-0024 #355): cycle detection (app-level), soft-delete через `archived_at`, slug READ-ONLY. Backend Slice 1 — frontend admin UI отдельным slice. |
+| `outbox` | ✅ Foundation (Slice 0) | Transactional outbox table + drainer worker + `WebhookEventDispatcher` env-gated routing (ADR-0026 #356). `OUTBOX_DRAINER_ENABLED=False` (default) → legacy direct fan-out; `=True` → single insert в outbox + drainer fan-out per subscriber. Slice 1+ переводит конкретные business repos (articles/chat/collaborators/vault) на atomic transactional commit с outbox enqueue в same session. |
 | `audit` | ✅ MVP | Centralized audit_log table + repository + viewer page |
 | `auth` | ✅ MVP | Keycloak JWT verify + scope mapper (ADR-0003 access_levels) + roles/scopes endpoint |
 | `categories` | ✅ MVP | Иерархия + counts |
