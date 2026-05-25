@@ -131,6 +131,19 @@ paths:
                     - staging
                     - dev
                     - local
+  /api/v1/whoami:
+    get:
+      tags:
+      - Health
+      summary: Identity-helper для frontend (JWT sub + scope + roles)
+      operationId: whoami
+      x-implementation-status: implemented
+      x-implementation-note: Auth helper — debug-friendly. 401 при anon
+      responses:
+        '200':
+          description: JWT claims + computed access_levels
+        '401':
+          description: Не аутентифицирован
   /api/v1/articles:
     get:
       tags:
@@ -885,14 +898,13 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /api/v1/premises-cards/{premises_id}:
+  /api/v1/premises-cards/{slug}:
     parameters:
-    - name: premises_id
+    - name: slug
       in: path
       required: true
       schema:
         type: string
-        format: uuid
     get:
       tags:
       - Premises Cards
@@ -910,7 +922,7 @@ paths:
         '
       operationId: getPremisesCard
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline
+      x-implementation-note: Phase 1 baseline; key — slug, не UUID
       parameters:
       - $ref: '#/components/parameters/RequestId'
       responses:
@@ -927,13 +939,14 @@ paths:
                       $ref: '#/components/schemas/PremisesCard'
         '404':
           $ref: '#/components/responses/NotFound'
-    put:
+    patch:
       tags:
       - Premises Cards
-      summary: Обновить карточку
+      summary: Обновить карточку (partial)
       operationId: updatePremisesCard
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан (ADR-0025)
+      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан (ADR-0025).
+        Method PATCH, не PUT (partial update); spec drift fixed
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
@@ -956,6 +969,24 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/PremisesCard'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Premises Cards
+      summary: Архивировать карточку (soft-delete, STAFF only)
+      operationId: archivePremisesCard
+      x-implementation-status: implemented
+      x-implementation-note: Phase 1 baseline; archived карточки скрываются из публичных
+        listings
+      parameters:
+      - $ref: '#/components/parameters/RequestId'
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Archived
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -2001,6 +2032,19 @@ paths:
       schema:
         type: string
         format: uuid
+    get:
+      tags:
+      - Admin
+      summary: Карточка инцидента
+      operationId: getSecurityIncident
+      x-implementation-status: implemented
+      x-implementation-pr: 231
+      x-implementation-note: ФЗ-152 §17.1 admin UI carddetail
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Инцидент не найден
     patch:
       tags:
       - Admin
@@ -2302,6 +2346,40 @@ paths:
                   task_id:
                     type: string
                     format: uuid
+  /api/v1/admin/vault/emergency-unlock:
+    post:
+      tags:
+      - Admin
+      summary: Emergency vault unlock (ADR-0021 escrow recovery)
+      operationId: vaultEmergencyUnlock
+      x-implementation-status: implemented
+      x-implementation-pr: 335
+      x-implementation-note: ADR-0021. Combines Shamir shares from sealed envelopes
+        (director + legal firm) → recover KEK → audit + SecurityIncident row created
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shares, reason]
+              properties:
+                shares:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 2
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Vault unlocked; SecurityIncident создан
+        '400':
+          description: Невалидные / недостаточные shares
+        '403':
+          description: Caller не имеет LEGAL+STAFF scope
   /api/v1/admin/stats:
     get:
       tags:
@@ -3040,6 +3118,81 @@ paths:
       responses:
         '200':
           description: Отменено
+  /api/v1/service-orders/{order_id}/accept:
+    post:
+      tags:
+      - Collaborators
+      summary: Принять заказ в работу (STAFF / collaborator owner)
+      operationId: acceptServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 329
+      x-implementation-note: ТЗ §3.10.6 lifecycle transition PENDING → ACCEPTED
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Принят
+        '409':
+          description: Невалидный переход статуса
+  /api/v1/service-orders/{order_id}/complete:
+    post:
+      tags:
+      - Collaborators
+      summary: Завершить заказ (STAFF / collaborator owner)
+      operationId: completeServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 329
+      x-implementation-note: ТЗ §3.10.6 lifecycle transition ACCEPTED → COMPLETED
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Завершён
+        '409':
+          description: Невалидный переход статуса
+  /api/v1/service-orders/{order_id}/fail:
+    post:
+      tags:
+      - Collaborators
+      summary: Пометить заказ как неуспешный (STAFF / collaborator owner)
+      operationId: failServiceOrder
+      x-implementation-status: implemented
+      x-implementation-pr: 329
+      x-implementation-note: ТЗ §3.10.6 lifecycle transition ACCEPTED → FAILED
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Помечен как failed
+        '409':
+          description: Невалидный переход статуса
   /api/v1/collaborators/{collaborator_id}/portal-access:
     parameters:
     - name: collaborator_id
@@ -3572,6 +3725,186 @@ paths:
             ownership first)
         '404':
           description: Group / member не найден
+  /api/v1/vault/users/{user_id}/pubkey:
+    get:
+      tags: [Vault]
+      summary: Получить публичный ключ пользователя (для re-wrap при шаринге)
+      operationId: getVaultUserPubkey
+      x-implementation-status: implemented
+      x-implementation-note: ADR-0017 multi-user wraps — share flow требует получения
+        pubkey'я получателя
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Pubkey + algorithm
+        '404':
+          description: User не setup'нул vault (нет pubkey'я)
+  /api/v1/vault/secrets/{secret_id}/wraps:
+    post:
+      tags: [Vault]
+      summary: Поделиться secret'ом с другим пользователем (новая wrap-запись)
+      operationId: createVaultSecretWrap
+      x-implementation-status: implemented
+      x-implementation-note: ADR-0017 multi-user wraps. Caller re-wraps secret_key
+        под pubkey получателя client-side
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '201':
+          description: Wrap создан
+        '403':
+          description: Caller — не owner
+        '409':
+          description: Wrap для этого user_id уже существует
+  /api/v1/vault/secrets/{secret_id}/wraps/{user_id}:
+    delete:
+      tags: [Vault]
+      summary: Отозвать доступ пользователя к secret'у (удалить wrap)
+      operationId: deleteVaultSecretWrap
+      x-implementation-status: implemented
+      x-implementation-note: ADR-0017. True revoke (rotate secret_key) — backlog
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Wrap удалён
+        '403':
+          description: Caller — не owner
+        '404':
+          description: Wrap не найден
+  /api/v1/vault/setup-escrow:
+    post:
+      tags: [Vault]
+      summary: Настроить emergency escrow (Shamir SSS shares)
+      operationId: setupVaultEscrow
+      x-implementation-status: implemented
+      x-implementation-pr: 333
+      x-implementation-note: ADR-0021 emergency access. Shamir SSS over GF(256);
+        shares хранятся client-side у директора + юр.фирмы
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Escrow setup'нут (shares получены client-side)
+        '409':
+          description: Escrow уже настроен
+  /api/v1/vault/fido2/register-begin:
+    post:
+      tags: [Vault]
+      summary: FIDO2 / WebAuthn — начать регистрацию ключа
+      operationId: fido2RegisterBegin
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022 Вариант A. Returns PublicKeyCredentialCreationOptions
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Options сгенерированы; challenge stored DB-side
+        '409':
+          description: Превышен лимит ключей (VAULT_FIDO2_MAX_KEYS_PER_USER)
+  /api/v1/vault/fido2/register-complete:
+    post:
+      tags: [Vault]
+      summary: FIDO2 / WebAuthn — завершить регистрацию (verify attestation)
+      operationId: fido2RegisterComplete
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022. Verify attestation + persist credential
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '201':
+          description: Ключ зарегистрирован
+        '400':
+          description: Attestation verification failure
+        '404':
+          description: Challenge expired / not found
+  /api/v1/vault/fido2/assert-begin:
+    post:
+      tags: [Vault]
+      summary: FIDO2 / WebAuthn — начать authentication assertion
+      operationId: fido2AssertBegin
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022. Returns PublicKeyCredentialRequestOptions
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Options сгенерированы
+        '404':
+          description: У пользователя нет зарегистрированных ключей
+  /api/v1/vault/fido2/assert-complete:
+    post:
+      tags: [Vault]
+      summary: FIDO2 / WebAuthn — завершить authentication (verify signature)
+      operationId: fido2AssertComplete
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022. Verify signature + bump sign_count
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Authentication успешен (vault unlock proof)
+        '400':
+          description: Assertion verification failure
+  /api/v1/vault/fido2/credentials:
+    get:
+      tags: [Vault]
+      summary: Список зарегистрированных FIDO2 ключей пользователя
+      operationId: listFido2Credentials
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022. Метаданные (label, last_used_at, sign_count)
+      responses:
+        '200':
+          description: Список ключей
+  /api/v1/vault/fido2/credentials/{credential_id}:
+    delete:
+      tags: [Vault]
+      summary: Удалить (revoke) FIDO2 ключ
+      operationId: deleteFido2Credential
+      x-implementation-status: implemented
+      x-implementation-pr: 330
+      x-implementation-note: ADR-0022. Soft-delete + audit row
+      parameters:
+      - name: credential_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Ключ удалён
+        '404':
+          description: Credential не найден или принадлежит другому user'у
 
   /api/v1/audit-log:
     get:
