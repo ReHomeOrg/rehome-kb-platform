@@ -2,14 +2,23 @@
 
 ## Статус
 
-- [x] **Предложено** (awaiting Architect approval)
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант B) — 2026-05-25 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
 - **Дата:** 2026-05-25
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Согласовано Архитектором:** **нет**, awaiting approval
+- **Согласовано Архитектором:** **да**, 2026-05-25
+- **Approve note:** Architect approved Вариант B (full admin CRUD с cycle
+  detection + soft-delete). Open-question resolutions:
+  1. Вариант B confirmed.
+  2. Slug READ-ONLY (PATCH меняет только title / description / parent_id).
+  3. БЕЗ step-up MFA — categories не security-sensitive (staff_admin
+     gate достаточен, same pattern что PATCH /admin/users).
+  4. Cycle detection на app-level (Python recursive check) — categories
+     low-volume, simpler & testable.
+  5. Backend Slice 1 + Frontend Slice 2 — separate PR'ы.
 
 ## Контекст
 

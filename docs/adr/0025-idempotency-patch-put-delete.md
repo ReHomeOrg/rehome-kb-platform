@@ -2,14 +2,22 @@
 
 ## Статус
 
-- [x] **Предложено** (awaiting Architect approval)
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант B) — 2026-05-25 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
 - **Дата:** 2026-05-25
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Согласовано Архитектором:** **нет**, awaiting approval
+- **Согласовано Архитектором:** **да**, 2026-05-25
+- **Approve note:** Architect approved Вариант B (PATCH-only opt-in).
+  Open-question resolutions:
+  1. Вариант B confirmed.
+  2. DELETE skip — natural 404 на retry достаточно (Stripe pattern).
+  3. PUT skip — natural same-state idempotency.
+  4. Single PR с 9 PATCH endpoints (manageable scope).
+  5. Frontend opt-in — без mandatory header generation; existing
+     callers work unchanged.
 
 ## Контекст
 
