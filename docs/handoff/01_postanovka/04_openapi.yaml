@@ -1399,6 +1399,107 @@ paths:
                     type: integer
                   response_time_ms:
                     type: integer
+  /api/v1/admin/categories:
+    post:
+      tags:
+      - Admin
+      summary: Создать категорию (staff_admin)
+      operationId: createAdminCategory
+      x-implementation-status: implemented
+      x-implementation-pr: 355
+      x-adr: ADR-0024
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCategoryCreate'
+      responses:
+        '201':
+          description: Создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Slug уже занят
+        '422':
+          description: Невалидный payload / unknown parent_id / archived parent
+  /api/v1/admin/categories/{category_id}:
+    parameters:
+    - name: category_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - Admin
+      summary: Карточка категории (staff_admin)
+      operationId: getAdminCategory
+      x-implementation-status: implemented
+      x-implementation-pr: 355
+      x-adr: ADR-0024
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '404':
+          description: Не найдена
+    patch:
+      tags:
+      - Admin
+      summary: Обновить категорию (staff_admin)
+      operationId: updateAdminCategory
+      x-implementation-status: implemented
+      x-implementation-pr: 355
+      x-adr: ADR-0024
+      x-implementation-note: Slug READ-ONLY; cycle detection app-level;
+        Idempotency-Key поддержан (ADR-0025)
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCategoryPatch'
+      responses:
+        '200':
+          description: Обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '404':
+          description: Не найдена
+        '422':
+          description: Cycle / unknown parent_id / archived parent
+    delete:
+      tags:
+      - Admin
+      summary: Архивировать категорию (soft-delete, staff_admin)
+      operationId: archiveAdminCategory
+      x-implementation-status: implemented
+      x-implementation-pr: 355
+      x-adr: ADR-0024
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Архивирована
+        '404':
+          description: Не найдена
   /api/v1/admin/users:
     get:
       tags:
@@ -4003,6 +4104,80 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Category'
+    AdminCategoryView:
+      type: object
+      description: Admin response для /admin/categories (ADR-0024). Включает
+        archived_at для admin tree view; public GET /categories filter'ит archived.
+      required:
+      - id
+      - slug
+      - title
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          pattern: ^[a-z0-9-]+$
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 2000
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        archived_at:
+          type: [string, 'null']
+          format: date-time
+    AdminCategoryCreate:
+      type: object
+      description: POST /admin/categories body (ADR-0024).
+      required:
+      - slug
+      - title
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[a-z0-9-]+$
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 2000
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+    AdminCategoryPatch:
+      type: object
+      description: PATCH /admin/categories/{id} body. Slug READ-ONLY
+        (ADR-0024 §Open Q 2). Editable - title / description / parent_id.
+        additionalProperties=false enforced server-side (extra=forbid).
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 2000
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+      additionalProperties: false
     Tag:
       type: object
       properties:
