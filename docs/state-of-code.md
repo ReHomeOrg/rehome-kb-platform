@@ -574,8 +574,13 @@ UI implementations.**
    golden vector test (Python ↔ TS share format). Production gate:
    physical инфра (sealed envelopes + физ. сейфы у директора и юр.
    фирмы) — Architect responsibility, не блокер кода.
-3. **POST /documents create endpoint** — нужен в OpenAPI?
-   (ADR-0023 Proposed, awaits architect approval).
+3. ~~**POST /documents create endpoint** — нужен в OpenAPI?~~
+   ✅ ADR-0023 принят (Вариант B, 2026-05-20 Architect Evgeniy):
+   keep external-ingest only; `document.created` webhook fire'ится через
+   internal `documents.service.create_document` (см. модуль). POST
+   /api/v1/documents намеренно НЕ exposed на HTTP surface. Follow-up
+   decision: `title`/`counterparty` НЕ в webhook payload (ПДн risk через
+   external subscribers).
 4. **Real LLM credentials + golden dataset 200 pairs** — ops + content.
 5. ~~Real async worker для admin_tasks~~ ✅ DONE (#268, ADR-0020 B):
    `asyncio.create_task` spawn + reaper для crash recovery. Phased
