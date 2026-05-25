@@ -71,11 +71,19 @@ def test_post_without_idempotency_key_is_noop(
         return article
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake_create)
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake_create)
 
     from src.api.db import get_session
 
     async def _empty_session() -> Any:
-        yield object()
+        from unittest.mock import AsyncMock, MagicMock
+        _sess = MagicMock()
+        _sess.commit = AsyncMock()
+        _sess.rollback = AsyncMock()
+        _sess.refresh = AsyncMock()
+        _sess.add = MagicMock()
+        _sess.flush = AsyncMock()
+        yield _sess
 
     app.dependency_overrides[get_session] = _empty_session
 
@@ -164,11 +172,19 @@ def test_post_with_idempotency_key_first_call_creates_and_saves(
         return article
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake_create)
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake_create)
 
     from src.api.db import get_session
 
     async def _empty_session() -> Any:
-        yield object()
+        from unittest.mock import AsyncMock, MagicMock
+        _sess = MagicMock()
+        _sess.commit = AsyncMock()
+        _sess.rollback = AsyncMock()
+        _sess.refresh = AsyncMock()
+        _sess.add = MagicMock()
+        _sess.flush = AsyncMock()
+        yield _sess
 
     app.dependency_overrides[get_session] = _empty_session
 
@@ -247,11 +263,19 @@ def test_post_with_idempotency_key_replay_returns_cached_response(
         return None  # should NOT be called
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake_create)
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake_create)
 
     from src.api.db import get_session
 
     async def _empty_session() -> Any:
-        yield object()
+        from unittest.mock import AsyncMock, MagicMock
+        _sess = MagicMock()
+        _sess.commit = AsyncMock()
+        _sess.rollback = AsyncMock()
+        _sess.refresh = AsyncMock()
+        _sess.add = MagicMock()
+        _sess.flush = AsyncMock()
+        yield _sess
 
     app.dependency_overrides[get_session] = _empty_session
 
@@ -367,11 +391,19 @@ def test_lock_acquired_before_lookup(
         return article
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake_create)
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake_create)
 
     from src.api.db import get_session
 
     async def _empty_session() -> Any:
-        yield object()
+        from unittest.mock import AsyncMock, MagicMock
+        _sess = MagicMock()
+        _sess.commit = AsyncMock()
+        _sess.rollback = AsyncMock()
+        _sess.refresh = AsyncMock()
+        _sess.add = MagicMock()
+        _sess.flush = AsyncMock()
+        yield _sess
 
     app.dependency_overrides[get_session] = _empty_session
 

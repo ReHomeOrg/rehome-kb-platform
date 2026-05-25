@@ -26,7 +26,14 @@ def audit_mock() -> Iterator[AsyncMock]:
 
 def _override_session() -> None:
     async def _empty_session() -> Any:
-        yield object()
+        from unittest.mock import AsyncMock, MagicMock
+        _sess = MagicMock()
+        _sess.commit = AsyncMock()
+        _sess.rollback = AsyncMock()
+        _sess.refresh = AsyncMock()
+        _sess.add = MagicMock()
+        _sess.flush = AsyncMock()
+        yield _sess
 
     app.dependency_overrides[get_session] = _empty_session
 
@@ -39,6 +46,7 @@ def _override_create(monkeypatch: pytest.MonkeyPatch, fake_article: Article) -> 
         return fake_article
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake)
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake)
     _override_session()
 
 

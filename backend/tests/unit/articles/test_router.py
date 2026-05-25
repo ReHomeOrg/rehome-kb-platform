@@ -370,7 +370,7 @@ def _override_post_create(
     return_article: Article | None = None,
     raise_exc: Exception | None = None,
 ) -> None:
-    """Подменяет ArticleRepository.create."""
+    """Подменяет ArticleRepository.create + create_atomic (ADR-0026 Slice 1)."""
 
     async def _fake(self: Any, payload: Any, *, actor_sub: str) -> Article:
         if raise_exc is not None:
@@ -389,14 +389,27 @@ def _override_post_create(
         return return_article
 
     monkeypatch.setattr("src.api.articles.router.ArticleRepository.create", _fake)
+    # ADR-0026 Slice 1: handler теперь использует create_atomic.
+    monkeypatch.setattr("src.api.articles.router.ArticleRepository.create_atomic", _fake)
+
+    from unittest.mock import AsyncMock, MagicMock
 
     from src.api.db import get_session
     from src.api.main import app
 
-    async def _empty_session() -> Any:
-        yield object()
+    # Session mock с поддержкой commit/rollback/refresh (handler теперь
+    # делает explicit session.commit() per ADR-0026 Slice 1 atomic flow).
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.refresh = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
 
-    app.dependency_overrides[get_session] = _empty_session
+    async def _session_factory() -> Any:
+        yield session
+
+    app.dependency_overrides[get_session] = _session_factory
 
 
 def test_post_articles_401_without_token(client: TestClient) -> None:
