@@ -340,16 +340,23 @@ Phase 0 раздел «Что МОЖНО переиспользовать» = «
 
 ---
 
-# Current State (2026-05-22)
+# Current State (2026-05-25)
 
-> Refresh после landing'а webhook taxonomy completion, admin endpoints
-> foundation, новых ФЗ-152 модулей и HR Stage 2 encryption proposal.
+> Refresh после landing'а ADR-0024/0025/0026 (categories admin CRUD,
+> idempotency PATCH extension, transactional outbox pattern Slices 0-4),
+> CI hygiene + OpenAPI drift sync, post-Reviewer findings fixes.
 
-**Метрики проекта (delta vs 2026-05-18):**
-- Backend: **1338 unit tests passing** (+ ~30 since 2026-05-18), mypy strict ✓, ruff ✓.
-- 24+ Alembic миграций (через 0024_*).
-- **18 ADRs** (0001-0018; ADR-0018 — HR ПДн encryption, accepted 2026-05-22).
-- 0 open PR'ов; 55 merged 2026-05-22..23; OpenAPI 97/97 (см. CS.7).
+**Метрики проекта (delta vs 2026-05-22):**
+- Backend: **2028 unit tests passing** (+ ~690 since 2026-05-22), mypy strict
+  ✓ (src + tests, 427 source files), ruff ✓.
+- 30+ Alembic миграций (через 20260525_*).
+- **26 ADRs** (0001-0026; ADR-0024 categories admin CRUD; ADR-0025
+  idempotency extension; ADR-0026 strict outbox pattern — все accepted
+  2026-05-25).
+- 0 open PR'ов; 13 merged 2026-05-25 (см. CS.12); OpenAPI **119/119** —
+  app/spec drift = 0 после #333.
+- CI: все 8 jobs green; Backend (Python) восстановлен после fix'а
+  pre-existing format/mypy red в #332.
 
 ## CS.7. Recent PRs (2026-05-23 finale)
 
@@ -631,4 +638,89 @@ Skipped explicitly (deferred):
 - Service payment sizing (TD-005).
 - HR Stage 2 кэп-сертификаты / passport scans — отдельный flow через
   kb-files (ADR-0012 server-side encryption).
+
+## CS.12. Session 2026-05-25 — ADR-0024/0025/0026 + CI/docs cleanup
+
+13 PR'ов merged. Закрыты 3 design-decision items из ADR-batch'а
+2026-05-25 + долгоиграющие CI / docs drift.
+
+### ADR-0024 — Categories admin CRUD (1 PR)
+
+- **#355**: admin CRUD над `categories` (POST/PATCH/DELETE/GET) с
+  cycle detection (app-level через `visited` set; protects от corrupted
+  graph), soft-delete через `archived_at`, slug READ-ONLY. Backend
+  только; frontend admin UI — отдельный slice. RBAC: `staff_admin`
+  без MFA per ADR-0024 Open Q 3.
+
+### ADR-0025 — Idempotency-Key extension (1 PR)
+
+- **#354**: Idempotency-Key header support расширен с POST-only
+  на 8 PATCH endpoint'ов (4 admin: security-incident, PD-request,
+  KB-user, system-config; 4 content: article, premises-card,
+  collaborator, hr-employee). Shared `_process_for_actor` core
+  с body-hash collision detection (409). Replay path стоит ПОСЛЕ
+  RBAC checks — не обходит scope guards.
+
+### ADR-0026 — Strict outbox pattern, Slices 0-4 (6 PR'ов)
+
+- **#356 (Slice 0)**: foundation — `outbox` table (id, event_type,
+  payload, created_at, flushed_at, retries, last_error) + partial
+  index `WHERE flushed_at IS NULL` + `OutboxRepository`
+  (enqueue/fetch_unflushed/mark_flushed/record_failure) + `OutboxDrainer`
+  singleton worker per `WebhookDeliveryWorker` pattern.
+- **#357 (Slice 1)**: POST /articles handler — atomic через
+  `ArticleRepository.create_atomic` (без inner commit) + handler
+  делает single `session.commit()`. Article + version + audit +
+  outbox.enqueue в одной транзакции → ФЗ-152 §22 audit-trail
+  completeness invariant закрыт для articles.
+- **#358 (Slice 2)**: chat escalate + collaborator review — webhook
+  dispatch перенесён ДО `session.commit()`. Atomic invariant для
+  `ChatRepository.create_escalation_atomic` + reviews POST.
+- **#328 (Slice 3)**: оставшиеся 9 collaborator lifecycle endpoints
+  (POST/DELETE/activate/suspend/onboarding/portal-access в `router.py`
+  + create/cancel/accept/complete/fail в `service_orders_router.py`).
+  Vault emergency unlock (ADR-0021) уже был atomic — out of scope.
+- **#330 (Slice 4a)**: `OutboxCleanupWorker` — physical-delete flushed
+  rows past 30-day retention. Env-gated `OUTBOX_CLEANUP_WORKER_ENABLED`,
+  daily poll default, mirror WebhookCleanupWorker.
+- **#331 (Slice 4b)**: legacy direct-dispatch путь УДАЛЁН.
+  `WebhookEventDispatcher` теперь всегда пишет в outbox. Drainer
+  fan-out'ит асинхронно. `OUTBOX_DRAINER_ENABLED` default flipped
+  `False → True` (preserve webhook delivery для single-process deploy).
+  ADR-0026 Open Q6 обновлён post-hoc. См. `docs/handoff/02_process/architect-deviations.md`.
+
+### Hygiene / drift sync (4 PR'а)
+
+- **#329**: doc fix PR# typo (Slice 3 был #328, не #359).
+- **#332**: ruff format pre-existing files + mypy strict fix (tests/).
+  Backend (Python) CI job впервые зелёный за неделю. Drive-by changes
+  по чужим файлам — Architect approved post-hoc в deviations ledger.
+- **#333**: OpenAPI spec drift sync — 18 endpoints добавлены (FIDO2
+  ceremony, vault emergency-unlock + setup-escrow + wraps,
+  service-orders accept/complete/fail, admin security-incident detail,
+  whoami, premises-cards DELETE). Также fix: `{premises_id}` (UUID)
+  → `{slug}`, PUT → PATCH. App/spec drift = 0.
+- **#334**: integration regression fix от Slice 4b — `drainer_instance`
+  fixture + `await drainer._drain_once()` перед `worker._run_once()`
+  в 5 webhook e2e тестах. Не отключены / не skip'нуты тесты — честный
+  fix.
+
+### Post-Reviewer fixup (1 PR)
+
+- **#335**: Reviewer findings 2026-05-25 — docstring fix в outbox
+  repo (`FOR UPDATE SKIP LOCKED` claim), dead logger removal в
+  dispatcher.py, ADR-0026 Open Q6 update, новый
+  `architect-deviations.md` ledger с post-hoc approve'ами для #332
+  и #354.
+
+### Что закрыто из CS.4 backlog
+
+- ~~OpenAPI spec drift sync~~ ✅ #333 (см. также CS.4 update).
+
+### Что осталось self-serve
+
+- Vault Stage 2: true revoke (rotate secret_key + re-wrap на revoke),
+  QR-код для TOTP setup, batch pubkey endpoint для groups >50.
+- Observability: Grafana dashboards для hot paths (нужен running
+  Grafana для validation), alert tuning (нужны operational данные).
 
