@@ -193,6 +193,12 @@ async def create_service_order(
             price_rub=payload.price_rub,
             commission_rub=payload.commission_rub,
         )
+        # ADR-0026 Slice 3: dispatch ДО commit'а → atomic order + outbox.
+        await _dispatch_lifecycle_event(
+            webhook_dispatcher,
+            event=WebhookEvent.SERVICE_ORDER_CREATED,
+            order=order,
+        )
         await session.commit()
     except IntegrityError as exc:
         # Несуществующий collaborator / premises — FK violation. 422 более
@@ -204,12 +210,6 @@ async def create_service_order(
             status_code=422,
             detail="Referenced collaborator or premises not found",
         ) from exc
-
-    await _dispatch_lifecycle_event(
-        webhook_dispatcher,
-        event=WebhookEvent.SERVICE_ORDER_CREATED,
-        order=order,
-    )
 
     location = f"/api/v1/service-orders/{order.id}"
     response.headers["Location"] = location
@@ -299,12 +299,13 @@ async def cancel_service_order(
         await session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    await session.commit()
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     await _dispatch_lifecycle_event(
         webhook_dispatcher,
         event=WebhookEvent.SERVICE_ORDER_CANCELLED,
         order=cancelled,
     )
+    await session.commit()
     return ServiceOrderResponse.model_validate(cancelled)
 
 
@@ -338,8 +339,9 @@ async def _staff_only_transition(
         await session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    await session.commit()
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     await _dispatch_lifecycle_event(webhook_dispatcher, event=event, order=updated)
+    await session.commit()
     return ServiceOrderResponse.model_validate(updated)
 
 
