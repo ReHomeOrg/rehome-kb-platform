@@ -381,10 +381,11 @@ paths:
       summary: Частично обновить статью
       operationId: patchArticle
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline
+      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -932,10 +933,11 @@ paths:
       summary: Обновить карточку
       operationId: updatePremisesCard
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline
+      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/RequestId'
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1527,8 +1529,10 @@ paths:
       operationId: updateKbUser
       x-implementation-status: implemented
       x-implementation-pr: 230
+      x-implementation-note: Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1809,8 +1813,10 @@ paths:
       operationId: processPersonalDataRequest
       x-implementation-status: implemented
       x-implementation-pr: 232
+      x-implementation-note: Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1901,8 +1907,10 @@ paths:
       operationId: updateSecurityIncident
       x-implementation-status: implemented
       x-implementation-pr: 231
+      x-implementation-note: Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -1955,9 +1963,11 @@ paths:
       operationId: updateSystemConfig
       x-implementation-status: implemented
       x-implementation-pr: 264
-      x-implementation-note: ADR-0019; X-MFA-Token honest stub
+      x-implementation-note: ADR-0019 (X-MFA-Token step-up) + Idempotency-Key
+        поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -2473,8 +2483,10 @@ paths:
       x-implementation-status: implemented
       x-implementation-slice: 1
       x-adr: ADR-0014
+      x-implementation-note: Idempotency-Key поддержан (ADR-0025)
       parameters:
       - $ref: '#/components/parameters/CsrfToken'
+      - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -3181,7 +3193,7 @@ paths:
       summary: Partial update
       operationId: patchHrEmployee
       x-implementation-status: implemented
-      x-implementation-note: Phase 1 baseline
+      x-implementation-note: Phase 1 baseline; Idempotency-Key поддержан (ADR-0025)
       parameters:
       - name: employee_id
         in: path
@@ -3189,6 +3201,7 @@ paths:
         schema:
           type: string
           format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: OK
