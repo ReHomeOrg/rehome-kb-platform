@@ -20,6 +20,7 @@ from src.api.admin.security_incidents_router import (
 from src.api.admin.users_router import router as admin_users_router
 from src.api.articles.router import router as articles_router
 from src.api.audit.router import router as audit_router
+from src.api.categories.admin_router import router as admin_categories_router
 from src.api.categories.router import router as categories_router
 from src.api.chat.router import router as chat_router
 from src.api.collaborators.junction_router import router as premises_collaborators_router
@@ -67,6 +68,7 @@ router.include_router(vault_emergency_admin_router)
 router.include_router(webhooks_router)
 router.include_router(admin_router)
 router.include_router(admin_users_router)
+router.include_router(admin_categories_router)
 router.include_router(admin_security_incidents_router)
 router.include_router(admin_pd_requests_router)
 router.include_router(admin_audit_log_router)

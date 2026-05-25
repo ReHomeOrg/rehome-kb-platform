@@ -2,7 +2,8 @@
 
 Self-referential дерево: `parent_id → categories.id` (nullable).
 CHECK constraint `parent_id <> id` — anti-self-reference на DB-уровне.
-Полное cycle-detection (A→B→A) — backlog admin CRUD эпика.
+Cycle detection (A→B→A) — app-level в `CategoryAdminRepository`
+(ADR-0024). Soft-delete через `archived_at` column (#355).
 """
 
 from datetime import datetime
@@ -57,10 +58,22 @@ class Category(Base):
         onupdate=func.now(),
         nullable=False,
     )
+    # Soft-delete (ADR-0024 #355). NULL = active. Public GET /categories
+    # filter'ит archived; admin UI показывает с toggle.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint("parent_id <> id", name="ck_categories_no_self_reference"),
         Index("ix_categories_parent_slug", "parent_id", "slug"),
+        # Partial index для active-only tree queries (см. migration 0030).
+        Index(
+            "ix_categories_active",
+            "slug",
+            postgresql_where="archived_at IS NULL",
+        ),
     )
 
     def __repr__(self) -> str:  # pragma: no cover (debug only)
