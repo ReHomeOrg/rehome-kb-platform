@@ -141,7 +141,7 @@ def test_admin_security_incidents_patch_replays(
         get_security_incident_repository,
     )
 
-    cached_body = {
+    cached_body: dict[str, Any] = {
         "id": str(uuid4()),
         "incident_type": "access_violation",
         "severity": "low",
@@ -254,7 +254,7 @@ def test_articles_patch_replays(
     """PATCH /articles/{slug} — replay не дёргает repo.patch / webhook / indexer."""
     from src.api.articles.repository import ArticleRepository
 
-    cached_body = {
+    cached_body: dict[str, Any] = {
         "id": str(uuid4()),
         "slug": "cached-slug",
         "title": "Cached",
