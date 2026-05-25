@@ -7,12 +7,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.db import get_session
@@ -87,6 +87,27 @@ class OutboxRepository:
             )
         )
         await self._session.execute(stmt)
+
+    async def hard_delete_flushed(
+        self,
+        *,
+        retention: timedelta,
+        now: datetime | None = None,
+    ) -> int:
+        """Background cleanup: physical-DELETE outbox rows с
+        `flushed_at < cutoff` (ADR-0026 Slice 4, 30-day retention default).
+
+        Only flushed rows — unflushed остаются для drainer retry. Caller
+        (cleanup worker) commit'ит.
+        """
+        current = now or datetime.now(UTC)
+        cutoff = current - retention
+        stmt = delete(OutboxRow).where(
+            OutboxRow.flushed_at.is_not(None),
+            OutboxRow.flushed_at < cutoff,
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
 
 
 def get_outbox_repository(

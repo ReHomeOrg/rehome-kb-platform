@@ -29,6 +29,7 @@ from src.api.observability import (
     install_request_id_filter,
     render_metrics,
 )
+from src.api.outbox.cleanup_worker import OutboxCleanupWorker
 from src.api.outbox.drainer import close_drainer, init_drainer
 from src.api.v1.router import router as v1_router
 from src.api.webhooks.cleanup_worker import WebhookCleanupWorker
@@ -120,6 +121,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         )
         webhook_cleanup.start()
         logger.info("webhook_cleanup.worker.started")
+
+    # ADR-0026 Slice 4: physical-delete flushed outbox rows past retention.
+    outbox_cleanup: OutboxCleanupWorker | None = None
+    if settings.outbox_cleanup_worker_enabled:
+        outbox_cleanup = OutboxCleanupWorker(
+            session_factory=session_factory,
+            settings=settings,
+        )
+        outbox_cleanup.start()
+        logger.info("outbox_cleanup.worker.started")
     try:
         yield
     finally:
@@ -135,6 +146,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         if webhook_cleanup is not None:
             await webhook_cleanup.stop()
             logger.info("webhook_cleanup.worker.stopped")
+        if outbox_cleanup is not None:
+            await outbox_cleanup.stop()
+            logger.info("outbox_cleanup.worker.stopped")
         # #350: close LLMProvider httpx client pool. Idempotent —
         # no-op если init не успел отработать.
         try:
