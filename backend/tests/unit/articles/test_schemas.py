@@ -192,8 +192,8 @@ def test_article_input_tags_lowercased() -> None:
 
 def test_article_input_tags_dedup_case_insensitive() -> None:
     """Дубли с разным case → один lowercase entry."""
-    payload = ArticleInput(  # type: ignore[arg-type]
-        **_valid_payload(tags=["Договор", "договор", "ДОГОВОР"])
+    payload = ArticleInput(
+        **_valid_payload(tags=["Договор", "договор", "ДОГОВОР"]),  # type: ignore[arg-type]
     )
     assert payload.tags == ["договор"]
 
@@ -212,8 +212,8 @@ def test_article_input_tags_drop_empty() -> None:
 
 def test_article_input_tags_preserves_order_of_first_occurrence() -> None:
     """Dedup сохраняет order первого появления (важно для UI consistency)."""
-    payload = ArticleInput(  # type: ignore[arg-type]
-        **_valid_payload(tags=["Сервис", "Договор", "сервис"])
+    payload = ArticleInput(
+        **_valid_payload(tags=["Сервис", "Договор", "сервис"]),  # type: ignore[arg-type]
     )
     assert payload.tags == ["сервис", "договор"]
 

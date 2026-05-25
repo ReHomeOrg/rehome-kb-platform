@@ -43,6 +43,7 @@ def _override_create(monkeypatch: pytest.MonkeyPatch, fake_article: Article) -> 
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -157,6 +158,7 @@ def test_delete_archives_and_removes_by_slug_when_rag_enabled(
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
