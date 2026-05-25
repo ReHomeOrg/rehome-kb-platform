@@ -29,6 +29,7 @@ from src.api.observability import (
     install_request_id_filter,
     render_metrics,
 )
+from src.api.outbox.drainer import close_drainer, init_drainer
 from src.api.v1.router import router as v1_router
 from src.api.webhooks.cleanup_worker import WebhookCleanupWorker
 from src.api.webhooks.worker import WebhookDeliveryWorker
@@ -62,6 +63,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
         logger.info("llm_provider.initialized", extra={"provider": settings.llm_provider})
     except Exception:
         logger.exception("llm_provider.init_failed", extra={"provider": settings.llm_provider})
+
+    # #356 / ADR-0026: initialize OutboxDrainer singleton (env-gated).
+    # При `OUTBOX_DRAINER_ENABLED=False` — no-op; webhook dispatcher
+    # использует legacy direct path. Failures логируются но не блокируют
+    # startup (acceptable degradation: outbox rows накопятся и flush'нутся
+    # при следующем successful start'е).
+    try:
+        init_drainer(session_factory, settings)
+        if settings.outbox_drainer_enabled:
+            logger.info("outbox.drainer.initialized")
+    except Exception:
+        logger.exception("outbox.drainer.init_failed")
 
     # ADR-0020 §Crash recovery: scan orphaned tasks (>15min stale).
     try:
@@ -129,6 +142,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
             logger.info("llm_provider.closed")
         except Exception:
             logger.exception("llm_provider.close_failed")
+        # #356 / ADR-0026: graceful drainer shutdown.
+        try:
+            await close_drainer()
+            logger.info("outbox.drainer.closed")
+        except Exception:
+            logger.exception("outbox.drainer.close_failed")
 
 
 app = FastAPI(
