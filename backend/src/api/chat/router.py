@@ -586,9 +586,8 @@ async def post_escalate(
         },
     )
 
-    # E5.3 #91: fire chat.escalated webhook.
-    # outbox_enabled=True → outbox.enqueue в same session (atomic с
-    # escalation + audit); =False → legacy direct fan-out (best-effort).
+    # E5.3 #91: fire chat.escalated webhook. Slice 4b: outbox.enqueue в
+    # same session — atomic с escalation + audit.
     await webhook_dispatcher.dispatch(
         event_type="chat.escalated",
         payload={
