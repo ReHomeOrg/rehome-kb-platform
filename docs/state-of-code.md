@@ -244,6 +244,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | Модуль | Статус | Кратко |
 |---|---|---|
 | `articles` | ✅ MVP | CRUD + версионирование + Postgres FTS поиск + tags (case-insensitive #346) + categories + frontend admin форма + Pydantic Literal enums для audience/status/language (#353) |
+| `categories` | ✅ MVP | Read-only tree + admin CRUD (POST/PATCH/DELETE/GET через ADR-0024 #355): cycle detection (app-level), soft-delete через `archived_at`, slug READ-ONLY. Backend Slice 1 — frontend admin UI отдельным slice. |
 | `audit` | ✅ MVP | Centralized audit_log table + repository + viewer page |
 | `auth` | ✅ MVP | Keycloak JWT verify + scope mapper (ADR-0003 access_levels) + roles/scopes endpoint |
 | `categories` | ✅ MVP | Иерархия + counts |

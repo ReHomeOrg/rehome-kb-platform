@@ -147,3 +147,12 @@ ACTION_ADMIN_AUDIT_LOG_EXPORTED: Final = "admin.audit_log.exported"
 # доступны в system_config table напрямую для compliance audit).
 RESOURCE_ADMIN_SYSTEM_CONFIG: Final = "admin_system_config"
 ACTION_ADMIN_SYSTEM_CONFIG_UPDATED: Final = "admin.system_config.updated"
+
+# Category admin CRUD (#355, ADR-0024). Metadata содержит fields changed
+# (parent_id renames, title changes) — НЕ описание (admin может оставить
+# title с PII если сам захочет; не наш business). Soft-delete event
+# `archived` отдельно от updated для compliance review.
+RESOURCE_ADMIN_CATEGORY: Final = "admin_category"
+ACTION_ADMIN_CATEGORY_CREATED: Final = "admin.category.created"
+ACTION_ADMIN_CATEGORY_UPDATED: Final = "admin.category.updated"
+ACTION_ADMIN_CATEGORY_ARCHIVED: Final = "admin.category.archived"

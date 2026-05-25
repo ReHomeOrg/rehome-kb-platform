@@ -60,6 +60,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           <option value="admin_cache">admin_cache</option>
           <option value="admin_task">admin_task</option>
           <option value="admin_system_config">admin_system_config</option>
+          <option value="admin_category">admin_category</option>
         </select>
       </label>
       <label className="flex flex-col gap-1 text-xs">
