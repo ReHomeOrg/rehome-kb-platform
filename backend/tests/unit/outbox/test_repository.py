@@ -89,3 +89,56 @@ async def test_record_failure_truncates_long_error() -> None:
     flat = list(compiled.params.values())
     truncated = next(v for v in flat if isinstance(v, str) and v.startswith("X"))
     assert len(truncated) == 2000
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_flushed_emits_filtered_delete() -> None:
+    """`hard_delete_flushed` issues DELETE с filter `flushed_at IS NOT NULL`
+    + `flushed_at < cutoff` (ADR-0026 Slice 4)."""
+    from datetime import timedelta
+
+    session = _session_stub()
+    result = MagicMock()
+    result.rowcount = 3
+    session.execute = AsyncMock(return_value=result)
+    repo = OutboxRepository(session)
+    count = await repo.hard_delete_flushed(retention=timedelta(days=30))
+    assert count == 3
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile()).lower()
+    assert "delete from outbox" in sql
+    assert "flushed_at is not null" in sql
+    assert "flushed_at <" in sql
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_flushed_returns_zero_when_no_match() -> None:
+    """rowcount=0 path — when nothing matches retention cutoff."""
+    from datetime import timedelta
+
+    session = _session_stub()
+    result = MagicMock()
+    result.rowcount = 0
+    session.execute = AsyncMock(return_value=result)
+    repo = OutboxRepository(session)
+    assert await repo.hard_delete_flushed(retention=timedelta(days=30)) == 0
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_flushed_uses_explicit_now() -> None:
+    """Caller may inject `now` для deterministic tests."""
+    from datetime import UTC, datetime, timedelta
+
+    session = _session_stub()
+    result = MagicMock()
+    result.rowcount = 0
+    session.execute = AsyncMock(return_value=result)
+    repo = OutboxRepository(session)
+    fixed = datetime(2026, 1, 1, tzinfo=UTC)
+    await repo.hard_delete_flushed(retention=timedelta(days=30), now=fixed)
+    compiled = session.execute.call_args.args[0].compile(
+        compile_kwargs={"literal_binds": False}
+    )
+    bound = list(compiled.params.values())
+    cutoff = fixed - timedelta(days=30)
+    assert cutoff in bound

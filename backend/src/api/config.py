@@ -113,6 +113,26 @@ class Settings(BaseSettings):
     # Hard cap на batch size — anti-DoS если outbox grows unbounded.
     outbox_drainer_batch_size: int = Field(default=100, alias="OUTBOX_DRAINER_BATCH_SIZE")
 
+    # Outbox cleanup worker (ADR-0026 Slice 4, open-question #4 — 30-day
+    # retention). Mirrors webhook/chat cleanup pattern. Только flushed rows
+    # (`flushed_at IS NOT NULL`) удаляются; unflushed остаются для drainer
+    # retry. Default disabled — операции включают при выкатке outbox path.
+    outbox_cleanup_worker_enabled: bool = Field(
+        default=False, alias="OUTBOX_CLEANUP_WORKER_ENABLED"
+    )
+    outbox_cleanup_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        alias="OUTBOX_CLEANUP_RETENTION_DAYS",
+    )
+    outbox_cleanup_poll_interval_seconds: float = Field(
+        default=86400.0,
+        ge=60.0,
+        le=604800.0,
+        alias="OUTBOX_CLEANUP_POLL_INTERVAL_SECONDS",
+    )
+
     # Observability (#108). `/metrics` endpoint включается явно — safe-by-default
     # для случая, когда reverse-proxy ещё не настроен фильтровать его наружу.
     # MetricsMiddleware всегда работает (counter/histogram дешёвые); только
