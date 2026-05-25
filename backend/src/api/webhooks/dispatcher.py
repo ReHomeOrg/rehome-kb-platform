@@ -13,14 +13,11 @@ subscriber синхронно в request hot path) удалён — at-least-onc
 delivery теперь invariant архитектуры, не optional fast path.
 """
 
-import logging
 from typing import Any
 
 from fastapi import Depends
 
 from src.api.outbox.repository import OutboxRepository, get_outbox_repository
-
-logger = logging.getLogger(__name__)
 
 
 class WebhookEventDispatcher:
