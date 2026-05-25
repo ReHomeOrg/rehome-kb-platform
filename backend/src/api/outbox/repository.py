@@ -61,11 +61,7 @@ class OutboxRepository:
 
     async def mark_flushed(self, row_id: UUID) -> None:
         """Set flushed_at=now() — drainer вызывает после successful fan-out."""
-        stmt = (
-            update(OutboxRow)
-            .where(OutboxRow.id == row_id)
-            .values(flushed_at=datetime.now(UTC))
-        )
+        stmt = update(OutboxRow).where(OutboxRow.id == row_id).values(flushed_at=datetime.now(UTC))
         await self._session.execute(stmt)
 
     async def record_failure(

@@ -45,6 +45,7 @@ def _override_create(monkeypatch: pytest.MonkeyPatch, article: Article) -> None:
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -64,6 +65,7 @@ def _override_patch(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -91,6 +93,7 @@ def _override_update(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
