@@ -260,6 +260,12 @@ async def create_review(
     Backlog: добавить FK + validation после landing'а эпика.
 
     После INSERT — пересчёт `collaborators.rating`.
+
+    ADR-0026 Slice 2: review + rating UPDATE + audit + outbox.enqueue
+    (если enabled) → single atomic commit. Закрывает ФЗ-152 §22 invariant
+    для review creation path. Раньше webhook fire'ился ПОСЛЕ commit'а →
+    crash window между commit и dispatch — теперь устранён через outbox
+    routing (когда `OUTBOX_DRAINER_ENABLED=True`).
     """
     allowed_groups = compute_visible_groups(access_levels)
     collab = await _check_collaborator_visible(session, collaborator_id, allowed_groups)
@@ -293,12 +299,13 @@ async def create_review(
         resource_id=str(review.id),
         metadata={"collaborator_id": str(collaborator_id), "rating": payload.rating},
     )
-    await session.commit()
 
     # #225 / ТЗ §5.1: fire `collaborator.review.posted`. Payload содержит
     # ТОЛЬКО rating + collaborator_id + review_id (без comment text — comment
     # потенциально содержит ПДн / sensitive feedback; subscribers идут в
     # KB через GET /reviews если им нужен текст).
+    # ADR-0026 Slice 2: dispatch ДО commit'а — outbox.enqueue в same session
+    # (atomic с review + audit). Legacy path: best-effort fan-out.
     await webhook_dispatcher.dispatch(
         event_type=WebhookEvent.COLLABORATOR_REVIEW_POSTED.value,
         payload={
@@ -308,6 +315,10 @@ async def create_review(
             "created_at": review.created_at.isoformat(),
         },
     )
+
+    # Single atomic commit — review + rating UPDATE + audit + (outbox row
+    # если enabled). Exception на любом из шагов выше → rollback всё.
+    await session.commit()
     return _to_view(review)
 
 
