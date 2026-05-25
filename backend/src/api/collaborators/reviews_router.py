@@ -261,11 +261,10 @@ async def create_review(
 
     После INSERT — пересчёт `collaborators.rating`.
 
-    ADR-0026 Slice 2: review + rating UPDATE + audit + outbox.enqueue
-    (если enabled) → single atomic commit. Закрывает ФЗ-152 §22 invariant
-    для review creation path. Раньше webhook fire'ился ПОСЛЕ commit'а →
-    crash window между commit и dispatch — теперь устранён через outbox
-    routing (когда `OUTBOX_DRAINER_ENABLED=True`).
+    ADR-0026: review + rating UPDATE + audit + outbox.enqueue → single
+    atomic commit. Закрывает ФЗ-152 §22 invariant для review creation
+    path. Раньше webhook fire'ился ПОСЛЕ commit'а → crash window между
+    commit и dispatch — теперь устранён через outbox path.
     """
     allowed_groups = compute_visible_groups(access_levels)
     collab = await _check_collaborator_visible(session, collaborator_id, allowed_groups)

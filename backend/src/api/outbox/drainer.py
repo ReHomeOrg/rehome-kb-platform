@@ -8,9 +8,10 @@ singleton pattern (per ADR-0020 / #350):
 - `init_drainer(session_factory, settings)` в FastAPI lifespan startup.
 - `close_drainer()` в shutdown — signal + cancel + await graceful exit.
 
-При `outbox_drainer_enabled=False` drainer не start'ится — legacy direct
-dispatch path в `WebhookEventDispatcher.dispatch` остаётся active
-(см. webhooks/dispatcher.py).
+При `outbox_drainer_enabled=False` drainer не start'ится — outbox rows
+накапливаются в таблице, но никто их не flush'ит (split-pod deploy, где
+drainer запускается отдельным процессом). Default `True` — single-process
+deployment получает webhook delivery «из коробки».
 """
 
 from __future__ import annotations
@@ -132,8 +133,9 @@ def init_drainer(
 ) -> OutboxDrainer | None:
     """Initialize drainer singleton + start background task.
 
-    No-op (returns None) если `outbox_drainer_enabled=False` —
-    legacy direct dispatch path сохраняется. Idempotent при repeat call.
+    No-op (returns None) если `outbox_drainer_enabled=False` — outbox rows
+    накапливаются, но не flush'атся (используется когда drainer работает
+    в отдельном pod'е). Idempotent при repeat call.
     """
     global _drainer_instance
     if not settings.outbox_drainer_enabled:

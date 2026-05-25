@@ -434,14 +434,10 @@ async def create_article(
 
     Idempotency-Key (E5.1 #44): retry-safe replay при тот же body.
 
-    ADR-0026 Slice 1: article + version + audit + outbox.enqueue (если
-    `OUTBOX_DRAINER_ENABLED=True`) — atomic transaction. Single commit
-    в конце; rollback всё на любой exception → ФЗ-152 §22 audit-trail
-    completeness invariant. Webhook delivery — через outbox path drainer'а
-    (decoupled от request hot path).
-
-    Legacy path (`OUTBOX_DRAINER_ENABLED=False`): article + audit atomic,
-    webhook dispatch — best-effort (current MVP behavior).
+    ADR-0026: article + version + audit + outbox.enqueue — atomic
+    transaction. Single commit в конце; rollback всё на любой exception
+    → ФЗ-152 §22 audit-trail completeness invariant. Webhook delivery —
+    через outbox path drainer'а (decoupled от request hot path).
     """
     # E5.1: если idempotency replay есть — возвращаем cached response.
     # `JSONResponse` напрямую — bypass'ит `response_model=ArticleResponse`
@@ -478,10 +474,8 @@ async def create_article(
         metadata={"access_level": article.access_level},
     )
 
-    # E5.3 #91: fire webhook event если создаём сразу PUBLISHED.
-    # При outbox_enabled=True — single outbox.enqueue в same session
-    # (atomic с article + audit). При =False — legacy direct fan-out
-    # (each delivery_repo.enqueue commits — fragmented atomicity).
+    # E5.3 #91: fire webhook event если создаём сразу PUBLISHED. Slice 4b
+    # invariant — outbox.enqueue в same session atomic с article + audit.
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=None)
 
     # Single commit: persist article + version + audit + (outbox row если
