@@ -22,8 +22,13 @@
   5. `audit_repo.record` refactor — accept external session (drop
      inner flush; caller commits).
   6. Drainer env-gated like webhook worker (`OUTBOX_DRAINER_ENABLED`).
-     При disabled — direct dispatch fallback в `webhook_dispatcher`
-     для backward compat.
+     **Update 2026-05-25 post-Slice-4b** (Architect approved «option 2»):
+     legacy direct-dispatch fallback УДАЛЁН — dispatcher всегда пишет в
+     outbox. Env-flag default flipped `False → True` для preserve'а
+     webhook delivery semantics в single-process deployments. При
+     `=False` (split-pod deploy) outbox rows накапливаются на API-pod'е,
+     drainer-pod их flush'ит. Direct-dispatch fallback больше не
+     существует — это намеренное упрощение архитектуры (PR #331).
   7. Existing direct-dispatch callers (chat /escalate, vault emergency
      unlock) — migrated в Slice 2-3; до того работают через legacy path.
 

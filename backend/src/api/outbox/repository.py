@@ -47,8 +47,11 @@ class OutboxRepository:
     async def fetch_unflushed(self, *, limit: int) -> list[OutboxRow]:
         """Drainer-side: returns unflushed rows (oldest first).
 
-        FOR UPDATE SKIP LOCKED — позволяет concurrent drainer instances
-        не конкурировать; backlog (single-instance MVP OK).
+        Single-instance MVP: SELECT без `FOR UPDATE SKIP LOCKED`. Если завтра
+        понадобится поднять второй drainer pod — нужно добавить
+        `.with_for_update(skip_locked=True)` к stmt'у, иначе обе инстанции
+        попытаются flush одни и те же rows (race на `mark_flushed` UPDATE).
+        Backlog.
         """
         stmt = (
             select(OutboxRow)
