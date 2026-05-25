@@ -94,6 +94,9 @@ class CategoryRepository:
             )
             .select_from(Category)
             .outerjoin(Article, Article.category == Category.slug)
+            # ADR-0024: filter archived из public tree. Admin UI использует
+            # отдельный endpoint /admin/categories с include_archived toggle.
+            .where(Category.archived_at.is_(None))
             .group_by(Category.id)
             .order_by(Category.slug.asc())
         )
