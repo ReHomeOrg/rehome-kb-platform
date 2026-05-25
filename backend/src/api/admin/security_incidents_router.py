@@ -27,6 +27,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.security_incidents_repository import (
@@ -50,6 +51,7 @@ from src.api.auth.dependency import (
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 router = APIRouter(prefix="/admin/security-incidents", tags=["Admin"])
 
@@ -165,7 +167,8 @@ async def update_security_incident(
     repo: SecurityIncidentRepository = Depends(get_security_incident_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
-) -> SecurityIncidentView:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """OpenAPI §updateSecurityIncident.
 
     Updatable: status / resolution_note / rkn_notified_at. Identity-bound
@@ -175,8 +178,18 @@ async def update_security_incident(
     Terminal status transition (RESOLVED/FALSE_POSITIVE) — set'ит
     `resolved_at` если ещё None. Reverse (terminal → OPEN) — 409
     (incident lifecycle invariant).
+
+    Idempotency-Key (UUID header, ADR-0025): повторный request с тем же
+    key + body → replay cached response без duplicate audit row.
     """
     _require_staff_admin(access_levels)
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
 
     incident = await repo.get_by_id(incident_id)
     if incident is None:
@@ -184,7 +197,9 @@ async def update_security_incident(
 
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
-        return SecurityIncidentView.model_validate(incident)
+        body = SecurityIncidentView.model_validate(incident).model_dump(mode="json")
+        await idempotency.save(status_code=200, body=body)
+        return JSONResponse(status_code=200, content=body)
 
     try:
         await repo.update(
@@ -205,7 +220,9 @@ async def update_security_incident(
         metadata={"updated_fields": sorted(updates.keys())},
     )
     await session.commit()
-    return SecurityIncidentView.model_validate(incident)
+    body = SecurityIncidentView.model_validate(incident).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 __all__ = ["router"]

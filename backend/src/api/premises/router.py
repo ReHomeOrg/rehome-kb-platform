@@ -353,13 +353,26 @@ async def patch_premises_card(
     audit_repo: AuditRepository = Depends(get_audit_repository),
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     session: AsyncSession = Depends(get_session),
-) -> PremisesView:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """Partial update. Только non-None поля попадают в patch dict.
 
     Empty body (все поля None) — no-op, возвращает текущее состояние с
     updated_at touch — это намеренно (used as "version refresh" by
     clients).
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit row или webhook fire.
     """
+    from fastapi.responses import JSONResponse
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     patch_dict = payload.model_dump(exclude_none=True)
     card = await repo.update(slug, patch=patch_dict)
     if card is None:
@@ -387,7 +400,9 @@ async def patch_premises_card(
                 "updated_at": card.updated_at.isoformat(),
             },
         )
-    return project_for_scope(card, access_levels)
+    body = project_for_scope(card, access_levels).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 @router.delete(

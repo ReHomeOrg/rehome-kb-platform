@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.api.admin.llm_providers import build_provider_catalog
 from src.api.admin.schemas import (
@@ -56,6 +57,7 @@ from src.api.auth.dependency import (
 from src.api.auth.mfa import require_step_up_mfa
 from src.api.auth.scope import AccessLevel
 from src.api.config import Settings, get_settings
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -256,7 +258,8 @@ async def update_system_config(
     repo: SystemConfigRepository = Depends(get_system_config_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     mfa_claims: dict[str, Any] = Depends(require_step_up_mfa),
-) -> SystemConfig:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """`PATCH /api/v1/admin/system-config` (#264, ADR-0019).
 
     Updates allow-listed mutable keys (см. `MUTABLE_KEYS` в repo).
@@ -265,8 +268,19 @@ async def update_system_config(
     X-MFA-Token: required header containing Keycloak step-up token с
     `acr=2` (см. `auth/mfa.py`). 403 если missing / invalid / wrong sub /
     insufficient acr.
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit row или webhook fire.
     """
     _require_staff_admin(access_levels)
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     actor_sub = str(claims.get("sub", "unknown"))
 
     updates = payload.model_dump(exclude_unset=True)
@@ -286,7 +300,10 @@ async def update_system_config(
         },
     )
 
-    return build_system_config(settings, overlay=new_overlay)
+    result = build_system_config(settings, overlay=new_overlay)
+    body = result.model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.cursor import decode_cursor, encode_cursor
@@ -63,6 +64,7 @@ from src.api.collaborators.schemas import (
     SuspendRequest,
 )
 from src.api.db import get_session
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 from src.api.webhooks.dispatcher import (
     WebhookEventDispatcher,
     get_webhook_event_dispatcher,
@@ -302,8 +304,20 @@ async def patch_collaborator(
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
-) -> CollaboratorPublic | CollaboratorInternal | CollaboratorAdmin:
-    """`PATCH /api/v1/collaborators/{id}` — partial update, STAFF+ only."""
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
+    """`PATCH /api/v1/collaborators/{id}` — partial update, STAFF+ only.
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit row.
+    """
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     allowed_groups = compute_visible_groups(access_levels)
     c = await repo.get_by_id(collaborator_id, allowed_groups)
     if c is None:
@@ -323,7 +337,9 @@ async def patch_collaborator(
     )
     await session.commit()
 
-    return _serialize_for_scope(c, access_levels)
+    body = _serialize_for_scope(c, access_levels).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 @router.delete(
