@@ -2,14 +2,30 @@
 
 ## Статус
 
-- [x] **Предложено** (awaiting Architect approval)
-- [ ] Принято
+- [ ] Предложено
+- [x] **Принято** (Вариант C) — 2026-05-25 Architect Evgeniy
 - [ ] Заменено ADR-MMMM
 - [ ] Отклонено
 
 - **Дата:** 2026-05-25
 - **Автор:** Агент-Разработчик (Claude Code) под управлением Архитектора Evgeniy
-- **Согласовано Архитектором:** **нет**, awaiting approval
+- **Согласовано Архитектором:** **да**, 2026-05-25
+- **Approve note:** Architect approved Вариант C (transactional outbox +
+  background drainer). Open-question resolutions:
+  1. Вариант C confirmed.
+  2. Slice order: Slice 1 articles foundation → Slice 2 chat /
+     collaborators → Slice 3 vault (security scrutiny separate) →
+     Slice 4 dispatch routing cleanup.
+  3. Drainer poll interval: 5 sec default, env-configurable.
+  4. Outbox retention: 30 days for flushed rows (cleanup worker per
+     ChatCleanupWorker pattern — separate slice).
+  5. `audit_repo.record` refactor — accept external session (drop
+     inner flush; caller commits).
+  6. Drainer env-gated like webhook worker (`OUTBOX_DRAINER_ENABLED`).
+     При disabled — direct dispatch fallback в `webhook_dispatcher`
+     для backward compat.
+  7. Existing direct-dispatch callers (chat /escalate, vault emergency
+     unlock) — migrated в Slice 2-3; до того работают через legacy path.
 
 ## Контекст
 
