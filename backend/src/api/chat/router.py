@@ -18,6 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.system_config_repository import (
     SystemConfigRepository,
@@ -59,6 +60,7 @@ from src.api.chat.system_prompt import (
     resolve_system_prompt,
 )
 from src.api.config import Settings, get_settings
+from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult
 from src.api.search.repository import RetrievalHit
 from src.api.search.retrieval import RetrievalService, get_retrieval_service
@@ -519,17 +521,24 @@ async def post_escalate(
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     idempotency: IdempotencyResult = Depends(process_chat_idempotency_key),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """`POST /chat/sessions/{id}/escalate` — создать ticket эскалации.
 
     Body optional: пустой POST → priority='normal', reason=None.
 
-    Owner-gate через `create_escalation`. 404 mask если session не owned.
+    Owner-gate через `create_escalation_atomic`. 404 mask если session
+    не owned.
 
     Multiple escalations allowed — каждый POST создаёт новый ticket с
     уникальным id. Idempotency-Key (UUID header) делает endpoint retry-
     safe: повторный request с тем же key + body возвращает cached response
     (тот же ticket_id), no duplicate ticket / audit row / webhook fire.
+
+    ADR-0026 Slice 2: escalation + audit + outbox.enqueue (если outbox
+    enabled) → atomic single transaction. session.commit в конце handler
+    persistит всё или rollback'ит всё. ФЗ-152 §22 invariant для chat
+    escalation closed.
 
     Subscribers (helpdesk / on-call systems) реализуют ticket routing
     у себя — через `chat.escalated` webhook (#91, см. ниже). Backend не
@@ -550,7 +559,9 @@ async def post_escalate(
     reason = payload.reason if payload is not None else None
     priority = payload.priority if payload is not None else "normal"
 
-    escalation = await repo.create_escalation(
+    # ADR-0026 Slice 2: atomic — escalation + audit + outbox в одной
+    # транзакции; commit в конце.
+    escalation = await repo.create_escalation_atomic(
         session_id,
         user_id=user_id,
         session_token=session_token,
@@ -576,6 +587,8 @@ async def post_escalate(
     )
 
     # E5.3 #91: fire chat.escalated webhook.
+    # outbox_enabled=True → outbox.enqueue в same session (atomic с
+    # escalation + audit); =False → legacy direct fan-out (best-effort).
     await webhook_dispatcher.dispatch(
         event_type="chat.escalated",
         payload={
@@ -585,6 +598,11 @@ async def post_escalate(
             "requested_at": escalation.requested_at.isoformat(),
         },
     )
+
+    # Single commit — atomic flush escalation + version + audit + (outbox
+    # row если enabled). Exception на любом из шагов выше → rollback всё.
+    await session.commit()
+    await session.refresh(escalation)
 
     result = EscalateResponse(
         ticket_id=escalation.id,

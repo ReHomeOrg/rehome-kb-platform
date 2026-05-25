@@ -341,6 +341,37 @@ class ChatRepository:
         вызов создаёт новый ticket с уникальным id. Idempotency-Key
         обрабатывается на router-level через `process_chat_idempotency_key`
         (см. `chat/idempotency.py`).
+
+        Legacy commit semantics — caller'ы (handler) теперь могут управлять
+        транзакцией через `create_escalation_atomic` (ADR-0026 Slice 2).
+        """
+        escalation = await self.create_escalation_atomic(
+            session_id,
+            user_id=user_id,
+            session_token=session_token,
+            reason=reason,
+            priority=priority,
+        )
+        if escalation is None:
+            return None
+        await self._session.commit()
+        await self._session.refresh(escalation)
+        return escalation
+
+    async def create_escalation_atomic(
+        self,
+        session_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        session_token: UUID | None = None,
+        reason: str | None = None,
+        priority: str = "normal",
+    ) -> ChatEscalation | None:
+        """ADR-0026 Slice 2 — adds escalation row без commit'а.
+
+        Caller (`chat/router.py::post_escalate`) wraps в atomic transaction
+        вместе с audit + outbox.enqueue → ФЗ-152 §22 invariant для chat
+        escalation path.
         """
         session = await self.get_session_by_owner(
             session_id, user_id=user_id, session_token=session_token
@@ -356,8 +387,6 @@ class ChatRepository:
         )
         self._session.add(escalation)
         await self._session.flush()
-        await self._session.refresh(escalation)
-        await self._session.commit()
         return escalation
 
 
