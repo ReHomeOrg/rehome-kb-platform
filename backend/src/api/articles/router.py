@@ -780,7 +780,8 @@ async def patch_article(
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     indexer: IndexerService = Depends(get_indexer_service),
-) -> ArticleResponse:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """Partial-update: меняет только переданные поля.
 
     Доступные поля (см. `ArticlePatch`): title, body_markdown, tags, status.
@@ -794,7 +795,19 @@ async def patch_article(
     3. Source-mask в `repo.patch`: writer не видит источник → 404.
 
     Empty payload `{}` → 200, no-op (НЕ создаёт версию, идемпотентно).
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit / webhook fire / reindex.
     """
+    from fastapi.responses import JSONResponse
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     result = await repo.patch(slug, payload, access_levels, actor_sub=claims["sub"])
     if result is None:
         raise HTTPException(
@@ -829,7 +842,9 @@ async def patch_article(
     changed_fields = sorted(payload.model_dump(exclude_unset=True).keys())
     await _dispatch_article_updated(webhook_dispatcher, article, changed_fields=changed_fields)
     await _maybe_index_article(indexer, article)
-    return ArticleResponse.model_validate(article)
+    body = ArticleResponse.model_validate(article).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 @router.post(

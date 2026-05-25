@@ -259,20 +259,34 @@ async def update_kb_user(
     repo: KbUserRepository = Depends(get_kb_user_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
-) -> KbUserView:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """PATCH per OpenAPI §updateKbUser.
 
     Partial update: только переданные поля попадают в SQL UPDATE.
     Empty body (всё None) — no-op (idempotent), audit row не пишется.
+
+    Idempotency-Key (UUID header, ADR-0025): повторный request с тем же
+    key + body → replay cached response без duplicate audit row.
     """
     _require_staff_admin(access_levels)
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
+
     user = await repo.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="KbUser not found")
 
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
-        return KbUserView.model_validate(user)
+        body = KbUserView.model_validate(user).model_dump(mode="json")
+        await idempotency.save(status_code=200, body=body)
+        return JSONResponse(status_code=200, content=body)
 
     await repo.update_fields(user, updates)
     await audit.record(
@@ -283,7 +297,9 @@ async def update_kb_user(
         metadata={"updated_fields": sorted(updates.keys())},
     )
     await session.commit()
-    return KbUserView.model_validate(user)
+    body = KbUserView.model_validate(user).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 # ---------------------------------------------------------------------------
