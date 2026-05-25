@@ -77,6 +77,7 @@ def test_post_without_idempotency_key_is_noop(
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -178,6 +179,7 @@ def test_post_with_idempotency_key_first_call_creates_and_saves(
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -269,6 +271,7 @@ def test_post_with_idempotency_key_replay_returns_cached_response(
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()
@@ -397,6 +400,7 @@ def test_lock_acquired_before_lookup(
 
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()

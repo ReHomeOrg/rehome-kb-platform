@@ -134,9 +134,7 @@ class CategoryAdminRepository:
                     raise CycleDetectedError("parent_id не может равняться id")
                 parent = await self.get_by_id(parent_id)
                 if parent is None:
-                    raise ParentNotFoundError(
-                        f"parent_id {parent_id} не существует"
-                    )
+                    raise ParentNotFoundError(f"parent_id {parent_id} не существует")
                 if parent.archived_at is not None:
                     raise ArchivedParentError(
                         f"parent_id {parent_id} — archived; нельзя set'ить как родителя"

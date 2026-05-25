@@ -27,6 +27,7 @@ def audit_mock() -> Iterator[AsyncMock]:
 def _override_session() -> None:
     async def _empty_session() -> Any:
         from unittest.mock import AsyncMock, MagicMock
+
         _sess = MagicMock()
         _sess.commit = AsyncMock()
         _sess.rollback = AsyncMock()

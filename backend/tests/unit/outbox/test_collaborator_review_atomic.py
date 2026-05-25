@@ -54,9 +54,7 @@ def session_mock() -> Iterator[MagicMock]:
     update_result = MagicMock()
 
     # Order: SELECT collab visible → SELECT AVG (recompute) → UPDATE rating.
-    sess.execute = AsyncMock(
-        side_effect=[select_collab_result, avg_result, update_result]
-    )
+    sess.execute = AsyncMock(side_effect=[select_collab_result, avg_result, update_result])
     sess._test_collab = collab  # для test access
 
     async def _factory() -> Any:
