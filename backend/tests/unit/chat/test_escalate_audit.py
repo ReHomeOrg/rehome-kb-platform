@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -54,9 +55,27 @@ def override_repo() -> Iterator[AsyncMock]:
     create = AsyncMock(return_value=None)
     repo = ChatRepository.__new__(ChatRepository)
     repo.create_escalation = create  # type: ignore[method-assign]
+    # ADR-0026 Slice 2.
+    repo.create_escalation_atomic = create  # type: ignore[method-assign]
     app.dependency_overrides[get_chat_repository] = lambda: repo
+
+    # Session mock с поддержкой commit/refresh для atomic flow.
+    from src.api.db import get_session
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session.refresh = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    async def _session_factory() -> Any:
+        yield session
+
+    app.dependency_overrides[get_session] = _session_factory
     yield create
     app.dependency_overrides.pop(get_chat_repository, None)
+    app.dependency_overrides.pop(get_session, None)
 
 
 def test_escalate_auth_writes_audit_with_jwt_sub(
