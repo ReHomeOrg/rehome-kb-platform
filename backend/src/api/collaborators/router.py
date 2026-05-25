@@ -275,12 +275,16 @@ async def create_collaborator(
             "status": c.status,
         },
     )
-    await session.commit()
 
-    # #225 / ТЗ §5.1: fire `collaborator.created` webhook event.
+    # ADR-0026 Slice 3: dispatch ДО commit'а — `outbox.enqueue` в same
+    # session atomic с collaborator + audit. Legacy path (outbox disabled)
+    # сохраняет fan-out best-effort. #225 / ТЗ §5.1: `collaborator.created`.
     await _dispatch_lifecycle_event(
         webhook_dispatcher, event=WebhookEvent.COLLABORATOR_CREATED, collaborator=c
     )
+
+    # Single atomic commit — collaborator + audit + (outbox row если enabled).
+    await session.commit()
 
     # STAFF+ always gets Internal/Admin variant (inherits Public).
     return _serialize_for_scope(c, access_levels)
@@ -378,8 +382,8 @@ async def archive_collaborator(
         resource_id=str(c.id),
         metadata={"previous_status": previous_status},
     )
-    await session.commit()
 
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     # #225 / ТЗ §5.1: fire `collaborator.archived`.
     await _dispatch_lifecycle_event(
         webhook_dispatcher,
@@ -387,6 +391,8 @@ async def archive_collaborator(
         collaborator=c,
         extras={"previous_status": previous_status},
     )
+
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -455,8 +461,8 @@ async def activate_collaborator(
         resource_id=str(c.id),
         metadata={"previous_status": previous_status},
     )
-    await session.commit()
 
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     # #225 / ТЗ §5.1: fire `collaborator.activated`.
     await _dispatch_lifecycle_event(
         webhook_dispatcher,
@@ -464,6 +470,8 @@ async def activate_collaborator(
         collaborator=c,
         extras={"previous_status": previous_status},
     )
+
+    await session.commit()
     return _serialize_for_scope(c, access_levels)
 
 
@@ -522,8 +530,8 @@ async def suspend_collaborator(
             "until": payload.until,
         },
     )
-    await session.commit()
 
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     # #225 / ТЗ §5.1: fire `collaborator.suspended`.
     await _dispatch_lifecycle_event(
         webhook_dispatcher,
@@ -535,6 +543,8 @@ async def suspend_collaborator(
             "until": payload.until,
         },
     )
+
+    await session.commit()
     return _serialize_for_scope(c, access_levels)
 
 
@@ -623,8 +633,8 @@ async def onboard_collaborator(
             "message_provided": payload.message is not None,
         },
     )
-    await session.commit()
 
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     # #225 / ТЗ §5.1: fire `collaborator.onboarding.submitted`. Payload не
     # содержит ИНН / контакты — anti-PII (subscriber может быть external).
     await _dispatch_lifecycle_event(
@@ -636,6 +646,8 @@ async def onboard_collaborator(
             "portal_access_requested": payload.portal_access_level_requested,
         },
     )
+
+    await session.commit()
 
     return OnboardingResponse(
         id=c.id,
@@ -727,8 +739,8 @@ async def change_portal_access(
         resource_id=str(c.id),
         metadata={"from": current, "to": target, "reason": payload.reason},
     )
-    await session.commit()
 
+    # ADR-0026 Slice 3: dispatch ДО commit'а → atomic.
     # #225 / ТЗ §5.1: fire `collaborator.portal_access.changed`.
     await _dispatch_lifecycle_event(
         webhook_dispatcher,
@@ -740,4 +752,6 @@ async def change_portal_access(
             "reason": payload.reason,
         },
     )
+
+    await session.commit()
     return _serialize_for_scope(c, access_levels)
