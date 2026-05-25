@@ -251,6 +251,27 @@ class ArticleRepository:
         `actor_sub` — Keycloak `sub` claim писателя, для audit (E4.1) и
         version (E2.3). Router передаёт из `claims["sub"]` после
         `require_authenticated`.
+
+        Legacy callers получают commit внутри. ADR-0026 Slice 1 path —
+        `create_atomic` (no commit; caller wraps audit + outbox в same
+        transaction).
+        """
+        article = await self.create_atomic(payload, actor_sub=actor_sub)
+        await self._session.commit()
+        await self._session.refresh(article)
+        return article
+
+    async def create_atomic(
+        self,
+        payload: ArticleInput,
+        *,
+        actor_sub: str,
+    ) -> Article:
+        """Same logic as `create` но без commit'а (ADR-0026 Slice 1).
+
+        Caller commit'ит в same transaction вместе с audit row + outbox
+        enqueue → atomicity guarantee для ФЗ-152 §22 audit-trail
+        completeness invariant.
         """
         article = Article(
             slug=payload.slug,
@@ -280,13 +301,15 @@ class ArticleRepository:
                 summary="Article created",
             )
             self._session.add(version_row)
-            await self._session.commit()
+            # NB: version_row не flush'ится здесь — caller (session.commit
+            # в handler или внутри `create()` для legacy callers) flushes
+            # на commit. Это позволяет audit + outbox писать в same session
+            # с одним финальным commit per ADR-0026 Slice 1.
         except IntegrityError as exc:
             await self._session.rollback()
             if "uq_articles_slug" in str(exc.orig) or "articles_slug_key" in str(exc.orig):
                 raise SlugConflictError(payload.slug) from exc
             raise
-        await self._session.refresh(article)
         return article
 
     async def update(

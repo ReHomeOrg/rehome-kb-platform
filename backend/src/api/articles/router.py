@@ -7,6 +7,7 @@ write) добавляются в следующих эпиках через до
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.articles.audit import (
     log_article_archived,
@@ -58,6 +59,7 @@ from src.api.auth.dependency import (
 from src.api.auth.exceptions import ForbiddenError, UnauthorizedError
 from src.api.auth.scope import AccessLevel
 from src.api.config import get_settings
+from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
 from src.api.search.indexer import IndexerService, get_indexer_service
 from src.api.webhooks.dispatcher import (
@@ -419,6 +421,7 @@ async def create_article(
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     indexer: IndexerService = Depends(get_indexer_service),
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     """Создаёт статью.
 
@@ -429,14 +432,16 @@ async def create_article(
        пытается создать статью с access_level, к которому сам не имеет
        доступа (ADR-0003 write-extension).
 
-    Idempotency-Key (E5.1 #44): если header `Idempotency-Key: <UUID>` есть
-    в request — `process_idempotency_key` либо replay'ит cached response
-    (если retry с тем же body), либо 409 (retry с другим body), либо
-    готовит save-callback для cache'ирования после execution.
+    Idempotency-Key (E5.1 #44): retry-safe replay при тот же body.
 
-    Audit log: после успешного commit'а — `articles.created` с метаданными
-    (БЕЗ body_markdown/title — ФЗ-152). Best-effort на E4.1; E4.x будет
-    писать audit в той же транзакции через DB-таблицу.
+    ADR-0026 Slice 1: article + version + audit + outbox.enqueue (если
+    `OUTBOX_DRAINER_ENABLED=True`) — atomic transaction. Single commit
+    в конце; rollback всё на любой exception → ФЗ-152 §22 audit-trail
+    completeness invariant. Webhook delivery — через outbox path drainer'а
+    (decoupled от request hot path).
+
+    Legacy path (`OUTBOX_DRAINER_ENABLED=False`): article + audit atomic,
+    webhook dispatch — best-effort (current MVP behavior).
     """
     # E5.1: если idempotency replay есть — возвращаем cached response.
     # `JSONResponse` напрямую — bypass'ит `response_model=ArticleResponse`
@@ -459,17 +464,12 @@ async def create_article(
         dispatcher=webhook_dispatcher,
     )
 
-    article = await repo.create(payload, actor_sub=claims["sub"])
+    # ADR-0026 Slice 1: atomic transaction — article + audit + (optionally
+    # outbox.enqueue для webhook event). create_atomic flushes article без
+    # commit'а; audit + dispatch (если outbox enabled) добавляются в same
+    # session; final commit персистит всё или rollback'ит всё.
+    article = await repo.create_atomic(payload, actor_sub=claims["sub"])
 
-    # NB: audit log пишется в отдельную транзакцию ПОСЛЕ commit'а article'а
-    # (article repo commit'ит внутри). Crash window между commit'ами ещё
-    # существует — strict outbox требует repo refactor (отдельный backlog).
-    # Legacy stdout logger.info оставляем для дебага/grep'а.
-    log_article_created(
-        actor_sub=claims["sub"],
-        slug=article.slug,
-        access_level=article.access_level,
-    )
     await audit_repo.record(
         actor_sub=claims["sub"],
         action=ACTION_ARTICLES_CREATED,
@@ -479,8 +479,25 @@ async def create_article(
     )
 
     # E5.3 #91: fire webhook event если создаём сразу PUBLISHED.
+    # При outbox_enabled=True — single outbox.enqueue в same session
+    # (atomic с article + audit). При =False — legacy direct fan-out
+    # (each delivery_repo.enqueue commits — fragmented atomicity).
     await _maybe_dispatch_article_status_event(webhook_dispatcher, article, old_status=None)
-    # ADR-0010 #130: RAG indexer (gated на RAG_ENABLED).
+
+    # Single commit: persist article + version + audit + (outbox row если
+    # enabled). При exception на любом из шагов выше — rollback всё.
+    await session.commit()
+    await session.refresh(article)
+
+    # Post-commit side effects (cannot fail/rollback the transaction).
+    log_article_created(
+        actor_sub=claims["sub"],
+        slug=article.slug,
+        access_level=article.access_level,
+    )
+    # ADR-0010 #130: RAG indexer (gated на RAG_ENABLED). Async dispatch —
+    # failures here не roll back'ят article (acceptable: indexer retries
+    # на reindex_all job).
     await _maybe_index_article(indexer, article)
 
     location = f"/api/v1/articles/{article.slug}"
