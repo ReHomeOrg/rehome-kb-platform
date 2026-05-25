@@ -83,9 +83,7 @@ async def test_record_failure_truncates_long_error() -> None:
     repo = OutboxRepository(session)
     huge = "X" * 5000
     await repo.record_failure(uuid4(), error=huge)
-    compiled = session.execute.call_args.args[0].compile(
-        compile_kwargs={"literal_binds": False}
-    )
+    compiled = session.execute.call_args.args[0].compile(compile_kwargs={"literal_binds": False})
     flat = list(compiled.params.values())
     truncated = next(v for v in flat if isinstance(v, str) and v.startswith("X"))
     assert len(truncated) == 2000
@@ -136,9 +134,7 @@ async def test_hard_delete_flushed_uses_explicit_now() -> None:
     repo = OutboxRepository(session)
     fixed = datetime(2026, 1, 1, tzinfo=UTC)
     await repo.hard_delete_flushed(retention=timedelta(days=30), now=fixed)
-    compiled = session.execute.call_args.args[0].compile(
-        compile_kwargs={"literal_binds": False}
-    )
+    compiled = session.execute.call_args.args[0].compile(compile_kwargs={"literal_binds": False})
     bound = list(compiled.params.values())
     cutoff = fixed - timedelta(days=30)
     assert cutoff in bound
