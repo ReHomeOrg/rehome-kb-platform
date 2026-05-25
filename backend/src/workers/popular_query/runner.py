@@ -29,13 +29,10 @@ from contextlib import AbstractAsyncContextManager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.config import get_settings
 from src.api.outbox.repository import OutboxRepository
 from src.api.search.query_log import SearchQueryLogRepository
-from src.api.webhooks.delivery_repository import WebhookDeliveryRepository
 from src.api.webhooks.dispatcher import WebhookEventDispatcher
 from src.api.webhooks.events import WebhookEvent
-from src.api.webhooks.repository import WebhookRepository
 from src.workers.popular_query.metrics import (
     DISPATCH_TOTAL,
     QUERIES_EMITTED,
@@ -109,16 +106,9 @@ class PopularQueryWorker:
                 if not popular:
                     return 0
 
-                # ADR-0026 Slice 0: dispatcher теперь signature имеет
-                # outbox_repo + outbox_enabled. Worker reads env-flag —
-                # дефолт False (legacy direct path), True → outbox routing.
-                settings = get_settings()
-                dispatcher = WebhookEventDispatcher(
-                    webhook_repo=WebhookRepository(session),
-                    delivery_repo=WebhookDeliveryRepository(session),
-                    outbox_repo=OutboxRepository(session),
-                    outbox_enabled=settings.outbox_drainer_enabled,
-                )
+                # ADR-0026 Slice 4b: dispatcher всегда пишет в outbox,
+                # drainer fan-out'ит асинхронно.
+                dispatcher = WebhookEventDispatcher(OutboxRepository(session))
                 payload = {
                     "queries": [{"query": p.query, "count": p.count} for p in popular],
                     "window_hours": self._window_hours,
