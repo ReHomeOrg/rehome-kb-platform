@@ -1,14 +1,19 @@
 """E5 webhooks end-to-end integration tests (#93).
 
-Покрывают полный pipeline: register → trigger → outbox → worker → HTTP POST →
-mark_delivered/failed/dead_letter. Запускаются с реальным Postgres + Keycloak
-через docker compose (см. CI workflow `Integration (Keycloak)`).
+Покрывают полный pipeline: register → trigger → outbox → drainer →
+webhook_deliveries → worker → HTTP POST → mark_delivered/failed/dead_letter.
+Запускаются с реальным Postgres + Keycloak через docker compose (см. CI
+workflow `Integration (Keycloak)`).
 
-Worker НЕ автостартует в uvicorn (env-flag default False). В этих тестах
-мы создаём `WebhookDeliveryWorker` instance вручную и вызываем `_run_once()`
-напрямую — это deterministically обрабатывает batch и возвращается. Это
-лучше, чем `start()` + `asyncio.sleep()`, потому что тесты остаются быстрыми
-и не flaky.
+Worker и drainer НЕ автостартуют в этих тестах (env-flag через test
+fixture). Мы создаём instance'ы вручную и вызываем `_drain_once()` /
+`_run_once()` напрямую — это deterministically обрабатывает batch и
+возвращается. Это лучше, чем `start()` + `asyncio.sleep()`, потому что
+тесты остаются быстрыми и не flaky.
+
+ADR-0026 Slice 4b note: dispatcher теперь всегда пишет в outbox; чтобы
+delivery rows появились в `webhook_deliveries`, нужен drainer pass. Тесты
+вызывают `await drainer_instance._drain_once()` перед `worker._run_once()`.
 """
 
 import asyncio
@@ -27,6 +32,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.api.config import Settings
+from src.api.outbox.drainer import OutboxDrainer
 from src.api.webhooks.signing import verify_signature
 from src.api.webhooks.worker import WebhookDeliveryWorker
 
@@ -127,6 +133,29 @@ async def worker_instance() -> AsyncIterator[WebhookDeliveryWorker]:
         await engine.dispose()
 
 
+@pytest.fixture
+async def drainer_instance() -> AsyncIterator[OutboxDrainer]:
+    """Standalone drainer для прямого вызова `_drain_once()` (ADR-0026 Slice 4b).
+
+    Dispatcher теперь всегда пишет в outbox; drainer fan-out'ит на subscribers
+    (создаёт webhook_deliveries rows). Без этой стадии worker не найдёт
+    что доставлять.
+    """
+    engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = Settings(
+        OUTBOX_DRAINER_ENABLED=False,  # singleton не start'им; manual _drain_once
+        OUTBOX_DRAINER_POLL_INTERVAL_SECONDS=1.0,
+        OUTBOX_DRAINER_BATCH_SIZE=100,
+    )
+    drainer = OutboxDrainer(session_factory=session_factory, settings=settings)
+    try:
+        yield drainer
+    finally:
+        await drainer.stop()
+        await engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # DB cleanup tracker.
 
@@ -136,8 +165,17 @@ async def cleanup() -> AsyncIterator[dict[str, list[Any]]]:
     """Collect IDs/slugs созданных в тесте; DELETE в teardown.
 
     `webhook_deliveries` имеют CASCADE FK на webhooks, поэтому достаточно
-    удалить webhooks. Articles удаляем отдельно (no FK).
+    удалить webhooks. Articles удаляем отдельно (no FK). Outbox rows
+    (ADR-0026 Slice 4b) — clear unflushed чтобы next test не подхватил
+    leftover dispatch'и.
     """
+    # Pre-test: clear unflushed outbox rows от possible previous test leakage.
+    conn = await asyncpg.connect(RAW_DSN)
+    try:
+        await conn.execute("DELETE FROM outbox WHERE flushed_at IS NULL")
+    finally:
+        await conn.close()
+
     tracker: dict[str, list[Any]] = {
         "webhook_ids": [],
         "article_slugs": [],
@@ -152,6 +190,8 @@ async def cleanup() -> AsyncIterator[dict[str, list[Any]]]:
             await conn.execute("DELETE FROM articles WHERE slug = $1", slug)
         for sid in tracker["chat_session_ids"]:
             await conn.execute("DELETE FROM chat_sessions WHERE id = $1", sid)
+        # Clear any outbox rows we created (flushed или unflushed).
+        await conn.execute("DELETE FROM outbox WHERE flushed_at IS NULL")
     finally:
         await conn.close()
 
@@ -265,6 +305,7 @@ async def test_publish_article_delivers_webhook_with_hmac(
     m2m_token: str,
     receiver: _Receiver,
     worker_instance: WebhookDeliveryWorker,
+    drainer_instance: OutboxDrainer,
     cleanup: dict[str, list[Any]],
 ) -> None:
     wh = await _register_webhook_direct(receiver.url, events=["article.published"])
@@ -275,6 +316,9 @@ async def test_publish_article_delivers_webhook_with_hmac(
     cleanup["article_slugs"].append(slug)
     _create_article(kb_client, m2m_token, slug, status_value="PUBLISHED")
 
+    # Slice 4b: drainer fan-out outbox → webhook_deliveries.
+    drained = await drainer_instance._drain_once()
+    assert drained >= 1
     processed = await worker_instance._run_once()
     assert processed >= 1
 
@@ -305,6 +349,7 @@ async def test_5xx_response_schedules_retry(
     m2m_token: str,
     receiver: _Receiver,
     worker_instance: WebhookDeliveryWorker,
+    drainer_instance: OutboxDrainer,
     cleanup: dict[str, list[Any]],
 ) -> None:
     receiver.response_status = 503
@@ -316,6 +361,7 @@ async def test_5xx_response_schedules_retry(
     cleanup["article_slugs"].append(slug)
     _create_article(kb_client, m2m_token, slug, status_value="PUBLISHED")
 
+    await drainer_instance._drain_once()
     await worker_instance._run_once()
     delivery_id = await _delivery_id_for_webhook(UUID(wh["id"]))
     row = await _fetch_delivery(delivery_id)
@@ -335,6 +381,7 @@ async def test_max_attempts_marks_dead_letter(
     m2m_token: str,
     receiver: _Receiver,
     worker_instance: WebhookDeliveryWorker,
+    drainer_instance: OutboxDrainer,
     cleanup: dict[str, list[Any]],
 ) -> None:
     receiver.response_status = 500
@@ -346,6 +393,8 @@ async def test_max_attempts_marks_dead_letter(
     cleanup["article_slugs"].append(slug)
     _create_article(kb_client, m2m_token, slug, status_value="PUBLISHED")
 
+    # Slice 4b: outbox row → webhook_deliveries.
+    await drainer_instance._drain_once()
     delivery_id = await _delivery_id_for_webhook(UUID(wh["id"]))
 
     # MAX_ATTEMPTS=3 в worker_instance settings — 3 неуспешных run'а → dead_letter.
@@ -433,6 +482,7 @@ async def test_chat_escalated_delivers_webhook(
     m2m_token: str,
     receiver: _Receiver,
     worker_instance: WebhookDeliveryWorker,
+    drainer_instance: OutboxDrainer,
     cleanup: dict[str, list[Any]],
 ) -> None:
     wh = await _register_webhook_direct(receiver.url, events=["chat.escalated"])
@@ -464,6 +514,8 @@ async def test_chat_escalated_delivers_webhook(
     )
     assert esc_resp.status_code == 201, esc_resp.text
 
+    # Slice 4b: drain outbox first.
+    await drainer_instance._drain_once()
     processed = await worker_instance._run_once()
     assert processed >= 1
 
@@ -487,6 +539,7 @@ async def test_run_once_idempotent_after_delivery(
     m2m_token: str,
     receiver: _Receiver,
     worker_instance: WebhookDeliveryWorker,
+    drainer_instance: OutboxDrainer,
     cleanup: dict[str, list[Any]],
 ) -> None:
     wh = await _register_webhook_direct(receiver.url, events=["article.published"])
@@ -496,6 +549,8 @@ async def test_run_once_idempotent_after_delivery(
     cleanup["article_slugs"].append(slug)
     _create_article(kb_client, m2m_token, slug, status_value="PUBLISHED")
 
+    # Slice 4b: drain outbox → webhook_deliveries.
+    await drainer_instance._drain_once()
     first = await worker_instance._run_once()
     assert first >= 1
     second = await worker_instance._run_once()
