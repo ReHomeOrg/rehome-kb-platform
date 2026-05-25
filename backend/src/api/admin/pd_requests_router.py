@@ -20,6 +20,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.pd_requests_repository import (
@@ -43,6 +44,7 @@ from src.api.auth.dependency import (
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
+from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 router = APIRouter(prefix="/admin/personal-data/requests", tags=["Admin"])
 
@@ -157,7 +159,8 @@ async def process_pd_request(
     repo: PersonalDataRequestRepository = Depends(get_pd_request_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
-) -> PersonalDataRequestView:
+    idempotency: IdempotencyResult = Depends(process_idempotency_key),
+) -> Any:
     """OpenAPI §processPersonalDataRequest.
 
     Status — required в body. ALLOWED_MANUAL_TRANSITIONS controls valid
@@ -165,8 +168,18 @@ async def process_pd_request(
 
     Transition в terminal → invariant DB CHECK обеспечивает
     completed_at NOT NULL.
+
+    Idempotency-Key (UUID header, ADR-0025): replay cached response без
+    duplicate audit row на retry.
     """
     _require_staff_admin(access_levels)
+
+    if idempotency.replay is not None:
+        return JSONResponse(
+            status_code=idempotency.replay.status,
+            content=idempotency.replay.body,
+            headers=idempotency.replay.headers,
+        )
 
     req = await repo.get_by_id(request_id)
     if req is None:
@@ -197,7 +210,9 @@ async def process_pd_request(
         },
     )
     await session.commit()
-    return PersonalDataRequestView.model_validate(req)
+    body = PersonalDataRequestView.model_validate(req).model_dump(mode="json")
+    await idempotency.save(status_code=200, body=body)
+    return JSONResponse(status_code=200, content=body)
 
 
 __all__ = ["router"]
