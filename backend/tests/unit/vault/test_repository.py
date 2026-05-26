@@ -156,9 +156,7 @@ async def test_rotate_secret_atomic_no_blob_returns_none() -> None:
 async def test_list_secret_wraps_returns_all_recipients_ordered() -> None:
     """list_secret_wraps SQL: SELECT * WHERE secret_id = ? ORDER BY user_id."""
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     repo = VaultRepository(session)
     sid = uuid4()
     await repo.list_secret_wraps(sid)
