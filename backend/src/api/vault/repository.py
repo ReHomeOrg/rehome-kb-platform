@@ -443,6 +443,11 @@ class VaultRepository:
         blob.payload_version = expected_version + 1
 
         # 5. Update title (encrypted с тем же secret_key как blob).
+        # `secret is not None` — defensive: на практике unreachable благодаря
+        # FK CASCADE (если blob locked через SELECT FOR UPDATE на step 1,
+        # значит secret row существует; если бы secret был deleted, blob
+        # CASCADE-удалён и step 1 уже вернул None). Guard оставляем для
+        # robustness против будущих FK schema изменений.
         secret = await self.get_secret(secret_id)
         if secret is not None:
             secret.title_ciphertext = new_title_ciphertext

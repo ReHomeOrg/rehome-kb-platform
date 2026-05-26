@@ -12,7 +12,7 @@ from base64 import b64decode
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.api.vault.models import (
     VaultGroup,
@@ -280,6 +280,20 @@ class VaultSecretRotateInput(BaseModel):
     def _v_blob(cls, v: str) -> str:
         _decode_b64(v, MAX_BLOB_CIPHERTEXT_BYTES, "new_blob_ciphertext")
         return v
+
+    @model_validator(mode="after")
+    def _v_unique_user_ids(self) -> "VaultSecretRotateInput":
+        """Каждый user_id в new_wraps уникален.
+
+        Дубликаты падали бы на DB-level PK constraint `(secret_id, user_id)`
+        → 500 для clients. Catch на pydantic level → 422 honest error.
+        """
+        seen: set[UUID] = set()
+        for w in self.new_wraps:
+            if w.user_id in seen:
+                raise ValueError(f"duplicate user_id in new_wraps: {w.user_id}")
+            seen.add(w.user_id)
+        return self
 
 
 class VaultSecretMetadataView(BaseModel):
