@@ -30,6 +30,7 @@ import {
 } from "@/lib/vault/crypto";
 import { getVaultKey } from "@/lib/vault/session";
 
+import RecipientsPanel from "./recipients-panel";
 import ShareSecretPanel from "./share-secret-panel";
 
 interface DecryptedSecret {
@@ -70,6 +71,9 @@ export default function SecretDetail({ secretId, userId }: Props): JSX.Element {
 
   const [sharing, setSharing] = useState(false);
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
+
+  const [managingRecipients, setManagingRecipients] = useState(false);
+  const [rotateSuccess, setRotateSuccess] = useState<string | null>(null);
 
   async function load(): Promise<void> {
     setLoading(true);
@@ -256,6 +260,18 @@ export default function SecretDetail({ secretId, userId }: Props): JSX.Element {
                 Поделиться
               </button>
             ) : null}
+            {state.raw.owner_id === userId && !managingRecipients ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setManagingRecipients(true);
+                  setRotateSuccess(null);
+                }}
+                className="rounded-md border border-orange-300 bg-orange-50 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100"
+              >
+                Получатели
+              </button>
+            ) : null}
             {!deleteConfirm ? (
               <button
                 type="button"
@@ -271,6 +287,9 @@ export default function SecretDetail({ secretId, userId }: Props): JSX.Element {
             {shareSuccess ? (
               <span className="text-xs text-green-700">{shareSuccess}</span>
             ) : null}
+            {rotateSuccess ? (
+              <span className="text-xs text-green-700">{rotateSuccess}</span>
+            ) : null}
           </div>
           {sharing ? (
             <ShareSecretPanel
@@ -282,6 +301,23 @@ export default function SecretDetail({ secretId, userId }: Props): JSX.Element {
                 setSharing(false);
                 setShareSuccess("Расшарено успешно");
                 setTimeout(() => setShareSuccess(null), 3000);
+              }}
+            />
+          ) : null}
+          {managingRecipients ? (
+            <RecipientsPanel
+              secretId={state.raw.id}
+              ownerId={userId}
+              plaintextTitle={state.title}
+              plaintextPayload={state.payload}
+              currentVersion={state.raw.payload_version}
+              onCancel={() => setManagingRecipients(false)}
+              onRotated={() => {
+                setManagingRecipients(false);
+                setRotateSuccess("Доступ отозван, ключ обновлён");
+                setTimeout(() => setRotateSuccess(null), 3000);
+                // Перезагрузка: новый secret_key + version у state'а.
+                void load();
               }}
             />
           ) : null}

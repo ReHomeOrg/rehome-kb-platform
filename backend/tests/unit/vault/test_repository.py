@@ -122,6 +122,7 @@ async def test_rotate_secret_atomic_version_mismatch_returns_none() -> None:
 
     result = await repo.rotate_secret_atomic(
         secret_id=blob.secret_id,
+        new_title_ciphertext=b"new-title",
         new_ciphertext=b"new",
         expected_version=1,  # mismatch — caller думает версия 1
         new_wraps=[],
@@ -143,6 +144,7 @@ async def test_rotate_secret_atomic_no_blob_returns_none() -> None:
     repo = VaultRepository(session)
     result = await repo.rotate_secret_atomic(
         secret_id=uuid4(),
+        new_title_ciphertext=b"new-title",
         new_ciphertext=b"new",
         expected_version=1,
         new_wraps=[],
@@ -151,21 +153,47 @@ async def test_rotate_secret_atomic_no_blob_returns_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() -> None:
-    """Version match → blob.ciphertext + payload_version updated; wraps
-    deleted + re-inserted; session.flush'нут."""
-    from src.api.vault.models import VaultSecretBlob, VaultSecretWrap
+async def test_list_secret_wraps_returns_all_recipients_ordered() -> None:
+    """list_secret_wraps SQL: SELECT * WHERE secret_id = ? ORDER BY user_id."""
+    session = MagicMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: []))
+    )
+    repo = VaultRepository(session)
+    sid = uuid4()
+    await repo.list_secret_wraps(sid)
+    stmt = session.execute.call_args.args[0]
+    compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+    sql = str(compiled).lower()
+    assert "from vault_secret_wraps" in sql
+    assert "secret_id" in sql
+    assert "order by" in sql
+    assert "user_id" in sql
+    # secret_id param привязан.
+    assert sid in compiled.params.values()
 
+
+@pytest.mark.asyncio
+async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() -> None:
+    """Version match → blob.ciphertext + payload_version updated; title
+    updated; wraps deleted + re-inserted; session.flush'нут."""
+    from src.api.vault.models import VaultSecret, VaultSecretBlob, VaultSecretWrap
+
+    secret = VaultSecret()
+    secret.id = uuid4()
+    secret.title_ciphertext = b"old-title"
     blob = VaultSecretBlob()
-    blob.secret_id = uuid4()
+    blob.secret_id = secret.id
     blob.ciphertext = b"old"
     blob.payload_version = 1
     session = MagicMock()
-    # 1-й execute — SELECT FOR UPDATE blob; 2-й — DELETE wraps.
+    # 1-й execute — SELECT FOR UPDATE blob; 2-й — DELETE wraps; 3-й —
+    # get_secret (для title update).
     session.execute = AsyncMock(
         side_effect=[
             MagicMock(scalar_one_or_none=lambda: blob),
             MagicMock(),  # DELETE result
+            MagicMock(scalar_one_or_none=lambda: secret),  # get_secret
         ]
     )
     session.flush = AsyncMock()
@@ -178,6 +206,7 @@ async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() 
     ]
     result = await repo.rotate_secret_atomic(
         secret_id=blob.secret_id,
+        new_title_ciphertext=b"new-title",
         new_ciphertext=b"new-payload",
         expected_version=1,
         new_wraps=new_wraps,
@@ -185,8 +214,9 @@ async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() 
     assert result is blob
     assert blob.ciphertext == b"new-payload"
     assert blob.payload_version == 2
-    # DELETE issued после SELECT.
-    assert session.execute.await_count == 2
-    # Все new_wraps добавлены в session.
+    # Title тоже обновлён (тот же secret_key зашифровал).
+    assert secret.title_ciphertext == b"new-title"
+    # SELECT blob + DELETE wraps + SELECT secret = 3 execute call'а.
+    assert session.execute.await_count == 3
     assert session.add.call_count == 2
     session.flush.assert_awaited_once()

@@ -105,6 +105,29 @@ export interface VaultSecretView extends VaultSecretMetadataView {
   via_group_id: string | null;
 }
 
+/**
+ * ADR-0017 §E rotation — atomic re-wrap для true revoke. Client decrypt'ит
+ * blob с old secret_key, generate new secret_key, re-encrypt blob, re-wrap
+ * для surviving recipients (revoked user'а — не включён в new_wraps).
+ */
+export interface VaultSecretRotateInput {
+  /** Title re-encrypted с новым secret_key. Обязательно — без него title undecryptable. */
+  new_title_ciphertext_b64: string;
+  new_blob_ciphertext_b64: string;
+  expected_version: number;
+  new_wraps: VaultSecretWrapInput[];
+}
+
+/** Owner-facing wrap metadata — БЕЗ `wrapped_key` (zero-knowledge property). */
+export interface VaultSecretWrapView {
+  user_id: string;
+  group_id: string | null;
+}
+
+export interface VaultSecretWrapListResponse {
+  data: VaultSecretWrapView[];
+}
+
 export interface VaultSecretListResponse {
   data: VaultSecretMetadataView[];
 }
@@ -279,6 +302,46 @@ export async function removeSecretWrap(
   await apiFetch<void>(
     `/api/v1/vault/secrets/${encodeURIComponent(secretId)}/wraps/${encodeURIComponent(userId)}`,
     { method: "DELETE" },
+  );
+}
+
+/**
+ * ADR-0017 §E — list current recipients (owner-only). Используется
+ * rotation UI flow'ом чтобы знать кого re-wrap'нуть после revoke.
+ * Response не содержит wrapped_key bytes (zero-knowledge property).
+ */
+export async function listSecretWraps(
+  secretId: string,
+): Promise<VaultSecretWrapListResponse> {
+  return apiFetch<VaultSecretWrapListResponse>(
+    `/api/v1/vault/secrets/${encodeURIComponent(secretId)}/wraps`,
+  );
+}
+
+/**
+ * ADR-0017 §E — atomic key rotation. Owner-only. Server атомарно
+ * заменяет blob ciphertext + все wraps (DELETE all + INSERT new_wraps);
+ * bump'ает payload_version. Прерывает «cached plaintext» exposure
+ * у revoked recipients.
+ *
+ * Caller (UI) отвечает за crypto flow client-side:
+ *   1. decrypt текущий blob с current secret_key (через wrapped_key_b64)
+ *   2. generate новый secret_key (32 random bytes)
+ *   3. re-encrypt blob с новым secret_key
+ *   4. для каждого surviving recipient'а: getUserPubkey + wrapSecretKeyForGroup
+ *   5. POST /rotate с {new_blob, expected_version, new_wraps[]}
+ */
+export async function rotateVaultSecret(
+  id: string,
+  input: VaultSecretRotateInput,
+): Promise<VaultSecretView> {
+  return apiFetch<VaultSecretView>(
+    `/api/v1/vault/secrets/${encodeURIComponent(id)}/rotate`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+      headers: { "Content-Type": "application/json" },
+    },
   );
 }
 

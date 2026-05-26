@@ -226,25 +226,54 @@ class VaultSecretUpdateInput(BaseModel):
         return v
 
 
+class VaultSecretWrapView(BaseModel):
+    """Owner-facing wrap metadata — без `wrapped_key` (это per-recipient
+    encrypted key, нужен только самому recipient'у).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: UUID
+    group_id: UUID | None = None
+
+
+class VaultSecretWrapListResponse(BaseModel):
+    """GET /vault/secrets/{id}/wraps — owner-only list."""
+
+    data: list[VaultSecretWrapView]
+
+
 class VaultSecretRotateInput(BaseModel):
     """POST /vault/secrets/{id}/rotate — ADR-0017 §E true revoke.
 
     Client рутирует secret_key (decrypt с old, generate new, re-encrypt
-    с new), pre-wrap'ает new secret_key под каждый surviving recipient
-    (revoked user'а — просто не включает в `new_wraps`).
+    с new — ОБА title и blob), pre-wrap'ает new secret_key под каждый
+    surviving recipient (revoked user'а — просто не включает в
+    `new_wraps`).
 
-    Server атомарно: replace blob + replace wraps + bump version. Все или
-    ничего; нет окна когда blob updated но wraps stale.
+    Server атомарно: replace title + replace blob + replace wraps +
+    bump version. Все или ничего; нет окна когда blob updated но wraps
+    stale.
 
-    `new_wraps` может быть пустым — owner revoke'ает всех (включая себя),
-    secret становится недоступным; archive отдельным шагом.
+    `new_wraps` может быть пустым — owner revoke'ает всех (включая
+    себя), secret становится недоступным; archive отдельным шагом.
+
+    `new_title_ciphertext_b64` обязателен — title зашифрован тем же
+    secret_key, иначе после rotation станет undecryptable.
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    new_title_ciphertext_b64: str
     new_blob_ciphertext_b64: str
     expected_version: int = Field(ge=1)
     new_wraps: list[VaultSecretWrapInput] = Field(default_factory=list)
+
+    @field_validator("new_title_ciphertext_b64")
+    @classmethod
+    def _v_title(cls, v: str) -> str:
+        _decode_b64(v, MAX_TITLE_CIPHERTEXT_BYTES, "new_title_ciphertext")
+        return v
 
     @field_validator("new_blob_ciphertext_b64")
     @classmethod

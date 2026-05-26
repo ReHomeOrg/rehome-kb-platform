@@ -89,6 +89,8 @@ def repo_mocks() -> dict[str, AsyncMock]:
         "remove_secret_wrap": AsyncMock(return_value=False),
         # ADR-0017 §E true revoke
         "rotate_secret_atomic": AsyncMock(return_value=None),
+        # ADR-0017 §E rotation prep — list wraps for owner UI
+        "list_secret_wraps": AsyncMock(return_value=[]),
     }
 
 
@@ -672,6 +674,7 @@ def _rotate_payload(
     expected_version: int = 1,
 ) -> dict[str, Any]:
     return {
+        "new_title_ciphertext_b64": _b64(b"new-encrypted-title"),
         "new_blob_ciphertext_b64": _b64(b"new-encrypted-payload"),
         "expected_version": expected_version,
         "new_wraps": new_wraps if new_wraps is not None else [],
@@ -712,6 +715,9 @@ def test_rotate_secret_success(
     assert call["secret_id"] == secret.id
     assert call["expected_version"] == 1
     assert len(call["new_wraps"]) == 2
+    # Title тоже передан (re-encrypted с новым secret_key).
+    assert call["new_title_ciphertext"] == b"new-encrypted-title"
+    assert call["new_ciphertext"] == b"new-encrypted-payload"
 
     # Audit row с правильным action + metadata.
     audit_args = audit_record_mock.call_args.kwargs
@@ -851,3 +857,113 @@ def test_rotate_secret_rejects_extra_fields(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /vault/secrets/{id}/wraps — owner-only list (rotation prep)
+
+
+def test_list_wraps_success_returns_recipients(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Owner — 200 с list recipients (user_id + group_id)."""
+    owner = uuid4()
+    user_a = uuid4()
+    user_b = uuid4()
+    group_x = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+
+    wrap_a = MagicMock()
+    wrap_a.user_id = user_a
+    wrap_a.group_id = None
+    wrap_b = MagicMock()
+    wrap_b.user_id = user_b
+    wrap_b.group_id = group_x
+    override_deps["list_secret_wraps"].return_value = [wrap_a, wrap_b]
+
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.get(
+        f"/api/v1/vault/secrets/{secret.id}/wraps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["data"]) == 2
+    user_ids = {w["user_id"] for w in body["data"]}
+    assert user_ids == {str(user_a), str(user_b)}
+    # wrapped_key bytes НЕ должны попасть в response (zero-knowledge property).
+    assert all("wrapped_key" not in w and "wrapped_key_b64" not in w for w in body["data"])
+
+
+def test_list_wraps_403_non_owner(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Non-owner — 403, list_secret_wraps НЕ вызывается."""
+    owner = uuid4()
+    actor = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+
+    token = make_jwt(roles=["staff_admin"], sub=str(actor))
+    resp = client.get(
+        f"/api/v1/vault/secrets/{secret.id}/wraps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+    override_deps["list_secret_wraps"].assert_not_called()
+
+
+def test_list_wraps_404_archived(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Archived secret — 404."""
+    owner = uuid4()
+    secret = _make_secret(owner, archived_at=datetime.now(UTC))
+    override_deps["get_secret"].return_value = secret
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.get(
+        f"/api/v1/vault/secrets/{secret.id}/wraps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_list_wraps_404_not_found(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Несуществующий secret — 404."""
+    override_deps["get_secret"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.get(
+        f"/api/v1/vault/secrets/{uuid4()}/wraps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_list_wraps_empty_for_solo_secret(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Edge: secret без shared wraps (только owner) — empty list."""
+    owner = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+    override_deps["list_secret_wraps"].return_value = []
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.get(
+        f"/api/v1/vault/secrets/{secret.id}/wraps",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"] == []

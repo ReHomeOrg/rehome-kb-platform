@@ -65,6 +65,8 @@ from src.api.vault.schemas import (
     VaultSecretRotateInput,
     VaultSecretUpdateInput,
     VaultSecretView,
+    VaultSecretWrapListResponse,
+    VaultSecretWrapView,
     VaultSetupInput,
     VaultTotpSetupInput,
     VaultUnlockInput,
@@ -484,6 +486,7 @@ async def rotate_secret(
 
     new_blob = await repo.rotate_secret_atomic(
         secret_id=secret_id,
+        new_title_ciphertext=b64decode(payload.new_title_ciphertext_b64),
         new_ciphertext=b64decode(payload.new_blob_ciphertext_b64),
         expected_version=payload.expected_version,
         new_wraps=new_wraps,
@@ -662,6 +665,46 @@ async def add_secret_wraps(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get(
+    "/secrets/{secret_id}/wraps",
+    response_model=VaultSecretWrapListResponse,
+    summary="List secret recipients (owner-only)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Caller — не owner secret'а"},
+        404: {"description": "Secret не найден или archived"},
+    },
+)
+async def list_secret_wraps(
+    secret_id: UUID = Path(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+) -> VaultSecretWrapListResponse:
+    """Owner-only list текущих recipients (ADR-0017 §E rotation prep).
+
+    Used UI rotation flow'ом для:
+    1. Display списка кому сейчас расшарен secret.
+    2. Compute «surviving recipients» list после revoke click'а.
+    3. Re-wrap каждого survivor'а под новый secret_key — нужны их
+       pubkey'и (отдельный per-user lookup через GET /vault/users/{id}/pubkey).
+
+    Response НЕ содержит `wrapped_key` — per-recipient encrypted key
+    нужен только самому recipient'у (zero-knowledge property).
+    """
+    user_id = _user_id_from_claims(claims)
+    secret = await repo.get_secret(secret_id)
+    if secret is None or secret.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if secret.owner_id != user_id:
+        # Owner-only — 403, не 404-mask: caller знает что secret есть.
+        raise HTTPException(status_code=403, detail="Only owner may list recipients")
+
+    wraps = await repo.list_secret_wraps(secret_id)
+    return VaultSecretWrapListResponse(
+        data=[VaultSecretWrapView(user_id=w.user_id, group_id=w.group_id) for w in wraps]
+    )
+
+
 @router.delete(
     "/secrets/{secret_id}/wraps/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -682,9 +725,10 @@ async def remove_secret_wrap(
 ) -> Response:
     """Remove wrap. Только owner может unshare.
 
-    Caveat (ADR-0017 §E): revoke не делает старые secret_keys forgotten
-    — removed user мог cache'ить в browser memory. True revoke = rotate
-    secret_key (backlog Stage 2).
+    Caveat (ADR-0017 §E): этот endpoint deletes wrap row, но НЕ делает
+    cached plaintext forgotten — removed user мог cache'ить decrypted
+    blob в browser memory. Для true revoke (rotation flow) используется
+    `POST /vault/secrets/{id}/rotate` (ADR-0017 §E, реализован 2026-05-27).
     """
     actor_id = _user_id_from_claims(claims)
     secret = await repo.get_secret(secret_id)
