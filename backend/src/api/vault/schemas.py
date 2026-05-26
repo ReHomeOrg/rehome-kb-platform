@@ -226,6 +226,33 @@ class VaultSecretUpdateInput(BaseModel):
         return v
 
 
+class VaultSecretRotateInput(BaseModel):
+    """POST /vault/secrets/{id}/rotate — ADR-0017 §E true revoke.
+
+    Client рутирует secret_key (decrypt с old, generate new, re-encrypt
+    с new), pre-wrap'ает new secret_key под каждый surviving recipient
+    (revoked user'а — просто не включает в `new_wraps`).
+
+    Server атомарно: replace blob + replace wraps + bump version. Все или
+    ничего; нет окна когда blob updated но wraps stale.
+
+    `new_wraps` может быть пустым — owner revoke'ает всех (включая себя),
+    secret становится недоступным; archive отдельным шагом.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_blob_ciphertext_b64: str
+    expected_version: int = Field(ge=1)
+    new_wraps: list[VaultSecretWrapInput] = Field(default_factory=list)
+
+    @field_validator("new_blob_ciphertext_b64")
+    @classmethod
+    def _v_blob(cls, v: str) -> str:
+        _decode_b64(v, MAX_BLOB_CIPHERTEXT_BYTES, "new_blob_ciphertext")
+        return v
+
+
 class VaultSecretMetadataView(BaseModel):
     """Metadata-only view (для list endpoint).
 

@@ -241,7 +241,15 @@ recipients) — backlog Stage 2.
    для UI «секреты, расшаренные с этой группой». Backlog (можно derive
    client-side из существующего list + per-secret wrap check, но
    неэффективно).
-3. **Rotate secret_key** (true revoke) — Stage 2.
+3. ~~**Rotate secret_key** (true revoke) — Stage 2.~~ **DONE 2026-05-27**:
+   `POST /vault/secrets/{secret_id}/rotate` (backend). Owner-only;
+   atomic replace blob + wraps в single transaction (SELECT FOR UPDATE
+   на blob + DELETE all wraps + INSERT new wraps + UPDATE blob.ciphertext
+   + bump payload_version). Прерывает «cached plaintext» exposure у
+   revoked recipients. Frontend rotation UI — отдельный slice (нетривиальная
+   client-side crypto: decrypt → regenerate → re-encrypt → re-wrap для
+   surviving users). См. `VaultRepository.rotate_secret_atomic` + audit
+   action `vault.secret.rotated`.
 4. **Concurrent share races** — два owner'а одновременно расшаривают
    тот же secret с разными группами; backend нужен UQ `(secret_id, user_id)`
    PK уже это даёт. Race на DELETE одного / POST другого — last-write-wins,

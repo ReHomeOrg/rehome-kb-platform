@@ -363,6 +363,65 @@ class VaultRepository:
         await self._session.flush()
         return blob
 
+    async def rotate_secret_atomic(
+        self,
+        *,
+        secret_id: UUID,
+        new_ciphertext: bytes,
+        expected_version: int,
+        new_wraps: list[VaultSecretWrap],
+    ) -> VaultSecretBlob | None:
+        """ADR-0017 §E true revoke — atomic rotation: replace blob ciphertext
+        AND wraps в одной транзакции.
+
+        Use case: owner revoke'ит user'а с access — DELETE wrap недостаточно,
+        потому что revoked user мог cache'ить plaintext в browser memory.
+        Rotate генерирует новый secret_key client-side, re-encrypt'ит blob,
+        re-wrap'ит для surviving users; этот метод persistит rotation
+        атомарно.
+
+        Returns updated blob если version OK + rotation applied, None если
+        version mismatch (caller refresh view + retry).
+
+        Steps в single transaction (SELECT FOR UPDATE locks blob row):
+        1. Version check на blob.
+        2. DELETE все old wraps для (secret_id).
+        3. INSERT new wraps (caller передаёт surviving users; revoked user
+           просто отсутствует в new_wraps).
+        4. UPDATE blob.ciphertext + payload_version++.
+
+        Caller — handler — отвечает за `session.commit()` (ADR-0026 atomic).
+        """
+        from sqlalchemy import delete
+
+        # 1. SELECT FOR UPDATE + version check (same pattern as update_secret_blob).
+        result = await self._session.execute(
+            select(VaultSecretBlob).where(VaultSecretBlob.secret_id == secret_id).with_for_update()
+        )
+        blob = result.scalar_one_or_none()
+        if blob is None:
+            return None
+        if blob.payload_version != expected_version:
+            return None
+
+        # 2. DELETE all existing wraps for this secret.
+        await self._session.execute(
+            delete(VaultSecretWrap).where(VaultSecretWrap.secret_id == secret_id)
+        )
+
+        # 3. INSERT new wraps (skip session.add'ing the same wrap row если у
+        # caller'а — flush'нем все сразу).
+        for w in new_wraps:
+            w.secret_id = secret_id
+            self._session.add(w)
+
+        # 4. Update blob + bump version.
+        blob.ciphertext = new_ciphertext
+        blob.payload_version = expected_version + 1
+
+        await self._session.flush()
+        return blob
+
     async def archive_secret(self, secret_id: UUID) -> bool:
         """Soft-delete. Audit log сохраняется (compliance trail)."""
         from datetime import UTC, datetime

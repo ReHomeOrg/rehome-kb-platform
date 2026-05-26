@@ -34,6 +34,7 @@ from src.api.audit import (
     ACTION_VAULT_SECRET_CREATED,
     ACTION_VAULT_SECRET_DELETED,
     ACTION_VAULT_SECRET_READ,
+    ACTION_VAULT_SECRET_ROTATED,
     ACTION_VAULT_SECRET_UPDATED,
     ACTION_VAULT_SHARE_ADDED,
     ACTION_VAULT_SHARE_REVOKED,
@@ -61,6 +62,7 @@ from src.api.vault.schemas import (
     VaultSecretAddWrapsInput,
     VaultSecretCreateInput,
     VaultSecretListResponse,
+    VaultSecretRotateInput,
     VaultSecretUpdateInput,
     VaultSecretView,
     VaultSetupInput,
@@ -422,6 +424,104 @@ async def update_secret(
     )
     chosen = next((w for w in wraps if w.user_id == user_id), wraps[0])
     return secret_detail_view(secret, new_blob, chosen.wrapped_key, via_group_id=chosen.group_id)
+
+
+@router.post(
+    "/secrets/{secret_id}/rotate",
+    response_model=VaultSecretView,
+    summary="Rotate secret_key (ADR-0017 §E true revoke)",
+    description=(
+        "Owner-only atomic rotation: client decrypts с old secret_key, "
+        "генерирует новый, re-encrypt'ит blob, re-wrap'ит для surviving "
+        "recipients. Server атомарно: DELETE all wraps + INSERT new wraps "
+        "+ UPDATE blob.ciphertext + bump version. Прерывает «cached "
+        "plaintext» exposure у revoked user'ов."
+    ),
+    responses={
+        403: {"description": "Caller — не owner"},
+        404: {"description": "Not found или archived"},
+        409: {"description": "Version mismatch — refresh and retry"},
+    },
+)
+async def rotate_secret(
+    secret_id: UUID = Path(...),
+    payload: VaultSecretRotateInput = Body(...),
+    claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+    audit: AuditRepository = Depends(get_audit_repository),
+    session: AsyncSession = Depends(get_session),
+) -> VaultSecretView:
+    """ADR-0017 §E — true revoke через key rotation.
+
+    Flow:
+    1. RBAC: only owner может rotate (revoke других — owner-only action).
+    2. Repository.rotate_secret_atomic — DELETE old wraps + INSERT new
+       wraps + UPDATE blob в single transaction (SELECT FOR UPDATE).
+    3. Audit: actor_sub + previous_version + new_version + new_recipients
+       count. Metadata НЕ содержит revoked_user_ids (PII risk если log
+       leak).
+    4. ADR-0026 atomic: handler — single session.commit() в конце.
+    """
+    user_id = _user_id_from_claims(claims)
+    secret = await repo.get_secret(secret_id)
+    if secret is None or secret.archived_at is not None:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if secret.owner_id != user_id:
+        # Owner-only — others get 403 (распознают что secret есть, но они не
+        # owner). 404-mask не применяется, потому что rotate — explicit op
+        # owner'а; 403 более honest.
+        raise HTTPException(status_code=403, detail="Only owner may rotate secret_key")
+
+    new_wraps = [
+        VaultSecretWrap(
+            secret_id=secret_id,
+            user_id=w.user_id,
+            group_id=w.group_id,
+            wrapped_key=b64decode(w.wrapped_key_b64),
+        )
+        for w in payload.new_wraps
+    ]
+
+    new_blob = await repo.rotate_secret_atomic(
+        secret_id=secret_id,
+        new_ciphertext=b64decode(payload.new_blob_ciphertext_b64),
+        expected_version=payload.expected_version,
+        new_wraps=new_wraps,
+    )
+    if new_blob is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Version mismatch — refresh and retry",
+        )
+
+    from datetime import UTC, datetime
+
+    secret.updated_at = datetime.now(UTC)
+    await session.flush()
+
+    await audit.record(
+        actor_sub=str(user_id),
+        action=ACTION_VAULT_SECRET_ROTATED,
+        resource_type=RESOURCE_VAULT_SECRET,
+        resource_id=str(secret_id),
+        metadata={
+            "previous_version": payload.expected_version,
+            "new_version": new_blob.payload_version,
+            "surviving_recipients_count": len(new_wraps),
+        },
+    )
+    await session.commit()
+
+    # Owner всегда должен быть в new_wraps (иначе он сам себя revoke'ает —
+    # допустимо для archive flow). Если owner отсутствует — нет wrapped_key
+    # для return view; используем placeholder с empty bytes (UI обработает
+    # как «no access»).
+    owner_wrap = next((w for w in new_wraps if w.user_id == user_id), None)
+    if owner_wrap is None:
+        # Edge case: owner revoke'нул сам себя. Return view без wrapped_key —
+        # client должен archive secret следующим запросом.
+        return secret_detail_view(secret, new_blob, b"", via_group_id=None)
+    return secret_detail_view(secret, new_blob, owner_wrap.wrapped_key, via_group_id=None)
 
 
 @router.delete(
