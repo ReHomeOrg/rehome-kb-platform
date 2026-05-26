@@ -39,9 +39,10 @@ async function makeVaultKey(): Promise<CryptoKey> {
 describe("Vault rotation crypto round-trip (ADR-0017 §E)", () => {
   it("create → share → rotate (revoke user-B) → survivor C still decrypts title + blob", async () => {
     // ---- Setup phase ----
-    // Owner setup: vault key + X25519 keypair (для self-receive sharing).
+    // Owner setup: vault key. Owner использует AES-GCM vault key для
+    // self-wrap (wrapSecretKeyForUser), не X25519 — поэтому отдельный
+    // X25519 keypair для owner'а не нужен.
     const ownerVaultKey = await makeVaultKey();
-    const ownerKeypair = generateX25519Keypair();
 
     // User-B (will be revoked) and User-C (will survive): X25519 keypairs.
     const userBKeypair = generateX25519Keypair();
