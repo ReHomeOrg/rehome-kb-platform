@@ -260,6 +260,27 @@ class VaultRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_secret_wraps(self, secret_id: UUID) -> list[VaultSecretWrap]:
+        """Owner-facing: all wraps for a secret (recipient list).
+
+        Used для rotation UI — owner видит кто сейчас имеет access, чтобы
+        выбрать кого revoke и для кого re-wrap новый secret_key. Caller
+        (router) проверяет owner_id == actor; этот метод не делает
+        authorization check.
+
+        Returns ORM wraps в порядке INSERT (PK по умолчанию). Caller
+        отвечает за PII-safe serialization: wrapped_key bytes НЕ должны
+        попасть в response — это per-recipient encrypted key, который
+        нужен только самому recipient'у.
+        """
+        stmt = (
+            select(VaultSecretWrap)
+            .where(VaultSecretWrap.secret_id == secret_id)
+            .order_by(VaultSecretWrap.user_id.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def can_user_access_secret(
         self,
         *,
@@ -367,18 +388,19 @@ class VaultRepository:
         self,
         *,
         secret_id: UUID,
+        new_title_ciphertext: bytes,
         new_ciphertext: bytes,
         expected_version: int,
         new_wraps: list[VaultSecretWrap],
     ) -> VaultSecretBlob | None:
-        """ADR-0017 §E true revoke — atomic rotation: replace blob ciphertext
-        AND wraps в одной транзакции.
+        """ADR-0017 §E true revoke — atomic rotation: replace title +
+        blob ciphertext AND wraps в одной транзакции.
 
         Use case: owner revoke'ит user'а с access — DELETE wrap недостаточно,
         потому что revoked user мог cache'ить plaintext в browser memory.
-        Rotate генерирует новый secret_key client-side, re-encrypt'ит blob,
-        re-wrap'ит для surviving users; этот метод persistит rotation
-        атомарно.
+        Rotate генерирует новый secret_key client-side, re-encrypt'ит blob
+        И title (оба используют тот же secret_key), re-wrap'ит для surviving
+        users; этот метод persistит rotation атомарно.
 
         Returns updated blob если version OK + rotation applied, None если
         version mismatch (caller refresh view + retry).
@@ -389,6 +411,7 @@ class VaultRepository:
         3. INSERT new wraps (caller передаёт surviving users; revoked user
            просто отсутствует в new_wraps).
         4. UPDATE blob.ciphertext + payload_version++.
+        5. UPDATE secret.title_ciphertext (тот же secret_key зашифровал title).
 
         Caller — handler — отвечает за `session.commit()` (ADR-0026 atomic).
         """
@@ -418,6 +441,11 @@ class VaultRepository:
         # 4. Update blob + bump version.
         blob.ciphertext = new_ciphertext
         blob.payload_version = expected_version + 1
+
+        # 5. Update title (encrypted с тем же secret_key как blob).
+        secret = await self.get_secret(secret_id)
+        if secret is not None:
+            secret.title_ciphertext = new_title_ciphertext
 
         await self._session.flush()
         return blob
