@@ -3589,10 +3589,11 @@ paths:
       operationId: rotateVaultSecret
       x-implementation-status: implemented
       x-implementation-note: ADR-0017 §E — atomic key rotation. Client decrypt'ит
-        + generate new secret_key + re-encrypt blob + re-wrap для surviving
-        recipients; server атомарно DELETE all wraps + INSERT new wraps + UPDATE
-        blob.ciphertext + bump payload_version. Прерывает «cached plaintext»
-        exposure у revoked user'ов
+        + generate new secret_key + re-encrypt title + blob + re-wrap для
+        surviving recipients; server атомарно DELETE all wraps + INSERT new
+        wraps + UPDATE secret.title_ciphertext + UPDATE blob.ciphertext + bump
+        payload_version. Прерывает «cached plaintext» exposure у revoked
+        user'ов
       parameters:
       - name: secret_id
         in: path
@@ -3774,6 +3775,27 @@ paths:
         '404':
           description: User не setup'нул vault (нет pubkey'я)
   /api/v1/vault/secrets/{secret_id}/wraps:
+    get:
+      tags: [Vault]
+      summary: List secret recipients (owner-only, rotation prep)
+      operationId: listSecretWraps
+      x-implementation-status: implemented
+      x-implementation-note: ADR-0017 §E — owner-only list текущих recipients
+        для rotation UI. Response без wrapped_key (zero-knowledge property)
+      parameters:
+      - name: secret_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: List recipients
+        '403':
+          description: Caller — не owner
+        '404':
+          description: Not found или archived
     post:
       tags: [Vault]
       summary: Поделиться secret'ом с другим пользователем (новая wrap-запись)

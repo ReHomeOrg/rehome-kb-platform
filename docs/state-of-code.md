@@ -309,7 +309,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 
 **Backlog по модулям:**
 - **HR Stage 2**: ПДн encryption (паспорт, ИНН, СНИЛС, банк), 1С:ЗУП интеграция, КЭДО.
-- **Vault Stage 2**: ~~FIDO2 hardware token~~ ✅ (ADR-0022), ~~emergency access (2-of-2 escrow)~~ ✅ (ADR-0021), ~~true revoke (rotate secret_key + re-wrap)~~ ✅ backend (ADR-0017 §E, 2026-05-27; frontend rotation UI — separate slice), QR-код для TOTP setup, batch pubkey endpoint для groups >50.
+- **Vault Stage 2**: ~~FIDO2 hardware token~~ ✅ (ADR-0022), ~~emergency access (2-of-2 escrow)~~ ✅ (ADR-0021), ~~true revoke (rotate secret_key + re-wrap)~~ ✅ full stack (ADR-0017 §E, 2026-05-27, backend `POST /rotate` + `GET /wraps` + frontend `RecipientsPanel` revoke→rotation flow), QR-код для TOTP setup, batch pubkey endpoint для groups >50.
 - **kb-search Stage 2**: Qdrant migration при scale; вынос embedding в shared worker через Lifespan.
 - **kb-eval**: smoke run в CI с real provider'ом (требует credentials); composite score baseline measurement и dashboard.
 - **Observability**: Grafana dashboards для каждого hot path; alert rules.
@@ -720,9 +720,10 @@ Skipped explicitly (deferred):
 ### Что осталось self-serve
 
 - Vault Stage 2: ~~true revoke (rotate secret_key + re-wrap на revoke)~~
-  ✅ backend DONE (2026-05-27, `POST /vault/secrets/{id}/rotate` per
-  ADR-0017 §E; frontend rotation UI — separate slice); QR-код для TOTP
-  setup; batch pubkey endpoint для groups >50.
+  ✅ full stack DONE (2026-05-27, `POST /vault/secrets/{id}/rotate` +
+  `GET /vault/secrets/{id}/wraps` per ADR-0017 §E + frontend
+  `RecipientsPanel` с revoke→rotation flow в secret-detail page); QR-код
+  для TOTP setup; batch pubkey endpoint для groups >50.
 - Observability: Grafana dashboards для hot paths (нужен running
   Grafana для validation), alert tuning (нужны operational данные).
 
