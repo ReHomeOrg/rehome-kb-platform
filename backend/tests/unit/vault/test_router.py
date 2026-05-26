@@ -840,6 +840,33 @@ def test_rotate_secret_empty_new_wraps_allowed(
     assert audit_args["metadata"]["surviving_recipients_count"] == 0
 
 
+def test_rotate_secret_rejects_duplicate_user_ids(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Pydantic uniqueness validator — duplicate user_id в new_wraps → 422
+    (а не 500 от PK violation на DB-level)."""
+    owner = uuid4()
+    override_deps["get_secret"].return_value = _make_secret(owner)
+    duplicate_uid = str(uuid4())
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    body = _rotate_payload(
+        new_wraps=[
+            {"user_id": duplicate_uid, "wrapped_key_b64": _b64(b"\x10" * 64)},
+            {"user_id": duplicate_uid, "wrapped_key_b64": _b64(b"\x11" * 64)},
+        ]
+    )
+    resp = client.post(
+        f"/api/v1/vault/secrets/{uuid4()}/rotate",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+    # Repository не вызван — caught на pydantic validation.
+    override_deps["rotate_secret_atomic"].assert_not_called()
+
+
 def test_rotate_secret_rejects_extra_fields(
     client: TestClient,
     override_deps: dict[str, AsyncMock],
