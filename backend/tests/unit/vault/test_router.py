@@ -87,6 +87,8 @@ def repo_mocks() -> dict[str, AsyncMock]:
         "get_user_pubkey": AsyncMock(return_value=None),
         "add_secret_wraps": AsyncMock(return_value=0),
         "remove_secret_wrap": AsyncMock(return_value=False),
+        # ADR-0017 §E true revoke
+        "rotate_secret_atomic": AsyncMock(return_value=None),
     }
 
 
@@ -658,3 +660,194 @@ def test_remove_wrap_404_no_wrap(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /vault/secrets/{id}/rotate — ADR-0017 §E true revoke
+
+
+def _rotate_payload(
+    *,
+    new_wraps: list[dict[str, Any]] | None = None,
+    expected_version: int = 1,
+) -> dict[str, Any]:
+    return {
+        "new_blob_ciphertext_b64": _b64(b"new-encrypted-payload"),
+        "expected_version": expected_version,
+        "new_wraps": new_wraps if new_wraps is not None else [],
+    }
+
+
+def test_rotate_secret_success(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Owner rotate'ит с surviving wraps — 200 + audit row + blob updated."""
+    owner = uuid4()
+    survivor = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+    new_blob = _make_blob(secret.id, version=2)
+    override_deps["rotate_secret_atomic"].return_value = new_blob
+
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    body = _rotate_payload(
+        new_wraps=[
+            {"user_id": str(owner), "wrapped_key_b64": _b64(b"\x10" * 64)},
+            {"user_id": str(survivor), "wrapped_key_b64": _b64(b"\x11" * 64)},
+        ]
+    )
+    resp = client.post(
+        f"/api/v1/vault/secrets/{secret.id}/rotate",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["payload_version"] == 2
+
+    # rotate_secret_atomic вызван с правильными args.
+    call = override_deps["rotate_secret_atomic"].call_args.kwargs
+    assert call["secret_id"] == secret.id
+    assert call["expected_version"] == 1
+    assert len(call["new_wraps"]) == 2
+
+    # Audit row с правильным action + metadata.
+    audit_args = audit_record_mock.call_args.kwargs
+    assert audit_args["action"] == "vault.secret.rotated"
+    assert audit_args["metadata"]["previous_version"] == 1
+    assert audit_args["metadata"]["new_version"] == 2
+    assert audit_args["metadata"]["surviving_recipients_count"] == 2
+
+
+def test_rotate_secret_403_non_owner(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Non-owner попытка rotate → 403 (security boundary)."""
+    owner = uuid4()
+    actor = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+
+    token = make_jwt(roles=["staff_admin"], sub=str(actor))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{secret.id}/rotate",
+        json=_rotate_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+    # rotate_secret_atomic НЕ был вызван (RBAC short-circuit).
+    override_deps["rotate_secret_atomic"].assert_not_called()
+    # Audit row НЕ создан.
+    audit_record_mock.assert_not_called()
+
+
+def test_rotate_secret_404_archived(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Archived secret → 404 (нельзя rotate уже soft-deleted)."""
+    owner = uuid4()
+    secret = _make_secret(owner, archived_at=datetime.now(UTC))
+    override_deps["get_secret"].return_value = secret
+
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{secret.id}/rotate",
+        json=_rotate_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+    override_deps["rotate_secret_atomic"].assert_not_called()
+
+
+def test_rotate_secret_404_not_found(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Несуществующий secret → 404."""
+    actor = uuid4()
+    override_deps["get_secret"].return_value = None
+    token = make_jwt(roles=["staff_admin"], sub=str(actor))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{uuid4()}/rotate",
+        json=_rotate_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_rotate_secret_409_version_mismatch(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """rotate_secret_atomic вернул None (version conflict) → 409, не commit."""
+    owner = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+    override_deps["rotate_secret_atomic"].return_value = None
+
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{secret.id}/rotate",
+        json=_rotate_payload(expected_version=99),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 409
+    # Audit row НЕ создан (rotate провалился раньше).
+    audit_record_mock.assert_not_called()
+
+
+def test_rotate_secret_empty_new_wraps_allowed(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    audit_record_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+) -> None:
+    """Edge: owner revoke'нул всех (включая себя) — empty new_wraps OK.
+
+    Use case: owner хочет «выбросить ключи в океан» перед archive'ом —
+    revoke даже своих cached plaintext'ов.
+    """
+    owner = uuid4()
+    secret = _make_secret(owner)
+    override_deps["get_secret"].return_value = secret
+    new_blob = _make_blob(secret.id, version=2)
+    override_deps["rotate_secret_atomic"].return_value = new_blob
+
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    resp = client.post(
+        f"/api/v1/vault/secrets/{secret.id}/rotate",
+        json=_rotate_payload(new_wraps=[]),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    audit_args = audit_record_mock.call_args.kwargs
+    assert audit_args["metadata"]["surviving_recipients_count"] == 0
+
+
+def test_rotate_secret_rejects_extra_fields(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Pydantic extra='forbid' — payload с лишним полем → 422."""
+    owner = uuid4()
+    override_deps["get_secret"].return_value = _make_secret(owner)
+    token = make_jwt(roles=["staff_admin"], sub=str(owner))
+    body = _rotate_payload()
+    body["extra_field"] = "abuse"
+    resp = client.post(
+        f"/api/v1/vault/secrets/{uuid4()}/rotate",
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422

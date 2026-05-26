@@ -99,3 +99,94 @@ async def test_can_user_access_secret_with_wrap() -> None:
     repo = VaultRepository(session)
     can = await repo.can_user_access_secret(secret_id=uuid4(), user_id=uuid4(), user_group_ids=[])
     assert can is True
+
+
+# ---------------------------------------------------------------------------
+# ADR-0017 §E rotate_secret_atomic
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_atomic_version_mismatch_returns_none() -> None:
+    """Если payload_version != expected_version — None, без mutations."""
+    from src.api.vault.models import VaultSecretBlob
+
+    blob = VaultSecretBlob()
+    blob.secret_id = uuid4()
+    blob.ciphertext = b"old"
+    blob.payload_version = 5  # actual version
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: blob))
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+    repo = VaultRepository(session)
+
+    result = await repo.rotate_secret_atomic(
+        secret_id=blob.secret_id,
+        new_ciphertext=b"new",
+        expected_version=1,  # mismatch — caller думает версия 1
+        new_wraps=[],
+    )
+    assert result is None
+    # Blob НЕ был изменён — ни ciphertext, ни version.
+    assert blob.ciphertext == b"old"
+    assert blob.payload_version == 5
+    # session.add НЕ вызывался для new_wraps (early return).
+    session.add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_atomic_no_blob_returns_none() -> None:
+    """Secret deleted между fetch и rotate — None."""
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: None))
+    session.flush = AsyncMock()
+    repo = VaultRepository(session)
+    result = await repo.rotate_secret_atomic(
+        secret_id=uuid4(),
+        new_ciphertext=b"new",
+        expected_version=1,
+        new_wraps=[],
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() -> None:
+    """Version match → blob.ciphertext + payload_version updated; wraps
+    deleted + re-inserted; session.flush'нут."""
+    from src.api.vault.models import VaultSecretBlob, VaultSecretWrap
+
+    blob = VaultSecretBlob()
+    blob.secret_id = uuid4()
+    blob.ciphertext = b"old"
+    blob.payload_version = 1
+    session = MagicMock()
+    # 1-й execute — SELECT FOR UPDATE blob; 2-й — DELETE wraps.
+    session.execute = AsyncMock(
+        side_effect=[
+            MagicMock(scalar_one_or_none=lambda: blob),
+            MagicMock(),  # DELETE result
+        ]
+    )
+    session.flush = AsyncMock()
+    session.add = MagicMock()
+    repo = VaultRepository(session)
+
+    new_wraps = [
+        VaultSecretWrap(user_id=uuid4(), group_id=None, wrapped_key=b"\x10" * 64),
+        VaultSecretWrap(user_id=uuid4(), group_id=None, wrapped_key=b"\x11" * 64),
+    ]
+    result = await repo.rotate_secret_atomic(
+        secret_id=blob.secret_id,
+        new_ciphertext=b"new-payload",
+        expected_version=1,
+        new_wraps=new_wraps,
+    )
+    assert result is blob
+    assert blob.ciphertext == b"new-payload"
+    assert blob.payload_version == 2
+    # DELETE issued после SELECT.
+    assert session.execute.await_count == 2
+    # Все new_wraps добавлены в session.
+    assert session.add.call_count == 2
+    session.flush.assert_awaited_once()
