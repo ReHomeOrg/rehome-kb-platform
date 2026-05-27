@@ -139,6 +139,60 @@ class ArticleQuestionRepository:
         await self._session.flush()
         return row
 
+    async def count_by_article(
+        self,
+        *,
+        limit: int = 50,
+    ) -> list[tuple[UUID, str, str, int, int, int]]:
+        """Per-article Q&A counts для admin analytics dashboard.
+
+        Returns `[(article_id, slug, title, pending, answered, dismissed), ...]`
+        sorted by `pending DESC` (content gap signal — статьи с большим
+        backlog'ом нуждаются в moderation attention) then `total DESC`.
+
+        Articles без вопросов НЕ в result (LEFT JOIN'ом нет смысла —
+        список нулей не полезен).
+        """
+        from sqlalchemy import case
+
+        from src.api.articles.models import Article
+
+        # COUNT(CASE WHEN status='X' THEN 1 END) — counts только matching rows.
+        pending_col = func.count(case((ArticleQuestion.status == "PENDING", 1))).label("pending")
+        answered_col = func.count(case((ArticleQuestion.status == "ANSWERED", 1))).label("answered")
+        dismissed_col = func.count(case((ArticleQuestion.status == "DISMISSED", 1))).label(
+            "dismissed"
+        )
+        total_col = func.count().label("total")
+
+        stmt = (
+            select(
+                ArticleQuestion.article_id,
+                Article.slug,
+                Article.title,
+                pending_col,
+                answered_col,
+                dismissed_col,
+                total_col,
+            )
+            .join(Article, Article.id == ArticleQuestion.article_id)
+            .group_by(ArticleQuestion.article_id, Article.slug, Article.title)
+            .order_by(pending_col.desc(), total_col.desc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            (
+                row.article_id,
+                row.slug,
+                row.title,
+                int(row.pending),
+                int(row.answered),
+                int(row.dismissed),
+            )
+            for row in result.all()
+        ]
+
 
 def get_article_question_repository(
     session: AsyncSession = Depends(get_session),
