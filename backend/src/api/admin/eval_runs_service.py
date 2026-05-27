@@ -16,6 +16,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.api.admin.eval_runs_schemas import (
     EvalRunProviderResult,
     EvalRunStartRequest,
@@ -68,12 +70,18 @@ class EvalRunsService:
         request: EvalRunStartRequest,
         *,
         actor_sub: str,
+        session: AsyncSession | None = None,
     ) -> AdminTask:
         """Validate + create PENDING task + spawn background runner.
 
         Background execution: см. `task_runner._run_eval`. На completion
         results записываются inline в task.params (получаются через
         GET /admin/llm/eval-runs).
+
+        `session` (optional) — handler injects для explicit commit ДО spawn
+        (race fix: без commit'а task row невидим в фоновой session
+        background coroutine'ы). Tests могут не передавать session — runner
+        тоже None в тестах, spawn skip'ается.
         """
         self._validate(request)
         pairs = self._load_pairs(request)
@@ -88,8 +96,11 @@ class EvalRunsService:
             },
         )
 
-        # ADR-0020 B: spawn off-request.
+        # ADR-0020 B: spawn off-request. Commit task row BEFORE spawn'а,
+        # иначе background coroutine упадёт на LookupError.
         if self._runner is not None:
+            if session is not None:
+                await session.commit()
             self._runner.spawn_eval_run(task.id, request.providers, pairs, actor_sub)
         return task
 

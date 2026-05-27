@@ -35,6 +35,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.audit_log_schemas import (
     AdminAuditLogListResponse,
@@ -62,6 +63,7 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.db import get_session
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -219,6 +221,7 @@ async def export_admin_audit_log(
     task_repo: AdminTaskRepository = Depends(get_admin_task_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     runner: AdminTaskRunner = Depends(get_admin_task_runner),
+    session: AsyncSession = Depends(get_session),
 ) -> AuditLogExportResponse:
     """`POST /api/v1/admin/audit-log/export` (OpenAPI 04 §exportAuditLog).
 
@@ -258,6 +261,10 @@ async def export_admin_audit_log(
     )
 
     result_url = _build_export_url(payload)
+    # Commit BEFORE spawn — background coroutine opens own session
+    # и upper'ит task.id; без commit'а row невидим (тот же race fix
+    # как в operational_router.reindex_content).
+    await session.commit()
     runner.spawn_audit_export(task.id, result_url, actor_sub)
 
     return AuditLogExportResponse(task_id=task.id, estimated_ready_at=None)
