@@ -6,18 +6,16 @@ End-to-end query flow (ADR-0010 §"Stage 1 — Retrieval"):
    articles на access_level + status).
 3. BM25 top-30: existing `ArticleRepository.search` (Postgres FTS,
    landed в E2.5a #46). Same access_level + status filter.
-4. RRF fusion (k=60):
+4. Symmetric RRF fusion (k=60):
        score = 1/(k + v_rank+1) + 1/(k + b_rank+1)
-   Asymmetric — vector-only hits OK (если no BM25 match, contributing
-   только vector term). **BM25-only article hits dropped**: т.к. fusion
-   итерирует по `vector_hits` (chunk granularity), статья ранжированная
-   только BM25 без vector chunk match в output не попадёт. Это
-   осознанный trade-off: chunk granularity у output обязательна для
-   citations / chat-grounding (article без конкретного chunk
-   бесполезна), а vector с правильно настроенным top-K (30) на типичных
-   ru-IR workloads даёт высокую recall. Регрессионный тест:
-   `test_rrf_fuse_bm25_only_articles_dropped`.
-5. Sort by fused score desc → top_k chunks.
+   - Vector chunks сохраняют chunk_index + text fragment.
+   - BM25-only articles (нет в vector top-K) добавляются как synthetic
+     chunk_index=0 entries с FTS snippet'ом как text — обеспечивает
+     recall для articles которые FTS matches strongly но vector miss'ил
+     (особенно critical при mock embeddings или imperfect production
+     model). До 2026-05-28 был asymmetric drop — fixed.
+5. Sort by fused score desc → top_k chunks (chunk-granularity output;
+   downstream `_dedupe_by_article` опционально dedup'нет для citations).
 
 Result type: `RetrievalHit` (re-used от repository).
 """
@@ -75,7 +73,8 @@ def _rerank_provider_label(reranker: Reranker) -> str:
 # Используется только для индекса rank (id) — поля title/snippet/score
 # игнорируются в fusion. Алиас облегчает refactoring если ArticleRepository
 # когда-нибудь поменяет shape.
-type BM25Row = tuple[UUID, str, str | None, float]
+type BM25Row = tuple[UUID, str, str, str | None, float]
+# (id, slug, title, snippet, ts_rank) — per ArticleRepository.search.
 
 logger = logging.getLogger(__name__)
 
@@ -181,24 +180,41 @@ class RetrievalService:
         *,
         top_k: int,
     ) -> list[RetrievalHit]:
-        """Asymmetric RRF: chunks from vector + article BM25 ranks.
+        """Symmetric RRF: chunk-level granularity + BM25-only synthesis.
 
-        BM25 returns articles (no chunk granularity) — promote'им
-        BM25 rank на все chunks этой статьи (via lookup map). Статьи,
-        ранжированные только BM25 без vector match, в output не
-        попадают: см. docstring модуля §"BM25-only article hits dropped".
+        Vector retriever отдаёт chunk-level granularity (chunk_index + text
+        fragment). BM25 — article-level (id + slug + title + snippet).
+
+        Fusion:
+        1. Каждый vector chunk сохраняется со score = 1/(_RRF_K + v_rank+1).
+        2. Если article также matches BM25 — все её chunks получают boost
+           1/(_RRF_K + b_rank+1).
+        3. BM25-only articles (не в vector top-K) добавляются как
+           synthetic chunk_index=0 entries — slug+title+snippet как text.
+           Это симметрично vector-only path и обеспечивает recall для
+           articles которые FTS matches strongly но vector miss'ил
+           (особенно critical при mock embeddings).
+        4. Output — chunk-granularity (downstream consumers dedup'ают
+           по article_id если им нужно — например `/search` endpoint
+           через `_dedupe_by_article`).
         """
         bm25_rank_by_article = {
-            article_row[0]: rank + 1 for rank, article_row in enumerate(bm25_articles)
+            article_row[0]: rank for rank, article_row in enumerate(bm25_articles)
         }
+        bm25_meta_by_article: dict[UUID, BM25Row] = {row[0]: row for row in bm25_articles}
+
         fused: list[tuple[float, RetrievalHit]] = []
+        seen_article_chunks: set[tuple[UUID, int]] = set()
+        vector_article_ids: set[UUID] = set()
+
+        # Vector chunks (chunk-granularity preserved).
         for v_rank, hit in enumerate(vector_hits):
             score = 1.0 / (_RRF_K + v_rank + 1)
             b_rank = bm25_rank_by_article.get(hit.article_id)
             if b_rank is not None:
-                score += 1.0 / (_RRF_K + b_rank)
-            # Replace cosine distance в `score` field на fused RRF score
-            # (chat / endpoint consumers ожидают "higher = better").
+                score += 1.0 / (_RRF_K + b_rank + 1)
+            seen_article_chunks.add((hit.article_id, hit.chunk_index))
+            vector_article_ids.add(hit.article_id)
             fused.append(
                 (
                     score,
@@ -214,6 +230,31 @@ class RetrievalService:
                     ),
                 )
             )
+
+        # BM25-only — synthesize chunk_index=0 entry с FTS snippet'ом.
+        # Только для articles которые ОТСУТСТВУЮТ в vector hits полностью
+        # (иначе уже представлены своими реальными chunks).
+        for article_id, (_, slug, title, snippet, _ts_rank) in bm25_meta_by_article.items():
+            if article_id in vector_article_ids:
+                continue
+            b_rank = bm25_rank_by_article[article_id]
+            score = 1.0 / (_RRF_K + b_rank + 1)
+            fused.append(
+                (
+                    score,
+                    RetrievalHit(
+                        article_id=article_id,
+                        slug=slug,
+                        title=title,
+                        chunk_index=0,
+                        text=snippet or "",
+                        char_start=0,
+                        char_end=len(snippet or ""),
+                        score=score,
+                    ),
+                )
+            )
+
         fused.sort(key=lambda x: -x[0])
         return [hit for _, hit in fused[:top_k]]
 

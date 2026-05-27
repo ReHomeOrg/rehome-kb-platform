@@ -1584,7 +1584,7 @@ async def test_search_returns_hits_and_has_more() -> None:
     session = MagicMock()
     result = MagicMock()
     # 4 rows для limit=3 → has_more=True, trim до 3.
-    rows = [(uuid4(), f"T{i}", "snippet", 0.5 - i * 0.1) for i in range(4)]
+    rows = [(uuid4(), f"slug-{i}", f"T{i}", "snippet", 0.5 - i * 0.1) for i in range(4)]
     result.all.return_value = rows
     session.execute = AsyncMock(return_value=result)
     repo = ArticleRepository(session)
