@@ -206,3 +206,53 @@ class ArticleVersion(Base):
 
     def __repr__(self) -> str:  # pragma: no cover (debug only)
         return f"<ArticleVersion article_id={self.article_id} v={self.version}>"
+
+
+class ArticleQuestion(Base):
+    """User Q&A под статьями (ТЗ §2 community-driven help, 2026-05-28).
+
+    Lifecycle: user submits PENDING → staff либо ANSWERED либо DISMISSED.
+    Public видит только ANSWERED. DISMISSED — internal audit trail.
+
+    ФЗ-152 invariants (enforced на router/audit level):
+    - `body` / `answer_body` НЕ попадают в audit_log metadata (user text
+      может содержать PII — phone/email).
+    - DISMISSED rows не возвращаются публично (включая body).
+    """
+
+    __tablename__ = "article_questions"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    article_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("articles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_sub: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'PENDING'"))
+    answer_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answerer_sub: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dismiss_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ArticleQuestion {self.id} status={self.status!r}>"
+
+    @staticmethod
+    def allowed_statuses() -> tuple[str, ...]:
+        return ("PENDING", "ANSWERED", "DISMISSED")

@@ -18,6 +18,8 @@ from src.api.admin.security_incidents_router import (
     router as admin_security_incidents_router,
 )
 from src.api.admin.users_router import router as admin_users_router
+from src.api.articles.questions_router import admin_router as article_questions_admin_router
+from src.api.articles.questions_router import public_router as article_questions_public_router
 from src.api.articles.router import router as articles_router
 from src.api.audit.router import router as audit_router
 from src.api.categories.admin_router import router as admin_categories_router
@@ -48,6 +50,8 @@ router = APIRouter(prefix="/api/v1")
 router.include_router(health.router)
 router.include_router(auth.router)
 router.include_router(articles_router)
+router.include_router(article_questions_public_router)
+router.include_router(article_questions_admin_router)
 router.include_router(audit_router)
 router.include_router(tags_router)
 router.include_router(categories_router)
