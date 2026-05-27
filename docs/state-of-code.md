@@ -267,6 +267,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 | Route | Статус | Использует |
 |---|---|---|
 | `/admin/*` | Admin panel | Collaborators (queue, lifecycle, portal-access, junction), HR, Audit, Articles |
+| `/` | Public | help.rehome.one landing — search bar + 11 категорий tile-grid + top FAQ (`tags=topfaq`) + «Открыть чат» CTA. ПЗ §2 |
 | `/articles` | Public + edit | Search, list, detail с markdown, create/edit/delete (STAFF+) |
 | `/categories` | Public | Tree view |
 | `/chat` | Auth | Sessions list + SSE chat + citations + escalation + feedback |
@@ -724,6 +725,20 @@ Skipped explicitly (deferred):
   `GET /vault/secrets/{id}/wraps` per ADR-0017 §E + frontend
   `RecipientsPanel` с revoke→rotation flow в secret-detail page); QR-код
   для TOTP setup; batch pubkey endpoint для groups >50.
+- **Help center seeded** (2026-05-27): импортировано 138 articles (15 FAQ +
+  120 KB + 3 baseline) из `reHome_*.docx`. Landing `/` заменён с «Coming
+  soon» на real help-center (search + categories + top FAQ tile-grid).
+  Maintenance scripts в `backend/scripts/` (`import_kb_articles.py`,
+  `reindex_articles.py`).
+- **Known issues** discovered while seeding:
+  - `POST /api/v1/admin/reindex` падает с `LookupError: admin_task not
+    found` — transaction race между handler и background task (open bug,
+    workaround — `scripts/reindex_articles.py` direct call).
+  - pgvector ↔ SQLAlchemy read path падает `'float' object is not
+    subscriptable` в `Vector._from_db` — embeddings persist OK
+    (`article_embeddings` 138 rows), но `/api/v1/search` 500 при
+    `RAG_ENABLED=true`. Backend сейчас работает с `RAG_ENABLED=false`
+    (FTS через `/articles/search` работает).
 - Observability: Grafana dashboards для hot paths (нужен running
   Grafana для validation), alert tuning (нужны operational данные).
 
