@@ -557,6 +557,111 @@ paths:
                         $ref: '#/components/schemas/SearchHit'
                     pagination:
                       $ref: '#/components/schemas/Pagination'
+  /api/v1/articles/{slug}/questions:
+    parameters:
+    - name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags: [Articles]
+      summary: Public Q&A list (только ANSWERED)
+      operationId: listArticleQuestions
+      x-implementation-status: implemented
+      x-implementation-note: ТЗ §2 community-driven help. Public list скрывает
+        author_sub (privacy); PENDING/DISMISSED не показываются
+      responses:
+        '200':
+          description: List of ANSWERED questions
+        '404':
+          description: Article not found
+    post:
+      tags: [Articles]
+      summary: Submit question (logged user)
+      operationId: submitArticleQuestion
+      x-implementation-status: implemented
+      x-implementation-note: Status=PENDING; станет публичным после staff
+        answer'а. body НЕ в audit metadata (ФЗ-152 PII guard)
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '201':
+          description: Created
+        '401':
+          description: Не аутентифицирован
+        '404':
+          description: Article not found
+        '422':
+          description: Invalid body (empty или > 2000 chars)
+  /api/v1/admin/article-questions:
+    get:
+      tags: [Admin]
+      summary: Moderation queue (STAFF+)
+      operationId: listAdminArticleQuestions
+      x-implementation-status: implemented
+      x-implementation-note: Offset-based pagination; filter по status
+      responses:
+        '200':
+          description: List + total
+        '401':
+          description: Не аутентифицирован
+        '403':
+          description: Требуется STAFF scope
+  /api/v1/admin/article-questions/{question_id}/answer:
+    post:
+      tags: [Admin]
+      summary: Answer question (STAFF+; publishes публично)
+      operationId: answerArticleQuestion
+      x-implementation-status: implemented
+      x-implementation-note: PENDING/DISMISSED → ANSWERED. answer_body НЕ
+        в audit metadata
+      parameters:
+      - name: question_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Answered
+        '401':
+          description: Не аутентифицирован
+        '403':
+          description: Требуется STAFF scope
+        '404':
+          description: Question not found
+        '422':
+          description: Invalid answer_body
+  /api/v1/admin/article-questions/{question_id}/dismiss:
+    post:
+      tags: [Admin]
+      summary: Dismiss question (STAFF+; ANSWERED → 409)
+      operationId: dismissArticleQuestion
+      x-implementation-status: implemented
+      x-implementation-note: PENDING → DISMISSED only. ANSWERED уже опубликован
+        публично — dismiss блокируется 409. reason value НЕ в audit metadata
+      parameters:
+      - name: question_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Dismissed
+        '401':
+          description: Не аутентифицирован
+        '403':
+          description: Требуется STAFF scope
+        '404':
+          description: Question not found
+        '409':
+          description: ANSWERED — нельзя retroactively unpublish
   /api/v1/categories:
     get:
       tags:

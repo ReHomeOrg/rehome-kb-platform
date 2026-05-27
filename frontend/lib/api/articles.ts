@@ -120,6 +120,113 @@ export async function patchArticle(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Article Q&A (ТЗ §2, 2026-05-28)
+
+export type ArticleQuestionStatus = "PENDING" | "ANSWERED" | "DISMISSED";
+
+/** Public view — без `author_sub` (privacy). */
+export interface ArticleQuestionPublic {
+  id: string;
+  body: string;
+  answer_body: string;
+  answered_at: string;
+  created_at: string;
+}
+
+export interface ArticleQuestionPublicListResponse {
+  data: ArticleQuestionPublic[];
+}
+
+/** Admin view — все поля. */
+export interface ArticleQuestionAdmin {
+  id: string;
+  article_id: string;
+  author_sub: string;
+  body: string;
+  status: ArticleQuestionStatus;
+  answer_body: string | null;
+  answerer_sub: string | null;
+  dismiss_reason: string | null;
+  created_at: string;
+  answered_at: string | null;
+  updated_at: string;
+}
+
+export interface ArticleQuestionAdminListResponse {
+  data: ArticleQuestionAdmin[];
+  total: number;
+}
+
+export async function listArticleQuestions(
+  slug: string,
+): Promise<ArticleQuestionPublicListResponse> {
+  return apiFetch<ArticleQuestionPublicListResponse>(
+    `/api/v1/articles/${encodeURIComponent(slug)}/questions`,
+  );
+}
+
+export async function submitArticleQuestion(
+  slug: string,
+  body: string,
+): Promise<ArticleQuestionAdmin> {
+  return apiFetch<ArticleQuestionAdmin>(
+    `/api/v1/articles/${encodeURIComponent(slug)}/questions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body }),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function listAdminArticleQuestions(
+  params: {
+    status?: ArticleQuestionStatus;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ArticleQuestionAdminListResponse> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const tail = qs.toString();
+  return apiFetch<ArticleQuestionAdminListResponse>(
+    `/api/v1/admin/article-questions${tail ? `?${tail}` : ""}`,
+  );
+}
+
+export async function answerArticleQuestion(
+  questionId: string,
+  answerBody: string,
+): Promise<ArticleQuestionAdmin> {
+  return apiFetch<ArticleQuestionAdmin>(
+    `/api/v1/admin/article-questions/${encodeURIComponent(questionId)}/answer`,
+    {
+      method: "POST",
+      body: JSON.stringify({ answer_body: answerBody }),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+export async function dismissArticleQuestion(
+  questionId: string,
+  reason: string | null,
+): Promise<ArticleQuestionAdmin> {
+  return apiFetch<ArticleQuestionAdmin>(
+    `/api/v1/admin/article-questions/${encodeURIComponent(questionId)}/dismiss`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 export async function deleteArticle(slug: string): Promise<void> {
   await apiFetch<void>(`/api/v1/articles/${encodeURIComponent(slug)}`, {
     method: "DELETE",

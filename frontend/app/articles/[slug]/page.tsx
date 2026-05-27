@@ -5,14 +5,17 @@
  * `not-found.tsx`. Render с react-markdown (без raw HTML).
  */
 
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import Nav from "@/app/_components/nav";
 import { getArticle } from "@/lib/api/articles";
 import { ApiError } from "@/lib/api/client";
+import { COOKIE_SESSION } from "@/lib/auth/cookies";
 
 import ArticleMarkdown from "../_components/article-markdown";
+import ArticleQaSection from "../_components/article-qa-section";
 import DeleteArticleButton from "../_components/delete-button";
 
 interface PageProps {
@@ -32,6 +35,9 @@ export default async function ArticleDetailPage({
     }
     throw err;
   }
+
+  const cookieStore = await cookies();
+  const isLoggedIn = cookieStore.has(COOKIE_SESSION);
 
   return (
     <>
@@ -92,6 +98,7 @@ export default async function ArticleDetailPage({
         <article className="rounded-md border border-gray-200 p-6">
           <ArticleMarkdown content={article.body_markdown} />
         </article>
+        <ArticleQaSection slug={article.slug} isLoggedIn={isLoggedIn} />
       </main>
     </>
   );

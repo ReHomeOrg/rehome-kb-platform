@@ -48,6 +48,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
         >
           <option value="">все</option>
           <option value="article">article</option>
+          <option value="article_question">article_question</option>
           <option value="collaborator">collaborator</option>
           <option value="document">document</option>
           <option value="premises_card">premises_card</option>

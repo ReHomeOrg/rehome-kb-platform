@@ -13,11 +13,18 @@ RESOURCE_WEBHOOK: Final = "webhook"
 RESOURCE_CHAT_SESSION: Final = "chat_session"
 RESOURCE_PREMISES_CARD: Final = "premises_card"
 RESOURCE_HR_EMPLOYEE: Final = "hr_employee"
+RESOURCE_ARTICLE_QUESTION: Final = "article_question"
 
 # Article actions.
 ACTION_ARTICLES_CREATED: Final = "articles.created"
 ACTION_ARTICLES_UPDATED: Final = "articles.updated"
 ACTION_ARTICLES_ARCHIVED: Final = "articles.archived"
+
+# Article Q&A actions (TZ §2, 2026-05-28). Metadata НЕ содержит body
+# (user-supplied text → PII risk если log leak).
+ACTION_ARTICLE_QUESTION_SUBMITTED: Final = "article.question.submitted"
+ACTION_ARTICLE_QUESTION_ANSWERED: Final = "article.question.answered"
+ACTION_ARTICLE_QUESTION_DISMISSED: Final = "article.question.dismissed"
 
 # Webhook actions.
 ACTION_WEBHOOKS_CREATED: Final = "webhooks.created"
