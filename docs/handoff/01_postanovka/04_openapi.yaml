@@ -2485,6 +2485,60 @@ paths:
           description: Невалидные / недостаточные shares
         '403':
           description: Caller не имеет LEGAL+STAFF scope
+  /api/v1/admin/analytics/queries:
+    get:
+      tags:
+      - Admin
+      summary: Top search queries с content-gap breakdown (STAFF_ADMIN)
+      operationId: getAdminAnalyticsQueries
+      x-implementation-status: implemented
+      x-implementation-note: ТЗ §2 KB usage observability. window_hours default
+        168 (7 дней), max 720 (30 дней)
+      parameters:
+      - name: window_hours
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 720
+          default: 168
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: Top queries
+        '401':
+          description: Не аутентифицирован
+        '403':
+          description: Требуется staff_admin scope
+  /api/v1/admin/analytics/article-questions:
+    get:
+      tags:
+      - Admin
+      summary: Q&A counts per article (moderation backlog)
+      operationId: getAdminAnalyticsArticleQuestions
+      x-implementation-status: implemented
+      x-implementation-note: Sorted by pending DESC; articles без вопросов исключены
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: Per-article counts
+        '401':
+          description: Не аутентифицирован
+        '403':
+          description: Требуется staff_admin scope
   /api/v1/admin/stats:
     get:
       tags:
