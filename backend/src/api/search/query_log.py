@@ -95,6 +95,40 @@ class SearchQueryLogRepository:
         self._session.add(row)
         await self._session.flush()
 
+    async def find_top_queries(
+        self,
+        *,
+        window_hours: int = 168,
+        limit: int = 50,
+    ) -> list[tuple[str, int, int]]:
+        """Top queries overall в window. Returns list of
+        `(query_normalized, total_count, with_results_count)`.
+
+        Used для admin analytics dashboard: shows what users actually
+        search, и какая доля query'ев имеет результаты (proxy для
+        content gap). `total - with_results` = unanswered queries.
+
+        Ordered count desc, then alphabetical (deterministic).
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(UTC) - timedelta(hours=window_hours)
+        total_col = func.count().label("total")
+        with_results_col = func.count(func.nullif(SearchQueryLog.has_results, False)).label(
+            "with_results"
+        )
+        stmt = (
+            select(SearchQueryLog.query_normalized, total_col, with_results_col)
+            .where(SearchQueryLog.created_at >= cutoff)
+            .group_by(SearchQueryLog.query_normalized)
+            .order_by(total_col.desc(), SearchQueryLog.query_normalized.asc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            (row.query_normalized, int(row.total), int(row.with_results)) for row in result.all()
+        ]
+
     async def find_popular_unanswered(
         self,
         *,

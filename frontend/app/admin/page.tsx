@@ -254,6 +254,22 @@ export default async function AdminDashboardPage({
                     Maintenance (reindex / cache) →
                   </a>
                 </li>
+                <li>
+                  <a
+                    href="/admin/analytics"
+                    className="underline hover:text-blue-900"
+                  >
+                    KB Аналитика (top queries / Q&A) →
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="/admin/article-questions?status=PENDING"
+                    className="underline hover:text-blue-900"
+                  >
+                    Q&A: модерация вопросов →
+                  </a>
+                </li>
               </ul>
             </section>
           </>
