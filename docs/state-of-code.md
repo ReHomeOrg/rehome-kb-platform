@@ -266,7 +266,7 @@ GitHub organization `rehome-one` (Free plan) создан 2026-05-11 как ко
 
 | Route | Статус | Использует |
 |---|---|---|
-| `/admin/*` | Admin panel | Collaborators (queue, lifecycle, portal-access, junction), HR, Audit, Articles |
+| `/admin/*` | Admin panel | Collaborators (queue, lifecycle, portal-access, junction), HR, Audit, Articles. **`/admin/analytics`** (2026-05-28): in-app KB observability — top search queries с content-gap breakdown + per-article Q&A moderation counts. **`/admin/article-questions`**: Q&A moderation queue (PENDING/ANSWERED/DISMISSED tabs). |
 | `/` | Public | help.rehome.one landing — search bar + 11 категорий tile-grid + top FAQ (`tags=topfaq`) + «Открыть чат» CTA. ПЗ §2 |
 | `/articles` | Public + edit | Search, list, detail с markdown, create/edit/delete (STAFF+) |
 | `/categories` | Public | Tree view |
