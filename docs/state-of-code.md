@@ -730,15 +730,22 @@ Skipped explicitly (deferred):
   soon» на real help-center (search + categories + top FAQ tile-grid).
   Maintenance scripts в `backend/scripts/` (`import_kb_articles.py`,
   `reindex_articles.py`).
-- **Known issues** discovered while seeding:
-  - `POST /api/v1/admin/reindex` падает с `LookupError: admin_task not
-    found` — transaction race между handler и background task (open bug,
-    workaround — `scripts/reindex_articles.py` direct call).
-  - pgvector ↔ SQLAlchemy read path падает `'float' object is not
-    subscriptable` в `Vector._from_db` — embeddings persist OK
-    (`article_embeddings` 138 rows), но `/api/v1/search` 500 при
-    `RAG_ENABLED=true`. Backend сейчас работает с `RAG_ENABLED=false`
-    (FTS через `/articles/search` работает).
+- ~~**Known issues** discovered while seeding (admin_task race +
+  pgvector deserialize)~~ ✅ ОБА FIXED (2026-05-27):
+  - **admin_task race**: handler делал `repo.create()` (flush only) →
+    spawn'ил background task, который читал task_id в свежей сессии и
+    падал на `LookupError` потому что INSERT ещё не committed. Fix:
+    explicit `await session.commit()` перед `runner.spawn_*` во всех 3
+    handler'ах (operational_router.reindex, audit_log_router.export,
+    eval_runs_router.start). End-to-end verified: reindex → task
+    COMPLETED.
+  - **pgvector deserialize**: `embedding.op("<=>")(...)` не типизировал
+    return value → SQLAlchemy наследовал Vector type → `Vector._from_db`
+    падал на float scalar. Fix: использовать
+    `ArticleEmbedding.embedding.cosine_distance(query_vector)` —
+    pgvector method с правильной типизацией. End-to-end verified:
+    `/api/v1/search "сервисный сбор"` → top hit «Почему сервисный сбор
+    не возвращается?» (score 0.030).
 - Observability: Grafana dashboards для hot paths (нужен running
   Grafana для validation), alert tuning (нужны operational данные).
 
