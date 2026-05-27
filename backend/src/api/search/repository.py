@@ -165,7 +165,10 @@ class EmbeddingRepository:
             ArticleEmbedding.char_end - ArticleEmbedding.char_start,
         ).label("text")
         # `embedding <=> :query` — pgvector cosine distance.
-        distance_expr = ArticleEmbedding.embedding.op("<=>")(query_vector).label("distance")
+        # `cosine_distance` method (vs raw op("<=>")) — типизирует return как
+        # Float, иначе SQLAlchemy наследует Vector type → падает на read
+        # `Vector._from_db('float')`. См. pgvector/sqlalchemy/vector.py.
+        distance_expr = ArticleEmbedding.embedding.cosine_distance(query_vector).label("distance")
 
         stmt = (
             select(

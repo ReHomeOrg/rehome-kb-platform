@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.eval_runs_schemas import (
     EvalRunListPagination,
@@ -34,6 +35,7 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.db import get_session
 
 router = APIRouter(prefix="/admin/llm", tags=["Admin"])
 
@@ -74,6 +76,7 @@ async def start_eval_run(
     claims: dict[str, Any] = Depends(require_authenticated),
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     service: EvalRunsService = Depends(_get_eval_runs_service),
+    session: AsyncSession = Depends(get_session),
 ) -> EvalRunStartResponse:
     """`POST /api/v1/admin/llm/eval-runs` (OpenAPI 04 §startEvalRun).
 
@@ -88,7 +91,7 @@ async def start_eval_run(
     _require_staff_admin(access_levels)
     actor_sub = claims.get("sub", "unknown")
     try:
-        task = await service.start_run(request, actor_sub=actor_sub)
+        task = await service.start_run(request, actor_sub=actor_sub, session=session)
     except EvalRunValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return EvalRunStartResponse(run_id=task.id)

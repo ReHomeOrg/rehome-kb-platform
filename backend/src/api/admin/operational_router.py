@@ -27,6 +27,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.admin.task_runner import AdminTaskRunner, get_admin_task_runner
 from src.api.admin.tasks_repository import (
@@ -51,6 +52,7 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.db import get_session
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -120,6 +122,7 @@ async def reindex_content(
     repo: AdminTaskRepository = Depends(get_admin_task_repository),
     audit_repo: AuditRepository = Depends(get_audit_repository),
     runner: AdminTaskRunner = Depends(get_admin_task_runner),
+    session: AsyncSession = Depends(get_session),
 ) -> ReindexResponse:
     """`POST /api/v1/admin/reindex` (OpenAPI 04 §reindexContent, #268 async).
 
@@ -156,6 +159,11 @@ async def reindex_content(
         resource_id=str(task.id),
         metadata={"scope": payload.scope},
     )
+
+    # CRITICAL: commit BEFORE spawn. Background task opens own session;
+    # без commit'а task row невидим для него → LookupError. Race
+    # документирован в state-of-code CS.12 (2026-05-27 known bug fix).
+    await session.commit()
 
     # Spawn background coroutine (asyncio.create_task). Request returns
     # 202 immediately; background task transitions PENDING → RUNNING →
