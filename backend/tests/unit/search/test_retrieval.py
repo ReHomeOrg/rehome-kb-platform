@@ -101,7 +101,7 @@ def test_rrf_fuse_bm25_match_boosts_score() -> None:
     1/(60 + b_rank+1)."""
     a = uuid4()
     vector_hits = [_hit(a, chunk_index=0)]
-    bm25 = [(a, "title", "snippet", 0.5)]  # rank 1
+    bm25 = [(a, "slug-a", "title", "snippet", 0.5)]  # rank 1
     fused = RetrievalService._rrf_fuse(vector_hits, bm25, top_k=10)
     expected = 1.0 / 61 + 1.0 / 61  # v_rank=1, b_rank=1
     assert abs(fused[0].score - expected) < 1e-9
@@ -115,7 +115,7 @@ def test_rrf_fuse_orders_by_descending_score() -> None:
         _hit(b, chunk_index=0),  # v_rank=2, BM25 rank 1 → 1/62 + 1/61 = 0.0326
         _hit(c, chunk_index=0),  # v_rank=3, BM25 rank 2 → 1/63 + 1/62 = 0.0320
     ]
-    bm25 = [(b, "t", "s", 0.5), (c, "t", "s", 0.4)]
+    bm25 = [(b, "slug-b", "t", "s", 0.5), (c, "slug-c", "t", "s", 0.4)]
     fused = RetrievalService._rrf_fuse(vector_hits, bm25, top_k=10)
     assert fused[0].article_id == b  # highest fused score
     assert fused[1].article_id == c
@@ -132,33 +132,40 @@ def test_rrf_fuse_empty_inputs() -> None:
     assert RetrievalService._rrf_fuse([], [], top_k=10) == []
 
 
-def test_rrf_fuse_bm25_only_articles_dropped() -> None:
-    """Article ранжированная только BM25 (без vector chunk match) НЕ
-    появляется в fused output.
+def test_rrf_fuse_bm25_only_articles_included_as_synthetic_chunk() -> None:
+    """Article ранжированная только BM25 (без vector chunk match) появляется
+    в fused output как synthetic chunk_index=0 entry с FTS snippet'ом
+    как text.
 
-    Это осознанный trade-off (см. retrieval.py docstring §"BM25-only
-    article hits dropped"): output обязан быть chunk-granularity для
-    citations / chat-grounding, и article без конкретного chunk
-    бесполезна.
+    Это симметричный fix к ранее асимметричному «BM25-only articles
+    dropped» — улучшает recall особенно с imperfect / mock embeddings.
+    Synthesis: slug + title из ArticleRepository.search row; text =
+    ts_headline snippet (без HTML escaping — frontend sanitize'ит).
     """
     bm25_only = uuid4()
-    # vector_hits — пусто (или содержит другие article'и), BM25 нашёл
-    # `bm25_only` article, но без vector chunk — её не должно быть в fused.
     fused = RetrievalService._rrf_fuse(
         vector_hits=[],
-        bm25_articles=[(bm25_only, "title", "snippet", 0.9)],
+        bm25_articles=[(bm25_only, "slug-only", "title", "snippet text", 0.9)],
         top_k=10,
     )
-    assert fused == []
-    # Тот же scenario с vector chunk'ами других article'й — BM25-only
-    # article всё равно не появляется.
+    assert len(fused) == 1
+    hit = fused[0]
+    assert hit.article_id == bm25_only
+    assert hit.slug == "slug-only"
+    assert hit.title == "title"
+    assert hit.chunk_index == 0
+    assert hit.text == "snippet text"
+    # Score = RRF от только BM25 rank=1: 1/(60+1) = 1/61.
+    assert abs(hit.score - 1.0 / 61) < 1e-9
+
+    # Mixed: vector chunk + другая BM25-only article — обе в output.
     other = uuid4()
     fused = RetrievalService._rrf_fuse(
         vector_hits=[_hit(other, chunk_index=0)],
-        bm25_articles=[(bm25_only, "title", "snippet", 0.9)],
+        bm25_articles=[(bm25_only, "slug-only", "title", "snippet", 0.9)],
         top_k=10,
     )
-    assert {h.article_id for h in fused} == {other}
+    assert {h.article_id for h in fused} == {other, bm25_only}
 
 
 def test_rrf_score_replaces_distance_in_hit() -> None:
