@@ -578,10 +578,12 @@ class ArticleRepository:
         *,
         cursor: tuple[float, UUID] | None = None,
         limit: int = 10,
-    ) -> tuple[list[tuple[UUID, str, str, float]], bool]:
+    ) -> tuple[list[tuple[UUID, str, str, str, float]], bool]:
         """Postgres FTS search через `search_vector @@ websearch_to_tsquery`.
 
-        Возвращает `[(id, title, snippet, score), ...]` + `has_more`.
+        Возвращает `[(id, slug, title, snippet, score), ...]` + `has_more`.
+        `slug` нужен для citation URLs в hybrid retrieval (RetrievalService
+        RRF fusion).
 
         Авторизация (ADR-0003 inherit):
         - `status='PUBLISHED'` — read-mask (DRAFT/ARCHIVED скрыты).
@@ -612,7 +614,7 @@ class ArticleRepository:
         ).label("snippet")
 
         allowed_strings = [level.value for level in access_levels]
-        stmt = select(Article.id, Article.title, headline, rank_expr).where(
+        stmt = select(Article.id, Article.slug, Article.title, headline, rank_expr).where(
             Article.status == "PUBLISHED",
             Article.access_level.in_(allowed_strings),
             Article.search_vector.op("@@")(tsq),
@@ -626,7 +628,7 @@ class ArticleRepository:
         stmt = stmt.order_by(rank_expr.desc(), Article.id.desc()).limit(limit + 1)
 
         result = await self._session.execute(stmt)
-        rows = [(row[0], row[1], row[2], float(row[3])) for row in result.all()]
+        rows = [(row[0], row[1], row[2], row[3], float(row[4])) for row in result.all()]
         has_more = len(rows) > limit
         return rows[:limit], has_more
 

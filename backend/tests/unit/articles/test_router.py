@@ -1676,8 +1676,8 @@ def test_search_returns_200_with_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rows = [
-        (uuid4(), "Договор аренды", "<b>Договор</b> аренды...", 0.85),
-        (uuid4(), "Другой документ", "...<b>договор</b>...", 0.42),
+        (uuid4(), "dogovor-arendy", "Договор аренды", "<b>Договор</b> аренды...", 0.85),
+        (uuid4(), "drugoy-dokument", "Другой документ", "...<b>договор</b>...", 0.42),
     ]
     _override_search(monkeypatch, rows)
     try:
@@ -1725,7 +1725,7 @@ def test_search_score_clipped_to_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ts_rank теоретически > 1; router clip'ит к 1.0."""
-    rows = [(uuid4(), "T", "snip", 1.5)]  # > 1
+    rows = [(uuid4(), "t", "T", "snip", 1.5)]  # > 1
     _override_search(monkeypatch, rows)
     try:
         response = client.post("/api/v1/articles/search", json={"q": "x"})
@@ -1739,7 +1739,7 @@ def test_search_returns_cursor_when_has_more(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rows = [(uuid4(), "T", "s", 0.5)]
+    rows = [(uuid4(), "t", "T", "s", 0.5)]
     _override_search(monkeypatch, rows, has_more=True)
     try:
         response = client.post("/api/v1/articles/search", json={"q": "x", "limit": 1})
