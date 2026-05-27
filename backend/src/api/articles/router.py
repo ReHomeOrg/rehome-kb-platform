@@ -908,12 +908,12 @@ async def search_articles(
             # на длинных query c повторяющимися словами.
             score=min(score, 1.0),
         )
-        for row_id, title, snippet, score in rows
+        for row_id, _slug, title, snippet, score in rows
     ]
 
     cursor_next: str | None = None
     if rows and has_more:
-        last_id, _, _, last_score = rows[-1]
+        last_id, _, _, _, last_score = rows[-1]
         cursor_next = encode_score_cursor(last_score, last_id)
 
     return ArticlesSearchResponse(
