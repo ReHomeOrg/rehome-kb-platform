@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from src.api.chat.pii_masking import mask_pii
 from src.api.db import get_session
 from src.api.db.base import Base
 
@@ -87,11 +88,23 @@ class SearchQueryLogRepository:
 
     async def log(self, *, query: str, has_results: bool) -> None:
         """Insert одну запись. Whitespace-only query NOOP'ом (caller'а
-        фильтрует router validator, но defence-in-depth)."""
+        фильтрует router validator, но defence-in-depth).
+
+        ФЗ-152 §6 + CLAUDE.md «нет ПДн в незамаскированном виде»:
+        применяем `mask_pii` к normalized query перед persistence.
+        User-supplied free-text может содержать phone/email/паспорт —
+        даже за RBAC barrier (top-queries видны только staff_admin)
+        ПДн в логах хранить нельзя. `mask_pii` идемпотентна; placeholders
+        `[PHONE]`/`[EMAIL]` etc. безопасно агрегируются как обычные
+        words (`COUNT(*) GROUP BY query_normalized`).
+        """
         normalized = normalize_query(query)
         if not normalized:
             return
-        row = SearchQueryLog(query_normalized=normalized, has_results=has_results)
+        # Маскируем PII перед persistence (idempotent — повторный вызов
+        # на уже masked text возвращает то же).
+        masked = mask_pii(normalized).text
+        row = SearchQueryLog(query_normalized=masked, has_results=has_results)
         self._session.add(row)
         await self._session.flush()
 
