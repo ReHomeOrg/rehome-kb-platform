@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
 
 # Add backend src to path
 sys.path.insert(0, "/home/evgeniy/projects/rehome-kb-platform/backend")
@@ -39,8 +38,10 @@ async def main() -> int:
                 article_repo.iter_published_for_reindex(),
             )
             await session.commit()
-            print(f"OK: articles_processed={result.articles_processed}, "
-                  f"chunks={result.chunks_total}, errors={result.errors_total}")
+            print(
+                f"OK: articles_processed={result.articles_processed}, "
+                f"chunks={result.chunks_total}, errors={result.errors_total}"
+            )
     finally:
         await engine.dispose()
     return 0

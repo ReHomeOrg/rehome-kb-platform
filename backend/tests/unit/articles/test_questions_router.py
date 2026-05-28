@@ -384,3 +384,36 @@ def test_admin_answer_body_too_long_returns_422(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+def test_admin_answer_can_revert_dismissed(
+    client: TestClient,
+    override_deps: dict[str, Any],
+    make_jwt: Callable[..., str],
+) -> None:
+    """DISMISSED → ANSWERED revert: previous_status='DISMISSED' в audit
+    metadata, dismiss_reason должен быть clear'нут в response (Reviewer
+    backlog #343.4)."""
+    dismissed = _make_question(status="DISMISSED", body="Original q")
+    dismissed.dismiss_reason = "off-topic original reason"
+    override_deps["repo"]["get_by_id"].return_value = dismissed
+
+    answered = _make_question(status="ANSWERED", body="Original q")
+    answered.id = dismissed.id
+    answered.dismiss_reason = None  # cleared per mark_answered
+    override_deps["repo"]["mark_answered"].return_value = answered
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/admin/article-questions/{dismissed.id}/answer",
+        json={"answer_body": "Actually here is answer"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "ANSWERED"
+    # dismiss_reason cleared (or null).
+    assert body.get("dismiss_reason") is None
+    # Audit metadata знает что previous был DISMISSED.
+    audit_kwargs = override_deps["audit_record"].call_args.kwargs
+    assert audit_kwargs["metadata"]["previous_status"] == "DISMISSED"
