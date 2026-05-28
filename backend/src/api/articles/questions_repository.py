@@ -96,7 +96,12 @@ class ArticleQuestionRepository:
         answer_body: str,
         answerer_sub: str,
     ) -> ArticleQuestion | None:
-        """PENDING / DISMISSED → ANSWERED. Returns updated row или None."""
+        """PENDING / DISMISSED → ANSWERED. Returns updated row или None.
+
+        При revert из DISMISSED — `dismiss_reason` clear'ится: иначе
+        admin view показывает stale «причину отклонения» для теперь-
+        опубликованного ответа (misleading audit trail).
+        """
         row = await self.get_by_id(question_id)
         if row is None:
             return None
@@ -106,6 +111,8 @@ class ArticleQuestionRepository:
         row.answerer_sub = answerer_sub
         row.answered_at = now
         row.updated_at = now
+        # Clear stale dismiss_reason (was set если revert DISMISSED→ANSWERED).
+        row.dismiss_reason = None
         await self._session.flush()
         return row
 

@@ -21,6 +21,7 @@ Result type: `RetrievalHit` (re-used от repository).
 """
 
 import logging
+import re
 import time
 from collections.abc import Sequence
 from typing import Final
@@ -46,6 +47,16 @@ from src.api.search.repository import (
     get_embedding_repository,
 )
 from src.api.search.rerank import MockReranker, Reranker
+
+# Postgres `ts_headline` обёртывает FTS matches в `<b>...</b>`. Для chat
+# LLM context это noise. Frontend (DOMPurify) sanitizes для own render —
+# RetrievalHit.text идёт И туда И в LLM, поэтому очищаем здесь.
+_BM25_MARKUP_RE: Final = re.compile(r"</?b>", re.IGNORECASE)
+
+
+def _strip_bm25_markup(snippet: str) -> str:
+    """Drop `<b>` / `</b>` markup из ts_headline output."""
+    return _BM25_MARKUP_RE.sub("", snippet)
 
 
 def _rerank_provider_label(reranker: Reranker) -> str:
@@ -239,6 +250,11 @@ class RetrievalService:
                 continue
             b_rank = bm25_rank_by_article[article_id]
             score = 1.0 / (_RRF_K + b_rank + 1)
+            # `ts_headline` обёртывает matches в `<b>...</b>` (FTS markup).
+            # Frontend sanitizes (DOMPurify whitelist `<b>`); но в chat LLM
+            # context эти tags — noise (модель может процитировать as-is
+            # или путаться). Strip перед сохранением в RetrievalHit.text.
+            clean_snippet = _strip_bm25_markup(snippet or "")
             fused.append(
                 (
                     score,
@@ -247,9 +263,9 @@ class RetrievalService:
                         slug=slug,
                         title=title,
                         chunk_index=0,
-                        text=snippet or "",
+                        text=clean_snippet,
                         char_start=0,
-                        char_end=len(snippet or ""),
+                        char_end=len(clean_snippet),
                         score=score,
                     ),
                 )

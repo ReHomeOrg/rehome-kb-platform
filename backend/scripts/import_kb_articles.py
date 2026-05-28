@@ -109,16 +109,16 @@ def parse_faq(path: str) -> list[dict[str, Any]]:
         if cur is None:
             continue
         # Field lines
-        if (v := field_value(text, "question")):
+        if v := field_value(text, "question"):
             cur["title"] = v[:200]
             continue
-        if (v := field_value(text, "category")):
+        if v := field_value(text, "category"):
             cur["category"] = v[:100]
             continue
-        if (v := field_value(text, "audience")):
+        if v := field_value(text, "audience"):
             cur["audience"] = AUDIENCE_MAP.get(v.lower(), "all")
             continue
-        if (v := field_value(text, "access_level")):
+        if v := field_value(text, "access_level"):
             v = v.upper()
             cur["access_level"] = v if v in ACCESS_MAP else "PUBLIC"
             continue
@@ -129,10 +129,10 @@ def parse_faq(path: str) -> list[dict[str, Any]]:
             cur["tags"] = (seed + parsed)[:10]
             continue
         # short_answer / full_answer + body
-        if (v := field_value(text, "short_answer")):
+        if v := field_value(text, "short_answer"):
             body_lines.append(f"**Кратко:** {v}")
             continue
-        if (v := field_value(text, "full_answer")):
+        if v := field_value(text, "full_answer"):
             body_lines.append(v)
             continue
         # Plain body paragraph
@@ -190,13 +190,13 @@ def parse_kb(path: str) -> list[dict[str, Any]]:
             continue
         if cur is None:
             continue
-        if (v := field_value(text, "question")):
+        if v := field_value(text, "question"):
             cur["title"] = v[:200]
             continue
-        if (v := field_value(text, "audience")):
+        if v := field_value(text, "audience"):
             cur["audience"] = AUDIENCE_MAP.get(v.lower(), "all")
             continue
-        if (v := field_value(text, "access_level")):
+        if v := field_value(text, "access_level"):
             v = v.upper()
             cur["access_level"] = v if v in ACCESS_MAP else "PUBLIC"
             continue
