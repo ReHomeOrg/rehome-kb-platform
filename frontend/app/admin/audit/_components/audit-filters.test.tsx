@@ -92,10 +92,50 @@ describe("AuditFilters", () => {
     ) as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
     expect(values).toContain("article");
+    expect(values).toContain("article_question");  // Q&A module 2026-05-28
     expect(values).toContain("vault_secret");
     expect(values).toContain("webhook");
     // Default option «все» — empty value
     expect(values).toContain("");
+  });
+
+  it("resource_type select полностью sync'нут с backend RESOURCE_*", () => {
+    /**
+     * Контрактная сцепка с `backend/src/api/audit/actions.py::RESOURCE_*`.
+     * Backend test `test_audit_resource_sync.py` проверяет sync c этой
+     * стороны (parsing select markup); этот frontend test проверяет
+     * что hardcoded set матчит документированный backend список.
+     *
+     * При добавлении RESOURCE_X в backend — обновить и этот expected_set,
+     * и select markup. Reviewer 2026-05-28 §G2.
+     */
+    render(<AuditFilters initial={EMPTY_INITIAL} />);
+    const select = screen.getByLabelText(
+      "Filter by resource type",
+    ) as HTMLSelectElement;
+    const values = new Set(
+      Array.from(select.options)
+        .map((o) => o.value)
+        .filter((v) => v !== ""),  // sentinel «все»
+    );
+    const expected = new Set([
+      "admin_cache",
+      "admin_category",
+      "admin_system_config",
+      "admin_task",
+      "article",
+      "article_question",
+      "chat_session",
+      "collaborator",
+      "document",
+      "hr_employee",
+      "premises_card",
+      "vault_group",
+      "vault_secret",
+      "vault_user",
+      "webhook",
+    ]);
+    expect(values).toEqual(expected);
   });
 
   it("q input имеет maxLength=200 (anti-DoS guard)", () => {

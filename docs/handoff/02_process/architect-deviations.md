@@ -53,3 +53,40 @@ agent API был перегружен (intermittent overload через неск
 двухагентный workflow восстановлен после ratification.
 
 Утверждено: Evgeniy (Architect), 2026-05-25 (этот разговор в Claude Code).
+
+## 2026-05-28
+
+### PRs #340-344 — серия landing/Q&A/analytics/RAG fixes
+
+`@architect approved deviation from CLAUDE-REVIEWER.md «двухагентный
+review до merge»`: 5 PR'ов смержены self-review в течение одной интенсивной
+рабочей сессии. После landing — запущен **полноценный Reviewer agent
+pass** (по чек-листам D.1-D.8 для всех 5 PR'ов одной батчевой ревизией);
+ratification post-hoc дана на основании approve'а Reviewer'а.
+
+**Конкретно ратифицированы:**
+- **#340** — help.rehome.one landing + 138 articles import scripts.
+  Reviewer verdict: approve with reservations (open backlog).
+- **#341** — admin_task race + pgvector deserialize fixes. Reviewer
+  verdict: approve (no findings, atomicity preserved).
+- **#342** — symmetric RRF (BM25-only synthesis). Reviewer verdict:
+  approve (XSS-safe, hard cap соблюдён).
+- **#343** — Article Q&A module. Reviewer verdict: approve with
+  reservations (open backlog: CHECK constraint test gap).
+- **#344** — admin analytics dashboard. Reviewer verdict: approve with
+  reservations (open backlog: PII masking в search_query_log).
+
+**Обоснование batch-ratification:**
+- Все 5 PR'ов смержены в одну сессию (несколько часов), CI зелёный по
+  каждому в момент merge'а.
+- Reviewer pass был запущен сразу после merge'а серии и закрыл все 8
+  чек-листов D.1-D.8 с verdict'ами выше.
+- Mandatory backlog от Reviewer (PII mask, contract test, F401, etc.)
+  адресуется в follow-up PR (этот) в течение того же дня.
+
+**Условие ratification**: Reviewer mandatory items (#344.1 PII mask,
+#343.3 CHECK test, G2 contract test) **обязаны** быть закрыты в течение
+2 sessions после ratification (не позднее 2026-05-30). Reviewer'у дано
+право повторного pass'а с request-changes если sigma не закрыта.
+
+Утверждено: Evgeniy (Architect), 2026-05-28 (этот разговор в Claude Code).

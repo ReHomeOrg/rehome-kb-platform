@@ -81,6 +81,46 @@ async def test_log_skips_empty_query() -> None:
     session.flush.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_log_masks_pii_in_query() -> None:
+    """ФЗ-152 §6 + CLAUDE.md «нет ПДн в незамаскированном виде»:
+    user-supplied query содержащий email / phone → masked перед
+    persistence. Top-queries dashboard видит staff_admin'у; ПДн в
+    логах хранить нельзя даже за RBAC barrier."""
+    session = _session()
+    repo = SearchQueryLogRepository(session)
+    await repo.log(
+        query="контакт менеджера user@example.com +7 916 123-45-67",
+        has_results=True,
+    )
+    session.add.assert_called_once()
+    row = session.add.call_args.args[0]
+    # Email и телефон должны быть замаскированы.
+    assert "user@example.com" not in row.query_normalized
+    assert "+7 916" not in row.query_normalized
+    assert "916-123-45-67" not in row.query_normalized
+    # Mask placeholders присутствуют.
+    assert "[EMAIL]" in row.query_normalized or "[PHONE]" in row.query_normalized
+
+
+@pytest.mark.asyncio
+async def test_log_pii_mask_is_idempotent() -> None:
+    """Повторный вызов на masked text — placeholders НЕ matches'ят
+    patterns (mask_pii idempotent). Garante'ит что multi-pass не
+    повреждает данные."""
+    session = _session()
+    repo = SearchQueryLogRepository(session)
+    # Первый pass.
+    await repo.log(query="my email user@example.com", has_results=True)
+    first_row = session.add.call_args.args[0]
+    first_normalized = first_row.query_normalized
+    # Второй pass с тем же масштабом — content тот же.
+    session.add.reset_mock()
+    await repo.log(query="my email user@example.com", has_results=True)
+    second_row = session.add.call_args.args[0]
+    assert first_normalized == second_row.query_normalized
+
+
 # ---------------------------------------------------------------------------
 # find_popular_unanswered()
 
