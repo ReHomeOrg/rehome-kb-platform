@@ -185,6 +185,7 @@ async def test_mark_dismissed_blocks_attached() -> None:
 
     result = await repo.mark_dismissed(row.id, reason="late")
     assert result is row
+    assert result is not None
     assert result.status == original_status  # unchanged
 
 
