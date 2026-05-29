@@ -31,6 +31,7 @@ from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -66,12 +67,6 @@ def _user_id_from_claims(claims: dict[str, Any]) -> UUID:
         return UUID(str(sub))
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=401, detail="Invalid sub claim") from exc
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    """Emergency unlock — staff_admin scope (STAFF + LEGAL) per ADR-0011."""
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(status_code=403, detail="Требуется staff_admin scope")
 
 
 def _decode_b64(field: str, value: str, max_bytes: int) -> bytes:
@@ -166,7 +161,7 @@ async def emergency_unlock(
     локально + decrypts. Endpoint только бухгалтерия (audit/incident/log) +
     payload exposure.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     requested_by = str(claims.get("sub", "unknown"))
 
     user = await vault_repo.get_user(payload.target_user_id)

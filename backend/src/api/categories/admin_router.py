@@ -32,6 +32,7 @@ from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.categories.admin_repository import (
@@ -51,15 +52,6 @@ from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult, process_idempotency_key
 
 router = APIRouter(prefix="/admin/categories", tags=["Admin"])
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    """staff_admin gate (STAFF + LEGAL). Same pattern что admin/users."""
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +87,7 @@ async def create_category(
 
     Idempotency-Key (UUID header, ADR-0025) — поддержан.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
@@ -155,7 +147,7 @@ async def get_category(
     repo: CategoryAdminRepository = Depends(get_category_admin_repository),
 ) -> CategoryView:
     """Admin видит row даже если archived (toggle filter в UI на client-side)."""
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     category = await repo.get_by_id(category_id)
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -196,7 +188,7 @@ async def update_category(
 
     Idempotency-Key (UUID header, ADR-0025) — поддержан.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
@@ -271,7 +263,7 @@ async def archive_category(
     DELETE per ADR-0025 не использует idempotency-key (natural 404 + idempotent
     archive semantics).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     category = await repo.get_by_id(category_id)
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")

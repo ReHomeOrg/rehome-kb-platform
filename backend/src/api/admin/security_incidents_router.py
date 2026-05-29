@@ -48,6 +48,7 @@ from src.api.audit import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -58,14 +59,6 @@ router = APIRouter(prefix="/admin/security-incidents", tags=["Admin"])
 
 ACTION_INCIDENT_UPDATED = "admin.security_incident.updated"
 RESOURCE_INCIDENT = "security_incident"
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +85,7 @@ async def list_security_incidents(
     repo: SecurityIncidentRepository = Depends(get_security_incident_repository),
 ) -> SecurityIncidentsListResponse:
     """OpenAPI §listSecurityIncidents."""
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     decoded = decode_cursor(cursor) if cursor else None
 
     rows, has_more = await repo.list_filtered(
@@ -136,7 +129,7 @@ async def get_security_incident(
     repo: SecurityIncidentRepository = Depends(get_security_incident_repository),
 ) -> SecurityIncidentView:
     """OpenAPI §getSecurityIncident."""
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     incident = await repo.get_by_id(incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="SecurityIncident not found")
@@ -182,7 +175,7 @@ async def update_security_incident(
     Idempotency-Key (UUID header, ADR-0025): повторный request с тем же
     key + body → replay cached response без duplicate audit row.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
