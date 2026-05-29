@@ -58,6 +58,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           <option value="vault_group">vault_group</option>
           <option value="webhook">webhook</option>
           <option value="chat_session">chat_session</option>
+          <option value="chat_unanswered">chat_unanswered</option>
           <option value="admin_cache">admin_cache</option>
           <option value="admin_task">admin_task</option>
           <option value="admin_system_config">admin_system_config</option>

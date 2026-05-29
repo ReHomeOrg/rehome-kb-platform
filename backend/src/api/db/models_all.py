@@ -14,6 +14,7 @@ from src.api.articles.models import Article, ArticleVersion
 from src.api.audit.models import AuditLog
 from src.api.categories.models import Category
 from src.api.chat.models import ChatEscalation, ChatMessage, ChatSession
+from src.api.chat.unanswered_queries import ChatUnansweredQuery
 from src.api.collaborators.models import Collaborator, CollaboratorReview, PremisesCollaborator
 from src.api.collaborators.service_orders_models import ServiceOrder
 from src.api.documents.models import Document
@@ -32,6 +33,7 @@ __all__ = [
     "ChatEscalation",
     "ChatMessage",
     "ChatSession",
+    "ChatUnansweredQuery",
     "Collaborator",
     "CollaboratorReview",
     "Document",
