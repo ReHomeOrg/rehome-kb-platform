@@ -41,6 +41,7 @@ from src.api.audit import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -51,14 +52,6 @@ router = APIRouter(prefix="/admin/personal-data/requests", tags=["Admin"])
 
 ACTION_PD_REQUEST_UPDATED = "admin.personal_data_request.updated"
 RESOURCE_PD_REQUEST = "personal_data_request"
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +78,7 @@ async def list_pd_requests(
     repo: PersonalDataRequestRepository = Depends(get_pd_request_repository),
 ) -> PersonalDataRequestsListResponse:
     """OpenAPI §listPersonalDataRequests."""
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     decoded = decode_cursor(cursor) if cursor else None
 
     rows, has_more = await repo.list_filtered(
@@ -128,7 +121,7 @@ async def get_pd_request(
     repo: PersonalDataRequestRepository = Depends(get_pd_request_repository),
 ) -> PersonalDataRequestView:
     """OpenAPI §getPersonalDataRequest."""
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     req = await repo.get_by_id(request_id)
     if req is None:
         raise HTTPException(status_code=404, detail="PersonalDataRequest not found")
@@ -172,7 +165,7 @@ async def process_pd_request(
     Idempotency-Key (UUID header, ADR-0025): replay cached response без
     duplicate audit row на retry.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(

@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from src.api.articles.questions_repository import (
@@ -30,6 +30,7 @@ from src.api.articles.questions_repository import (
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.search.query_log import (
@@ -38,14 +39,6 @@ from src.api.search.query_log import (
 )
 
 router = APIRouter(prefix="/admin/analytics", tags=["Admin"])
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +109,7 @@ async def get_top_queries(
     `with_results` count; `total - with_results` = «без ответа»
     (content gap candidate).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     rows = await repo.find_top_queries(window_hours=window_hours, limit=limit)
     return TopQueriesResponse(
         window_hours=window_hours,
@@ -152,7 +145,7 @@ async def get_article_questions_counts(
     Sorted by `pending DESC` — staff видит статьи с максимальным
     moderation backlog первыми. Articles без вопросов исключены.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     rows = await repo.count_by_article(limit=limit)
     return ArticleQuestionsCountResponse(
         data=[
