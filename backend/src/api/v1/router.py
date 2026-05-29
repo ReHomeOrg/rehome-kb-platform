@@ -26,6 +26,7 @@ from src.api.audit.router import router as audit_router
 from src.api.categories.admin_router import router as admin_categories_router
 from src.api.categories.router import router as categories_router
 from src.api.chat.router import router as chat_router
+from src.api.chat.unanswered_router import admin_router as chat_unanswered_admin_router
 from src.api.collaborators.junction_router import router as premises_collaborators_router
 from src.api.collaborators.metrics_router import router as collaborator_metrics_router
 from src.api.collaborators.reviews_router import router as collaborator_reviews_router
@@ -63,6 +64,7 @@ router.include_router(collaborator_metrics_router)
 router.include_router(premises_collaborators_router)
 router.include_router(service_orders_router)
 router.include_router(chat_router)
+router.include_router(chat_unanswered_admin_router)
 router.include_router(search_router)
 router.include_router(premises_router)
 router.include_router(hr_router)
