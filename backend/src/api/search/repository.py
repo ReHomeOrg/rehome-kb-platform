@@ -34,16 +34,22 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.articles.models import Article
+from src.api.articles.models import Article, ArticleQuestion
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
 from src.api.search.chunker import Chunk
-from src.api.search.models import ArticleEmbedding
+from src.api.search.models import ArticleEmbedding, ArticleQuestionEmbedding
 
 
 @dataclass(frozen=True)
 class RetrievalHit:
-    """Single retrieved chunk с denormalized article fields для citations."""
+    """Single retrieved chunk с denormalized article fields для citations.
+
+    `source_type` различает article body vs answered Q&A; frontend
+    рендерит разные variant'ы карточек (см. ТЗ Чат-поиск §«корпуса»).
+    `question_id` set'нут только для Q&A hits — используется для
+    deep-link'а `/articles/{slug}#question-{id}`.
+    """
 
     article_id: UUID
     slug: str
@@ -56,6 +62,11 @@ class RetrievalHit:
     # (lower = closer), RRF fused score для hybrid (higher = better). Caller
     # знает context.
     score: float
+    # Source type — backwards-compatible default; existing call sites не
+    # затрагиваются.
+    source_type: str = "article"
+    # Set только для source_type="article_question". Для article = None.
+    question_id: UUID | None = None
 
 
 class EmbeddingRepository:
@@ -245,3 +256,155 @@ def get_embedding_repository(
     session: AsyncSession = Depends(get_session),
 ) -> EmbeddingRepository:
     return EmbeddingRepository(session)
+
+
+# ---------------------------------------------------------------------------
+# Q&A embedding repository (2026-05-29)
+
+
+class QAEmbeddingRepository:
+    """Storage layer для article_question_embeddings (Q&A RAG corpus).
+
+    Mirror'ит EmbeddingRepository API но per-question, single chunk
+    (Q+A textы короткие). text материализован в row (`text_indexed`) —
+    PII-masked перед persist'ом, retrieval отдаёт его прямо в LLM
+    context.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self,
+        *,
+        question_id: UUID,
+        embedding: list[float],
+        text_indexed: str,
+        model_id: str,
+    ) -> None:
+        """INSERT … ON CONFLICT DO UPDATE — replay-safe (re-index same
+        question под тем же model_id overwrites).
+
+        Caller отвечает за commit.
+        """
+        stmt = pg_insert(ArticleQuestionEmbedding).values(
+            article_question_id=question_id,
+            embedding_model_id=model_id,
+            embedding=embedding,
+            text_indexed=text_indexed,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["article_question_id", "embedding_model_id"],
+            set_={
+                "embedding": stmt.excluded.embedding,
+                "text_indexed": stmt.excluded.text_indexed,
+            },
+        )
+        await self._session.execute(stmt)
+        await self._session.flush()
+
+    async def delete_by_question(self, question_id: UUID) -> int:
+        """Удалить все embeddings одного question'а (любой model_id).
+
+        Вызывается на DISMISSED / revert PENDING — терминал-state «нет
+        публичного ответа», embedding должен быть evict'нут чтобы chat
+        не вернул stale ответ.
+
+        Caller отвечает за commit.
+        """
+        stmt = delete(ArticleQuestionEmbedding).where(
+            ArticleQuestionEmbedding.article_question_id == question_id
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)
+
+    async def delete_by_model(self, model_id: str) -> int:
+        """Cleanup всех Q&A vectors под конкретной model — для blue-green
+        switch post-cutover (mirror EmbeddingRepository.delete_by_model)."""
+        stmt = delete(ArticleQuestionEmbedding).where(
+            ArticleQuestionEmbedding.embedding_model_id == model_id
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)
+
+    async def search(
+        self,
+        *,
+        query_vector: list[float],
+        access_levels: frozenset[AccessLevel],
+        model_id: str,
+        top_k: int = 30,
+    ) -> list[RetrievalHit]:
+        """Vector retrieval по cosine distance с ADR-0003 access filter.
+
+        JOIN chain `article_question_embeddings → article_questions →
+        articles` обязателен для:
+        - `articles.status='PUBLISHED'` (mirror article retrieval).
+        - `articles.access_level IN (caller scope)` — ADR-0003 enforced
+          через JOIN parent article.
+        - `article_questions.status='ANSWERED'` — defence-in-depth.
+          Indexer уже не должен embeddings'ить PENDING/DISMISSED, но
+          мало ли race / data corruption.
+        - `articles.slug` / `articles.title` для citation rendering.
+
+        Returns chunks с `source_type="article_question"` + `question_id`
+        для frontend deep-link'а `/articles/{slug}#question-{id}`.
+        """
+        allowed = [level.value for level in access_levels]
+        if not allowed:
+            return []
+
+        distance_expr = ArticleQuestionEmbedding.embedding.cosine_distance(query_vector).label(
+            "distance"
+        )
+
+        stmt = (
+            select(
+                ArticleQuestion.id.label("question_id"),
+                ArticleQuestion.article_id,
+                Article.slug,
+                Article.title,
+                ArticleQuestionEmbedding.text_indexed,
+                distance_expr,
+            )
+            .join(
+                ArticleQuestion,
+                ArticleQuestion.id == ArticleQuestionEmbedding.article_question_id,
+            )
+            .join(Article, Article.id == ArticleQuestion.article_id)
+            .where(
+                Article.status == "PUBLISHED",
+                Article.access_level.in_(allowed),
+                ArticleQuestion.status == "ANSWERED",
+                ArticleQuestionEmbedding.embedding_model_id == model_id,
+            )
+            .order_by(distance_expr.asc())
+            .limit(top_k)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            RetrievalHit(
+                article_id=row.article_id,
+                slug=row.slug,
+                title=row.title,
+                # chunk_index=0 — single chunk per question; ADR-0010
+                # tuple (article_id, chunk_index) уникальность не страдает
+                # т.к. dedup'ы делаются по (article_id, source_type, question_id).
+                chunk_index=0,
+                text=row.text_indexed,
+                char_start=0,
+                char_end=len(row.text_indexed),
+                score=float(row.distance),
+                source_type="article_question",
+                question_id=row.question_id,
+            )
+            for row in result
+        ]
+
+
+def get_qa_embedding_repository(
+    session: AsyncSession = Depends(get_session),
+) -> QAEmbeddingRepository:
+    return QAEmbeddingRepository(session)

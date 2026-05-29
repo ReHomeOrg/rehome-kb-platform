@@ -78,3 +78,53 @@ class ArticleEmbedding(Base):
             f"<ArticleEmbedding article_id={self.article_id} "
             f"chunk_index={self.chunk_index} model={self.embedding_model_id!r}>"
         )
+
+
+class ArticleQuestionEmbedding(Base):
+    """Q&A embedding row (2026-05-29, ТЗ Чат-поиск §«корпуса»).
+
+    Single chunk per (question, model) — Q+A текст короткий, chunking
+    не нужен. `text_indexed` материализован после `mask_pii` (raw
+    body может содержать ПДн пользователя; persisted masked'ом).
+
+    ADR-0003: access_level inherit'ится через JOIN с article_questions
+    → articles в retrieval-side. Здесь не дублируется.
+    """
+
+    __tablename__ = "article_question_embeddings"
+
+    article_question_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("article_questions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    embedding_model_id: Mapped[str] = mapped_column(
+        String(128),
+        primary_key=True,
+    )
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(EMBEDDING_DIM_STAGE1),
+        nullable=False,
+    )
+    # Хранится материализованно: source rows могли быть masked после
+    # indexing'а; reconstruction через JOIN дал бы raw text. Single source
+    # of truth для chunk text — этот column.
+    text_indexed: Mapped[str] = mapped_column(
+        # Text столбец — длинной не фиксируем (Q+A может быть 1-3 абзаца).
+        # SQLAlchemy String() без длины → TEXT.
+        String(),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = ({"comment": "Q&A RAG corpus (ТЗ Чат-поиск, 2026-05-29)"},)
+
+    def __repr__(self) -> str:  # pragma: no cover (debug only)
+        return (
+            f"<ArticleQuestionEmbedding question_id={self.article_question_id} "
+            f"model={self.embedding_model_id!r}>"
+        )
