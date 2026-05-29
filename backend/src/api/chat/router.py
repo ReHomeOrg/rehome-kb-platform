@@ -59,6 +59,10 @@ from src.api.chat.system_prompt import (
     hits_to_citations,
     resolve_system_prompt,
 )
+from src.api.chat.unanswered_queries import (
+    ChatUnansweredQueryRepository,
+    get_chat_unanswered_query_repository,
+)
 from src.api.config import Settings, get_settings
 from src.api.db import get_session
 from src.api.idempotency import IdempotencyResult
@@ -164,6 +168,47 @@ async def get_session_detail(
 # ~10K chars worst case, что вмещается в 8K-32K context window
 # типичных open-weight моделей.
 _RAG_CHAT_TOP_K = 5
+
+
+async def _maybe_capture_no_answer(
+    unanswered_repo: ChatUnansweredQueryRepository,
+    *,
+    capture_enabled: bool,
+    rag_enabled: bool,
+    retrieved_chunks: list[RetrievalHit],
+    query: str,
+    author_sub: str,
+    session_id: UUID,
+) -> None:
+    """Persist NEW row в chat_unanswered_queries для admin moderation queue.
+
+    Fires только если:
+    - `rag_enabled=True` — иначе у нас нет meaningful capture'а (RAG не
+      смотрел, нечего фиксировать как «не закрытое»).
+    - `capture_enabled=True` — feature flag (`CHAT_CAPTURE_UNANSWERED_ENABLED`).
+    - `retrieved_chunks == []` — RAG не нашёл relevant chunks.
+
+    Repository.record() сам делает `mask_pii()` + cap 500 chars (ФЗ-152
+    PII guard в одной точке persist'а). Pending row commit'нется через
+    `record_chat_turn` ниже по handler'у — atomic с chat message INSERT'ом.
+
+    Errors swallow'аются — chat не должен fail'ить на side-effect.
+    """
+    if not capture_enabled or not rag_enabled or retrieved_chunks:
+        return
+    try:
+        await unanswered_repo.record(
+            query=query,
+            author_sub=author_sub,
+            chat_session_id=session_id,
+        )
+    except Exception:
+        # `query_masked` уже truncated/masked в repo.record; здесь только
+        # длина для observability — без content.
+        logger.exception(
+            "chat.unanswered_capture_failed",
+            extra={"session_id": str(session_id), "query_len": len(query)},
+        )
 
 
 async def _maybe_dispatch_no_answer(
@@ -347,6 +392,7 @@ async def send_message(
     webhook_dispatcher: WebhookEventDispatcher = Depends(get_webhook_event_dispatcher),
     settings: Settings = Depends(get_settings),
     system_config_repo: SystemConfigRepository = Depends(get_system_config_repository),
+    unanswered_repo: ChatUnansweredQueryRepository = Depends(get_chat_unanswered_query_repository),
 ) -> ChatMessageResponse | StreamingResponse:
     """`POST /chat/sessions/{id}/messages` — JSON или SSE mode.
 
@@ -404,6 +450,20 @@ async def send_message(
         retrieved_chunks=retrieved_chunks,
         session_id=session_id,
         query=payload.content,
+    )
+    # 2026-05-29: internal capture queue для admin moderation (sibling
+    # webhook'у — webhook'и для external analytics, эта таблица для in-
+    # platform staff workflow). Same session — commit'нется через
+    # `record_chat_turn` ниже по handler'у atomically с chat message.
+    actor_sub = str(user_id) if user_id is not None else format_anon_actor_sub(session_token)
+    await _maybe_capture_no_answer(
+        unanswered_repo,
+        capture_enabled=settings.chat_capture_unanswered_enabled,
+        rag_enabled=settings.rag_enabled,
+        retrieved_chunks=retrieved_chunks,
+        query=payload.content,
+        author_sub=actor_sub,
+        session_id=session_id,
     )
 
     if "text/event-stream" in accept.lower():

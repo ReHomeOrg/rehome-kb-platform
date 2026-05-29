@@ -155,6 +155,13 @@ class Settings(BaseSettings):
     # foundation landed в off-state, явный flip когда indexer + endpoint
     # готовы. Эмбеддинги через self-hosted model (ФЗ-152: no external API).
     rag_enabled: bool = Field(default=False, alias="RAG_ENABLED")
+    # Chat unanswered query capture (2026-05-29). При RAG_ENABLED + query
+    # без relevant chunks → пишется в chat_unanswered_queries для admin
+    # moderation queue. Default True — feature gated на RAG_ENABLED, так что
+    # пока RAG off, никаких rows не пишется.
+    chat_capture_unanswered_enabled: bool = Field(
+        default=True, alias="CHAT_CAPTURE_UNANSWERED_ENABLED"
+    )
     # Provider selection: 'mock' (default, deterministic SHA — для dev/tests),
     # 'hf' (sentence-transformers, production). HF provider land'ится в
     # follow-up; до тех пор `hf` режим fail-fast при startup.
