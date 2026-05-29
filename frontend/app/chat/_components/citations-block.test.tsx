@@ -63,4 +63,47 @@ describe("CitationsBlock", () => {
     expect(screen.getByText("Aren")).toBeInTheDocument();
     expect(screen.getByText("Bren")).toBeInTheDocument();
   });
+
+  it("renders article_question citation with anchor link + Q&A label", () => {
+    render(
+      <CitationsBlock
+        citations={[
+          makeCitation({
+            type: "article_question",
+            question_id: "q-42",
+            url: "/articles/rent-contract#question-q-42",
+            chunk_index: 0,
+          }),
+        ]}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /Договор аренды/i });
+    // Anchor для deep-link на конкретный Q&A блок.
+    expect(link.getAttribute("href")).toBe(
+      "/articles/rent-contract#question-q-42",
+    );
+    // Q&A variant label вместо "chunk #N".
+    expect(screen.getByText(/ответ на вопрос пользователя/i)).toBeInTheDocument();
+    expect(screen.queryByText(/chunk #/i)).not.toBeInTheDocument();
+  });
+
+  it("mixed citations render both article and Q&A variants", () => {
+    render(
+      <CitationsBlock
+        citations={[
+          makeCitation({ id: "1", title: "Body", slug: "body", chunk_index: 2 }),
+          makeCitation({
+            type: "article_question",
+            id: "2",
+            title: "Q answer",
+            slug: "q",
+            question_id: "qid",
+            url: "/articles/q#question-qid",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText(/chunk #3/i)).toBeInTheDocument();
+    expect(screen.getByText(/ответ на вопрос пользователя/i)).toBeInTheDocument();
+  });
 });

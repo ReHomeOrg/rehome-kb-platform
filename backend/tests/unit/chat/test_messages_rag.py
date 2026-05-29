@@ -123,6 +123,30 @@ def test_hits_to_citations_structure() -> None:
     assert c["url"] == "/articles/my-slug"
 
 
+def test_hits_to_citations_article_question_variant() -> None:
+    """Q&A hit → type='article_question', anchor URL `#question-{id}`,
+    question_id field включён (2026-05-29, ТЗ Чат-поиск §«корпуса»)."""
+    aid = uuid4()
+    qid = uuid4()
+    qa_hit = RetrievalHit(
+        article_id=aid,
+        slug="rent-contract",
+        title="Договор аренды",
+        chunk_index=0,
+        text="Q+A текст",
+        char_start=0,
+        char_end=9,
+        score=0.016,
+        source_type="article_question",
+        question_id=qid,
+    )
+    [c] = hits_to_citations([qa_hit])
+    assert c["type"] == "article_question"
+    assert c["id"] == str(aid)
+    assert c["question_id"] == str(qid)
+    assert c["url"] == f"/articles/rent-contract#question-{qid}"
+
+
 # ---------------------------------------------------------------------------
 # fixtures для router-уровневых тестов
 

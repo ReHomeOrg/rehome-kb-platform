@@ -54,7 +54,9 @@ from src.api.auth.dependency import (
     require_authenticated,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.config import Settings, get_settings
 from src.api.db import get_session
+from src.api.search.qa_indexer import QuestionIndexer, get_question_indexer
 
 # Public-facing router (mounted под /api/v1/articles/{slug}/questions).
 public_router = APIRouter(prefix="/articles", tags=["Articles"])
@@ -200,6 +202,8 @@ async def answer_article_question(
     repo: ArticleQuestionRepository = Depends(get_article_question_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    indexer: QuestionIndexer = Depends(get_question_indexer),
+    settings: Settings = Depends(get_settings),
 ) -> ArticleQuestionAdminView:
     """`POST /api/v1/admin/article-questions/{id}/answer` — staff answers.
 
@@ -207,6 +211,11 @@ async def answer_article_question(
 
     ФЗ-152: audit metadata `{question_id, previous_status}` — БЕЗ
     answer_body.
+
+    RAG indexing: после commit'а — fire-and-forget call в QuestionIndexer
+    (gated на `RAG_ENABLED`). Mirror'ит article indexer pattern (см.
+    articles/router.py::_maybe_index_article). Failures swallowed —
+    moderation request не должна fail'ить на indexing side-effect.
     """
     actor_sub = str(claims.get("sub", "unknown"))
     existing = await repo.get_by_id(question_id)
@@ -232,6 +241,8 @@ async def answer_article_question(
         },
     )
     await session.commit()
+    if settings.rag_enabled:
+        await indexer.index_question(row.id)
     return ArticleQuestionAdminView.model_validate(row)
 
 
@@ -254,6 +265,8 @@ async def dismiss_article_question(
     repo: ArticleQuestionRepository = Depends(get_article_question_repository),
     audit: AuditRepository = Depends(get_audit_repository),
     session: AsyncSession = Depends(get_session),
+    indexer: QuestionIndexer = Depends(get_question_indexer),
+    settings: Settings = Depends(get_settings),
 ) -> ArticleQuestionAdminView:
     """`POST /api/v1/admin/article-questions/{id}/dismiss` — staff dismisses.
 
@@ -285,6 +298,11 @@ async def dismiss_article_question(
         },
     )
     await session.commit()
+    # PENDING → DISMISSED: embedding не существовало; remove idempotent.
+    # Включаем безусловно для defensive evict'а (если кто-то добавил row
+    # вручную через SQL — здесь cleanup).
+    if settings.rag_enabled:
+        await indexer.remove_question(row.id)
     return ArticleQuestionAdminView.model_validate(row)
 
 

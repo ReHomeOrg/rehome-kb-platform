@@ -129,16 +129,37 @@ def hits_to_citations(chunks: list[RetrievalHit]) -> list[dict[str, Any]]:
     Структура соответствует existing `chat_messages.citations` JSONB
     field (`{type, id, title, url, ...}`) с дополнительными полями
     chunk_index / score для richer frontend display.
+
+    `type` различает article body chunks ("article") vs Q&A ответы
+    ("article_question"). Q&A citations включают `question_id` и
+    URL с anchor'ом `#question-{id}` для deep-link'а на правильный
+    блок article page (2026-05-29, ТЗ Чат-поиск §«корпуса»).
     """
-    return [
-        {
-            "type": "article",
-            "id": str(hit.article_id),
-            "title": hit.title,
-            "slug": hit.slug,
-            "chunk_index": hit.chunk_index,
-            "score": hit.score,
-            "url": f"/articles/{hit.slug}",
-        }
-        for hit in chunks
-    ]
+    citations: list[dict[str, Any]] = []
+    for hit in chunks:
+        if hit.source_type == "article_question" and hit.question_id is not None:
+            citations.append(
+                {
+                    "type": "article_question",
+                    "id": str(hit.article_id),
+                    "question_id": str(hit.question_id),
+                    "title": hit.title,
+                    "slug": hit.slug,
+                    "chunk_index": hit.chunk_index,
+                    "score": hit.score,
+                    "url": f"/articles/{hit.slug}#question-{hit.question_id}",
+                }
+            )
+        else:
+            citations.append(
+                {
+                    "type": "article",
+                    "id": str(hit.article_id),
+                    "title": hit.title,
+                    "slug": hit.slug,
+                    "chunk_index": hit.chunk_index,
+                    "score": hit.score,
+                    "url": f"/articles/{hit.slug}",
+                }
+            )
+    return citations

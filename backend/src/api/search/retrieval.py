@@ -43,8 +43,10 @@ from src.api.search.metrics import (
 )
 from src.api.search.repository import (
     EmbeddingRepository,
+    QAEmbeddingRepository,
     RetrievalHit,
     get_embedding_repository,
+    get_qa_embedding_repository,
 )
 from src.api.search.rerank import MockReranker, Reranker
 
@@ -109,6 +111,7 @@ class RetrievalService:
         provider: EmbeddingProvider,
         reranker: Reranker | None = None,
         rerank_top_n: int = 20,
+        qa_repo: QAEmbeddingRepository | None = None,
     ) -> None:
         self._embedding_repo = embedding_repo
         self._article_repo = article_repo
@@ -117,6 +120,10 @@ class RetrievalService:
         # Когда подключён, RRF возвращает top_n → reranker → top_k.
         self._reranker = reranker
         self._rerank_top_n = rerank_top_n
+        # `qa_repo=None` → Q&A corpus skipped (backward-compat default;
+        # callers до 2026-05-29 не передают). Production wiring через
+        # `get_retrieval_service` подаёт настоящий QAEmbeddingRepository.
+        self._qa_repo = qa_repo
 
     async def search(
         self,
@@ -160,11 +167,25 @@ class RetrievalService:
             limit=per_retriever_k,
         )
 
+        # 2b. Q&A corpus — third parallel retriever (2026-05-29, ТЗ
+        # Чат-поиск §«корпуса»). ANSWERED article_questions indexed
+        # отдельной таблицей; vector-only retrieval (BM25 для Q&A — на
+        # будущее). Гарантирует что user-answered questions попадают в
+        # RAG context следующего запроса.
+        qa_hits: list[RetrievalHit] = []
+        if self._qa_repo is not None:
+            qa_hits = await self._qa_repo.search(
+                query_vector=query_vector,
+                access_levels=access_levels,
+                model_id=self._provider.model_id,
+                top_k=per_retriever_k,
+            )
+
         # 4. RRF fusion. Если reranker подключён — fuse'им до большего
         # top_n (даёт reranker'у пространство для promote'а далёких RRF
         # hits), затем cross-encoder reorders top_n → output top_k.
         fuse_k = max(top_k, self._rerank_top_n) if self._reranker else top_k
-        result = self._rrf_fuse(vector_hits, bm25_hits, top_k=fuse_k)
+        result = self._rrf_fuse(vector_hits, bm25_hits, qa_hits, top_k=fuse_k)
 
         if self._reranker is not None and result:
             rerank_label = _rerank_provider_label(self._reranker)
@@ -188,13 +209,17 @@ class RetrievalService:
         # `Sequence` (covariant) чтобы принять `list[tuple[UUID, str,
         # str, float]]` от ArticleRepository.search — list invariant.
         bm25_articles: Sequence[BM25Row],
+        qa_hits: list[RetrievalHit],
         *,
         top_k: int,
     ) -> list[RetrievalHit]:
-        """Symmetric RRF: chunk-level granularity + BM25-only synthesis.
+        """Symmetric RRF: chunk-level granularity + BM25-only synthesis
+        + Q&A vector hits как третий retriever.
 
         Vector retriever отдаёт chunk-level granularity (chunk_index + text
         fragment). BM25 — article-level (id + slug + title + snippet).
+        Q&A retriever (`qa_hits`) — per-question vector hits, source_type
+        уже set в "article_question" со своим question_id.
 
         Fusion:
         1. Каждый vector chunk сохраняется со score = 1/(_RRF_K + v_rank+1).
@@ -205,7 +230,11 @@ class RetrievalService:
            Это симметрично vector-only path и обеспечивает recall для
            articles которые FTS matches strongly но vector miss'ил
            (особенно critical при mock embeddings).
-        4. Output — chunk-granularity (downstream consumers dedup'ают
+        4. Q&A hits добавляются с rank-based score: каждый Q&A hit
+           independent от article fusion (даже если parent article в
+           bm25_articles, Q&A — отдельная единица знания). Deduplicate'ятся
+           по `question_id` (на случай дублирования в input).
+        5. Output — chunk-granularity (downstream consumers dedup'ают
            по article_id если им нужно — например `/search` endpoint
            через `_dedupe_by_article`).
         """
@@ -215,7 +244,6 @@ class RetrievalService:
         bm25_meta_by_article: dict[UUID, BM25Row] = {row[0]: row for row in bm25_articles}
 
         fused: list[tuple[float, RetrievalHit]] = []
-        seen_article_chunks: set[tuple[UUID, int]] = set()
         vector_article_ids: set[UUID] = set()
 
         # Vector chunks (chunk-granularity preserved).
@@ -224,7 +252,6 @@ class RetrievalService:
             b_rank = bm25_rank_by_article.get(hit.article_id)
             if b_rank is not None:
                 score += 1.0 / (_RRF_K + b_rank + 1)
-            seen_article_chunks.add((hit.article_id, hit.chunk_index))
             vector_article_ids.add(hit.article_id)
             fused.append(
                 (
@@ -267,6 +294,34 @@ class RetrievalService:
                         char_start=0,
                         char_end=len(clean_snippet),
                         score=score,
+                    ),
+                )
+            )
+
+        # Q&A vector hits. Каждый Q&A — independent unit of knowledge
+        # (НЕ часть parent article body); score основан на собственном
+        # rank в qa_hits list (не fused с article ranks). Dedup по
+        # question_id защищает от duplicate input.
+        seen_question_ids: set[UUID] = set()
+        for q_rank, hit in enumerate(qa_hits):
+            if hit.question_id is None or hit.question_id in seen_question_ids:
+                continue
+            seen_question_ids.add(hit.question_id)
+            score = 1.0 / (_RRF_K + q_rank + 1)
+            fused.append(
+                (
+                    score,
+                    RetrievalHit(
+                        article_id=hit.article_id,
+                        slug=hit.slug,
+                        title=hit.title,
+                        chunk_index=hit.chunk_index,
+                        text=hit.text,
+                        char_start=hit.char_start,
+                        char_end=hit.char_end,
+                        score=score,
+                        source_type="article_question",
+                        question_id=hit.question_id,
                     ),
                 )
             )
@@ -332,6 +387,7 @@ def get_retrieval_service(
     embedding_repo: EmbeddingRepository = Depends(get_embedding_repository),
     article_repo: ArticleRepository = Depends(get_article_repository),
     settings: Settings = Depends(get_settings),
+    qa_repo: QAEmbeddingRepository = Depends(get_qa_embedding_repository),
 ) -> RetrievalService:
     """FastAPI dependency — RetrievalService с settings-driven provider.
 
@@ -340,6 +396,9 @@ def get_retrieval_service(
     real vectors через indexer worker.
 
     `RERANK_ENABLED=true` подключает cross-encoder поверх RRF top-N.
+
+    `qa_repo` подаётся всегда (одна и та же AsyncSession dep) — Q&A
+    corpus extension включена unconditionally; пустой corpus = empty hits.
     """
     return RetrievalService(
         embedding_repo,
@@ -347,4 +406,5 @@ def get_retrieval_service(
         _build_provider(settings),
         reranker=_build_reranker(settings),
         rerank_top_n=settings.rerank_top_n,
+        qa_repo=qa_repo,
     )
