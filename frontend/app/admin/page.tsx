@@ -270,6 +270,14 @@ export default async function AdminDashboardPage({
                     Q&A: модерация вопросов →
                   </a>
                 </li>
+                <li>
+                  <a
+                    href="/admin/chat-unanswered-queries?status=NEW"
+                    className="underline hover:text-blue-900"
+                  >
+                    Чат: запросы без ответа →
+                  </a>
+                </li>
               </ul>
             </section>
           </>

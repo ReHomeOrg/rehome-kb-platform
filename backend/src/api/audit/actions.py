@@ -34,6 +34,15 @@ ACTION_WEBHOOKS_TESTED: Final = "webhooks.tested"
 # Chat actions.
 ACTION_CHAT_ESCALATED: Final = "chat.escalated"
 
+# Chat unanswered query capture (2026-05-29). Metadata содержит
+# `chat_session_id` + (on attach) `article_slug` + `question_id`. НЕ
+# содержит query body (масked, но ПДн-aware design — body живёт
+# в `chat_unanswered_queries.query_masked`, доступном только staff_admin).
+RESOURCE_CHAT_UNANSWERED: Final = "chat_unanswered"
+ACTION_CHAT_UNANSWERED_CAPTURED: Final = "chat.unanswered.captured"
+ACTION_CHAT_UNANSWERED_ATTACHED: Final = "chat.unanswered.attached"
+ACTION_CHAT_UNANSWERED_DISMISSED: Final = "chat.unanswered.dismissed"
+
 # Premises actions (#148, PZ §5 write side).
 ACTION_PREMISES_CREATED: Final = "premises.created"
 ACTION_PREMISES_UPDATED: Final = "premises.updated"

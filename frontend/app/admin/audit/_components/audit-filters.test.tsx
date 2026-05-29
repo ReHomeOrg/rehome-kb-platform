@@ -126,6 +126,7 @@ describe("AuditFilters", () => {
       "article",
       "article_question",
       "chat_session",
+      "chat_unanswered",
       "collaborator",
       "document",
       "hr_employee",
