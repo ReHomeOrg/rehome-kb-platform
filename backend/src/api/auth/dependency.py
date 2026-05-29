@@ -177,3 +177,25 @@ def require_access_level(required: AccessLevel) -> Callable[..., None]:
             raise ForbiddenError(detail=f"Required access_level: {required.value}")
 
     return _dep
+
+
+def require_staff_admin(
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+) -> None:
+    """FastAPI dependency — 403 если caller не имеет staff_admin scope.
+
+    `staff_admin` = STAFF + LEGAL (см. `auth/scope.py::SCOPE_TO_ACCESS_LEVELS`).
+    Прочие staff (staff_support, staff_hr) → 403.
+
+    Reviewer 2026-05-28 backlog #6: ранее 9 дублирующих локальных
+    функций в admin routers — сведены в эту единственную точку правды.
+
+    Использование:
+        @router.get(..., dependencies=[Depends(require_staff_admin)])
+        async def my_admin_endpoint(...): ...
+
+    или в endpoint signature:
+        _staff: None = Depends(require_staff_admin),
+    """
+    if AccessLevel.STAFF not in access_levels or AccessLevel.LEGAL not in access_levels:
+        raise ForbiddenError(detail="Требуется staff_admin scope")

@@ -46,6 +46,7 @@ from src.api.audit import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -60,18 +61,6 @@ ACTION_KB_USER_CREATED = "admin.kb_user.created"
 ACTION_KB_USER_UPDATED = "admin.kb_user.updated"
 ACTION_KB_USER_DEACTIVATED = "admin.kb_user.deactivated"
 RESOURCE_KB_USER = "kb_user"
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    """staff_admin (STAFF + LEGAL) per OpenAPI «scope = staff_admin».
-
-    staff_support / staff_hr → 403.
-    """
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +91,7 @@ async def list_kb_users(
     Filters role / status — optional. Cursor — opaque base64-encoded
     `(updated_at, id)` для keyset pagination (стандартный pattern).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     decoded = decode_cursor(cursor) if cursor else None
 
@@ -157,7 +146,7 @@ async def create_kb_user(
 
     Email unique CASE-INSENSITIVELY (BD UQ on `lower(email)`); duplicate → 409.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
@@ -229,7 +218,7 @@ async def get_kb_user(
     access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
     repo: KbUserRepository = Depends(get_kb_user_repository),
 ) -> KbUserView:
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     user = await repo.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="KbUser not found")
@@ -269,7 +258,7 @@ async def update_kb_user(
     Idempotency-Key (UUID header, ADR-0025): повторный request с тем же
     key + body → replay cached response без duplicate audit row.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
@@ -329,7 +318,7 @@ async def deactivate_kb_user(
 
     Idempotent: повторный DELETE на ARCHIVED → 204 (нет audit row при no-op).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     user = await repo.get_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="KbUser not found")

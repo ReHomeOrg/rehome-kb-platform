@@ -53,6 +53,7 @@ from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.mfa import require_step_up_mfa
 from src.api.auth.scope import AccessLevel
@@ -66,20 +67,6 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 _DEFAULT_WINDOW_DAYS = 30
 # Hard cap на window length — anti-DoS на больших scan'ах.
 _MAX_WINDOW_DAYS = 365
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    """staff_admin scope (STAFF + LEGAL) per OpenAPI.
-
-    staff_support (только STAFF) или staff_hr (STAFF + HR_RESTRICTED)
-    → 403. Это намеренно: admin/stats показывает security/PD metrics,
-    их видит только staff_admin / staff_legal по ADR-0003.
-    """
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin или staff_legal scope",
-        )
 
 
 @router.get(
@@ -118,7 +105,7 @@ async def get_admin_stats(
     если backend feature ещё не реализован. Это лучше чем 404'ить
     sub-блоки (admin UI ломается).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     now = datetime.now(UTC)
     period_to = to or now
@@ -202,7 +189,7 @@ async def list_llm_providers(
     Cost rates / health checks — null в response (no authoritative
     backend source; см. schemas docstring + llm_providers.py).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     return LlmProvidersListResponse(data=build_provider_catalog(settings))
 
 
@@ -230,7 +217,7 @@ async def get_system_config(
     Read-only projection — env (Settings) + DB overlay (ADR-0019).
     rate_limits / unimplemented blocks — null (admin UI рендерит «—»).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     overlay = await repo.read()
     return build_system_config(settings, overlay=overlay)
 
@@ -272,7 +259,7 @@ async def update_system_config(
     Idempotency-Key (UUID header, ADR-0025): replay cached response без
     duplicate audit row или webhook fire.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     if idempotency.replay is not None:
         return JSONResponse(
@@ -338,7 +325,7 @@ async def set_active_llm_provider(
 
     X-MFA-Token — required (step-up MFA per ADR-0019), см. PATCH endpoint.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     actor_sub = str(claims.get("sub", "unknown"))
 
     try:

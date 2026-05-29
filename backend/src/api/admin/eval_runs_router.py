@@ -33,6 +33,7 @@ from src.api.articles.cursor import decode_cursor, encode_cursor
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
@@ -42,14 +43,6 @@ router = APIRouter(prefix="/admin/llm", tags=["Admin"])
 # `listEvalRuns` cap — anti-DoS на large admin_tasks tables.
 _LIST_LIMIT_DEFAULT = 50
 _LIST_LIMIT_MAX = 200
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 def _get_eval_runs_service(
@@ -88,7 +81,7 @@ async def start_eval_run(
     через `AdminTaskRunner.spawn_eval_run` (ADR-0020 B). Handler возвращает
     202 immediately; client poll'ит `/admin/tasks/{run_id}` для finalstatus.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     actor_sub = claims.get("sub", "unknown")
     try:
         task = await service.start_run(request, actor_sub=actor_sub, session=session)
@@ -125,7 +118,7 @@ async def list_eval_runs(
     в pagination envelope означает дальше есть страница; `cursor_next`
     подаётся обратно в `?cursor=`.
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     decoded = decode_cursor(cursor) if cursor else None
     rows, has_more = await repo.list_recent(

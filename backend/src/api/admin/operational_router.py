@@ -50,20 +50,12 @@ from src.api.audit.repository import AuditRepository, get_audit_repository
 from src.api.auth.dependency import (
     get_current_access_levels,
     require_authenticated,
+    require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
 from src.api.db import get_session
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
-
-
-def _require_staff_admin(access_levels: frozenset[AccessLevel]) -> None:
-    """staff_admin scope (STAFF + LEGAL)."""
-    if not (AccessLevel.STAFF in access_levels and AccessLevel.LEGAL in access_levels):
-        raise HTTPException(
-            status_code=403,
-            detail="Требуется staff_admin scope",
-        )
 
 
 @router.delete(
@@ -91,7 +83,7 @@ async def invalidate_cache(
     Когда cache layer landит — изменится только реализация (audit row
     остаётся как trigger record для invalidation worker'а).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
 
     actor_sub = claims.get("sub", "unknown")
     await audit_repo.record(
@@ -143,7 +135,7 @@ async def reindex_content(
     - `articles` / `all` — реальный reindex.
     - `documents` / `premises_cards` — honest stub (task COMPLETED без work).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     payload = body or ReindexRequest()
     actor_sub = str(claims.get("sub", "unknown"))
 
@@ -194,7 +186,7 @@ async def get_task_status(
     Universal task status lookup. Используется admin UI для polling'а
     долгих операций (reindex, audit-log export — будущее).
     """
-    _require_staff_admin(access_levels)
+    require_staff_admin(access_levels)
     row = await repo.get(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} не найден")
