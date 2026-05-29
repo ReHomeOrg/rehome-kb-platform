@@ -29,15 +29,19 @@ def _hit(article_id: UUID, chunk_index: int = 0, score: float = 0.5) -> Retrieva
 def _make_service(
     vector_hits: list[RetrievalHit] | None = None,
     bm25_articles: list[tuple[Any, ...]] | None = None,
-) -> tuple[RetrievalService, MagicMock, MagicMock]:
+    qa_hits: list[RetrievalHit] | None = None,
+) -> tuple[RetrievalService, MagicMock, MagicMock, MagicMock]:
     embedding_repo = MagicMock()
     embedding_repo.search = AsyncMock(return_value=vector_hits or [])
 
     article_repo = MagicMock()
     article_repo.search = AsyncMock(return_value=(bm25_articles or [], False))
 
-    svc = RetrievalService(embedding_repo, article_repo, MockEmbeddingProvider())
-    return svc, embedding_repo, article_repo
+    qa_repo = MagicMock()
+    qa_repo.search = AsyncMock(return_value=qa_hits or [])
+
+    svc = RetrievalService(embedding_repo, article_repo, MockEmbeddingProvider(), qa_repo=qa_repo)
+    return svc, embedding_repo, article_repo, qa_repo
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +50,7 @@ def _make_service(
 
 @pytest.mark.asyncio
 async def test_search_empty_query_returns_empty() -> None:
-    svc, em, ar = _make_service()
+    svc, em, ar, qa = _make_service()
     hits = await svc.search(query="", access_levels=frozenset([AccessLevel.PUBLIC]))
     assert hits == []
     em.search.assert_not_awaited()
@@ -55,14 +59,14 @@ async def test_search_empty_query_returns_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_search_whitespace_query_returns_empty() -> None:
-    svc, _, _ = _make_service()
+    svc, _, _, _ = _make_service()
     hits = await svc.search(query="   \n", access_levels=frozenset([AccessLevel.PUBLIC]))
     assert hits == []
 
 
 @pytest.mark.asyncio
 async def test_search_no_access_levels_returns_empty() -> None:
-    svc, em, ar = _make_service()
+    svc, em, ar, qa = _make_service()
     hits = await svc.search(query="hello", access_levels=frozenset())
     assert hits == []
     em.search.assert_not_awaited()
@@ -70,7 +74,7 @@ async def test_search_no_access_levels_returns_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_search_calls_both_retrievers() -> None:
-    svc, em, ar = _make_service()
+    svc, em, ar, qa = _make_service()
     await svc.search(query="hello world", access_levels=frozenset([AccessLevel.PUBLIC]))
     em.search.assert_awaited_once()
     ar.search.assert_awaited_once()
@@ -89,7 +93,7 @@ def test_rrf_fuse_vector_only() -> None:
     """Без BM25 совпадений — score = 1/(60 + v_rank+1)."""
     a = uuid4()
     vector_hits = [_hit(a, chunk_index=0), _hit(a, chunk_index=1)]
-    fused = RetrievalService._rrf_fuse(vector_hits, [], top_k=10)
+    fused = RetrievalService._rrf_fuse(vector_hits, [], [], top_k=10)
     assert len(fused) == 2
     # Rank 1: 1/61, rank 2: 1/62.
     assert abs(fused[0].score - 1.0 / 61) < 1e-9
@@ -102,7 +106,7 @@ def test_rrf_fuse_bm25_match_boosts_score() -> None:
     a = uuid4()
     vector_hits = [_hit(a, chunk_index=0)]
     bm25 = [(a, "slug-a", "title", "snippet", 0.5)]  # rank 1
-    fused = RetrievalService._rrf_fuse(vector_hits, bm25, top_k=10)
+    fused = RetrievalService._rrf_fuse(vector_hits, bm25, [], top_k=10)
     expected = 1.0 / 61 + 1.0 / 61  # v_rank=1, b_rank=1
     assert abs(fused[0].score - expected) < 1e-9
 
@@ -116,7 +120,7 @@ def test_rrf_fuse_orders_by_descending_score() -> None:
         _hit(c, chunk_index=0),  # v_rank=3, BM25 rank 2 → 1/63 + 1/62 = 0.0320
     ]
     bm25 = [(b, "slug-b", "t", "s", 0.5), (c, "slug-c", "t", "s", 0.4)]
-    fused = RetrievalService._rrf_fuse(vector_hits, bm25, top_k=10)
+    fused = RetrievalService._rrf_fuse(vector_hits, bm25, [], top_k=10)
     assert fused[0].article_id == b  # highest fused score
     assert fused[1].article_id == c
     assert fused[2].article_id == a
@@ -124,12 +128,12 @@ def test_rrf_fuse_orders_by_descending_score() -> None:
 
 def test_rrf_fuse_respects_top_k() -> None:
     vector_hits = [_hit(uuid4(), chunk_index=i) for i in range(5)]
-    fused = RetrievalService._rrf_fuse(vector_hits, [], top_k=2)
+    fused = RetrievalService._rrf_fuse(vector_hits, [], [], top_k=2)
     assert len(fused) == 2
 
 
 def test_rrf_fuse_empty_inputs() -> None:
-    assert RetrievalService._rrf_fuse([], [], top_k=10) == []
+    assert RetrievalService._rrf_fuse([], [], [], top_k=10) == []
 
 
 def test_rrf_fuse_bm25_only_articles_included_as_synthetic_chunk() -> None:
@@ -146,6 +150,7 @@ def test_rrf_fuse_bm25_only_articles_included_as_synthetic_chunk() -> None:
     fused = RetrievalService._rrf_fuse(
         vector_hits=[],
         bm25_articles=[(bm25_only, "slug-only", "title", "snippet text", 0.9)],
+        qa_hits=[],
         top_k=10,
     )
     assert len(fused) == 1
@@ -163,6 +168,7 @@ def test_rrf_fuse_bm25_only_articles_included_as_synthetic_chunk() -> None:
     fused = RetrievalService._rrf_fuse(
         vector_hits=[_hit(other, chunk_index=0)],
         bm25_articles=[(bm25_only, "slug-only", "title", "snippet", 0.9)],
+        qa_hits=[],
         top_k=10,
     )
     assert {h.article_id for h in fused} == {other, bm25_only}
@@ -173,9 +179,133 @@ def test_rrf_score_replaces_distance_in_hit() -> None:
     distance (lower=better). Caller'ы ожидают higher=better convention."""
     a = uuid4()
     vector_hits = [_hit(a, chunk_index=0, score=0.234)]  # cosine distance
-    fused = RetrievalService._rrf_fuse(vector_hits, [], top_k=10)
+    fused = RetrievalService._rrf_fuse(vector_hits, [], [], top_k=10)
     assert fused[0].score != 0.234  # replaced
     assert fused[0].score == 1.0 / 61
+
+
+# ---------------------------------------------------------------------------
+# Q&A corpus fusion (2026-05-29, ТЗ Чат-поиск §«корпуса»)
+
+
+def _qa_hit(question_id: UUID, article_id: UUID) -> RetrievalHit:
+    return RetrievalHit(
+        article_id=article_id,
+        slug=f"slug-{article_id}",
+        title=f"Title {article_id}",
+        chunk_index=0,
+        text="Вопрос: q?\n\nОтвет: a.",
+        char_start=0,
+        char_end=20,
+        score=0.3,
+        source_type="article_question",
+        question_id=question_id,
+    )
+
+
+def test_rrf_fuse_qa_hits_appear_with_source_type() -> None:
+    """Q&A hits в output сохраняют source_type + question_id для frontend
+    citation rendering."""
+    q_id = uuid4()
+    a_id = uuid4()
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[],
+        bm25_articles=[],
+        qa_hits=[_qa_hit(q_id, a_id)],
+        top_k=10,
+    )
+    assert len(fused) == 1
+    assert fused[0].source_type == "article_question"
+    assert fused[0].question_id == q_id
+    assert fused[0].article_id == a_id
+    # Score recomputed по q_rank=1 → 1/61.
+    assert abs(fused[0].score - 1.0 / 61) < 1e-9
+
+
+def test_rrf_fuse_qa_hits_dedupe_by_question_id() -> None:
+    """Дублирующиеся question_id (защита от bad input) — один в output."""
+    q_id = uuid4()
+    a_id = uuid4()
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[],
+        bm25_articles=[],
+        qa_hits=[_qa_hit(q_id, a_id), _qa_hit(q_id, a_id)],
+        top_k=10,
+    )
+    assert len(fused) == 1
+
+
+def test_rrf_fuse_qa_independent_from_article_corpus() -> None:
+    """Q&A hit для article X появляется в output даже если same article X
+    в vector hits. Q&A — independent unit of knowledge."""
+    a_id = uuid4()
+    q_id = uuid4()
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[_hit(a_id, chunk_index=0)],
+        bm25_articles=[],
+        qa_hits=[_qa_hit(q_id, a_id)],
+        top_k=10,
+    )
+    # Article hit + Q&A hit для same article — оба present.
+    assert len(fused) == 2
+    source_types = {h.source_type for h in fused}
+    assert source_types == {"article", "article_question"}
+
+
+def test_rrf_fuse_qa_mixed_corpora_sorted_by_score() -> None:
+    """Mixed: vector + bm25 + qa hits, output sorted descending by score."""
+    a_v = uuid4()  # vector-only, v_rank=1
+    a_b = uuid4()  # bm25-only, b_rank=1
+    a_q = uuid4()
+    q_id = uuid4()  # qa hit, q_rank=1
+
+    fused = RetrievalService._rrf_fuse(
+        vector_hits=[_hit(a_v, chunk_index=0)],
+        bm25_articles=[(a_b, "slug-b", "title-b", "snippet", 0.5)],
+        qa_hits=[_qa_hit(q_id, a_q)],
+        top_k=10,
+    )
+    assert len(fused) == 3
+    # Все три имеют одинаковый top-rank score = 1/61 — порядок tie-broken
+    # python sort stable; важно что все присутствуют + правильные types.
+    assert all(abs(h.score - 1.0 / 61) < 1e-9 for h in fused)
+    types_by_article = {h.article_id: h.source_type for h in fused}
+    assert types_by_article[a_v] == "article"
+    assert types_by_article[a_b] == "article"
+    assert types_by_article[a_q] == "article_question"
+
+
+@pytest.mark.asyncio
+async def test_search_includes_qa_hits_in_result() -> None:
+    """End-to-end: pipeline вызывает qa_repo.search и hits появляются
+    в output с source_type."""
+    a_id = uuid4()
+    q_id = uuid4()
+    svc, em, ar, qa = _make_service(qa_hits=[_qa_hit(q_id, a_id)])
+    hits = await svc.search(
+        query="hello",
+        access_levels=frozenset([AccessLevel.PUBLIC]),
+    )
+    qa.search.assert_awaited_once()
+    qa_kwargs = qa.search.call_args.kwargs
+    # Same provider model_id и access_levels что и article retrievers.
+    assert qa_kwargs["model_id"] == "mock-v1"
+    assert qa_kwargs["access_levels"] == frozenset([AccessLevel.PUBLIC])
+    # Q&A hit в output.
+    assert any(h.source_type == "article_question" and h.question_id == q_id for h in hits)
+
+
+@pytest.mark.asyncio
+async def test_search_qa_repo_none_skips_qa_query() -> None:
+    """Backward-compat: qa_repo=None — Q&A search не выполняется."""
+    embedding_repo = MagicMock()
+    embedding_repo.search = AsyncMock(return_value=[])
+    article_repo = MagicMock()
+    article_repo.search = AsyncMock(return_value=([], False))
+    # qa_repo explicitly не передан (default=None).
+    svc = RetrievalService(embedding_repo, article_repo, MockEmbeddingProvider())
+    hits = await svc.search(query="hello", access_levels=frozenset([AccessLevel.PUBLIC]))
+    assert hits == []  # all corpora empty, no crash
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +350,7 @@ async def test_search_without_reranker_returns_rrf_order() -> None:
     """`reranker=None` → behavior backward-compatible."""
     a = uuid4()
     b = uuid4()
-    svc, _, _ = _make_service(
+    svc, _, _, _ = _make_service(
         vector_hits=[_hit(a, chunk_index=0), _hit(b, chunk_index=0)],
         bm25_articles=[],
     )
