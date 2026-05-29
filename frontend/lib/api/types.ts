@@ -201,17 +201,21 @@ export interface ChatSession {
  * Citation для chat assistant message (#138).
  *
  * Соответствует backend `hits_to_citations` (chat/system_prompt.py).
- * Stage 1: только `type='article'`. `url` всегда относительный
- * (`/articles/{slug}`) — клиент navigate'ит в SPA-стиле.
+ * `type="article"` — body chunk; `type="article_question"` —
+ * ANSWERED Q&A (2026-05-29). `url` всегда относительный
+ * (`/articles/{slug}` или с anchor'ом `#question-{id}` для Q&A) — клиент
+ * navigate'ит в SPA-стиле.
  */
 export interface Citation {
-  type: "article";
+  type: "article" | "article_question";
   id: string;
   title: string;
   slug: string;
   chunk_index: number;
   score: number;
   url: string;
+  /** Set только когда type="article_question". */
+  question_id?: string;
 }
 
 export interface ChatMessage {

@@ -386,6 +386,120 @@ def test_admin_answer_body_too_long_returns_422(
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# RAG indexer wiring (Q&A → corpus, 2026-05-29)
+
+
+@pytest.fixture
+def rag_indexer_override() -> Iterator[dict[str, AsyncMock]]:
+    """Override get_question_indexer + force RAG_ENABLED=True для теста.
+
+    Default `RAG_ENABLED=False` → indexer не вызывается. Эти тесты
+    проверяют что rag_enabled=True путь fires в indexer correctly.
+    """
+    from src.api.config import get_settings
+    from src.api.search.qa_indexer import QuestionIndexer, get_question_indexer
+
+    index_mock = AsyncMock(return_value=True)
+    remove_mock = AsyncMock(return_value=1)
+    indexer = QuestionIndexer.__new__(QuestionIndexer)
+    indexer.index_question = index_mock  # type: ignore[method-assign]
+    indexer.remove_question = remove_mock  # type: ignore[method-assign]
+
+    settings_obj = MagicMock()
+    settings_obj.rag_enabled = True
+
+    app.dependency_overrides[get_question_indexer] = lambda: indexer
+    app.dependency_overrides[get_settings] = lambda: settings_obj
+    yield {"index": index_mock, "remove": remove_mock}
+    app.dependency_overrides.pop(get_question_indexer, None)
+    app.dependency_overrides.pop(get_settings, None)
+
+
+def test_admin_answer_triggers_qa_indexing_when_rag_enabled(
+    client: TestClient,
+    override_deps: dict[str, Any],
+    rag_indexer_override: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    pending = _make_question(status="PENDING")
+    override_deps["repo"]["get_by_id"].return_value = pending
+    answered = _make_question(status="ANSWERED")
+    answered.id = pending.id
+    override_deps["repo"]["mark_answered"].return_value = answered
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/admin/article-questions/{pending.id}/answer",
+        json={"answer_body": "Answer"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    # Indexer запущен с id новопереведённого ANSWERED row.
+    rag_indexer_override["index"].assert_awaited_once_with(answered.id)
+    # remove НЕ вызван — это answer path.
+    rag_indexer_override["remove"].assert_not_called()
+
+
+def test_admin_dismiss_triggers_qa_removal_when_rag_enabled(
+    client: TestClient,
+    override_deps: dict[str, Any],
+    rag_indexer_override: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    pending = _make_question(status="PENDING")
+    override_deps["repo"]["get_by_id"].return_value = pending
+    dismissed = _make_question(status="DISMISSED")
+    dismissed.id = pending.id
+    override_deps["repo"]["mark_dismissed"].return_value = dismissed
+
+    token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/admin/article-questions/{pending.id}/dismiss",
+        json={"reason": "off-topic"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    rag_indexer_override["remove"].assert_awaited_once_with(dismissed.id)
+    rag_indexer_override["index"].assert_not_called()
+
+
+def test_admin_answer_skips_indexer_when_rag_disabled(
+    client: TestClient,
+    override_deps: dict[str, Any],
+    make_jwt: Callable[..., str],
+) -> None:
+    """RAG_ENABLED=False (default) — indexer не вызывается. Без override'а
+    rag_indexer_override settings.rag_enabled = False (from default Settings)."""
+    from src.api.search.qa_indexer import QuestionIndexer, get_question_indexer
+
+    index_mock = AsyncMock(return_value=True)
+    remove_mock = AsyncMock(return_value=1)
+    indexer = QuestionIndexer.__new__(QuestionIndexer)
+    indexer.index_question = index_mock  # type: ignore[method-assign]
+    indexer.remove_question = remove_mock  # type: ignore[method-assign]
+    app.dependency_overrides[get_question_indexer] = lambda: indexer
+
+    pending = _make_question(status="PENDING")
+    override_deps["repo"]["get_by_id"].return_value = pending
+    answered = _make_question(status="ANSWERED")
+    answered.id = pending.id
+    override_deps["repo"]["mark_answered"].return_value = answered
+
+    try:
+        token = make_jwt(roles=["staff_admin"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/admin/article-questions/{pending.id}/answer",
+            json={"answer_body": "Answer"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        # Settings RAG_ENABLED=False default → indexer never called.
+        index_mock.assert_not_called()
+    finally:
+        app.dependency_overrides.pop(get_question_indexer, None)
+
+
 def test_admin_answer_can_revert_dismissed(
     client: TestClient,
     override_deps: dict[str, Any],
