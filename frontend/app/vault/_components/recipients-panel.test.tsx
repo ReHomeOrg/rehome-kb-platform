@@ -219,11 +219,15 @@ describe("RecipientsPanel", () => {
         ],
       }),
     );
-    // GET /users/user-3/pubkey — survivor (user-2 будет revoked).
+    // POST /users/pubkeys — bulk lookup (survivor user-3; user-2 будет revoked).
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        user_id: "user-3",
-        x25519_pubkey_b64: toBase64(survivorKeypair.pubkey),
+        data: [
+          {
+            user_id: "user-3",
+            x25519_pubkey_b64: toBase64(survivorKeypair.pubkey),
+          },
+        ],
       }),
     );
     // POST /rotate response.
@@ -268,12 +272,16 @@ describe("RecipientsPanel", () => {
       expect(rotateCall).toBeDefined();
     });
 
-    // Verify: pubkey lookup был для user-3 (survivor).
+    // Verify: bulk pubkey POST содержит user-3 в user_ids.
     const pubkeyCall = fetchMock.mock.calls.find(
       ([url]) =>
-        typeof url === "string" && url.includes("/users/user-3/pubkey"),
+        typeof url === "string" && url.endsWith("/vault/users/pubkeys"),
     );
     expect(pubkeyCall).toBeDefined();
+    const pubkeyBody = JSON.parse(
+      (pubkeyCall![1] as RequestInit).body as string,
+    );
+    expect(pubkeyBody.user_ids).toEqual(["user-3"]);
     // Verify: rotate body содержит 2 wraps (owner + user-3).
     const rotateCall = fetchMock.mock.calls.find(
       ([url]) => typeof url === "string" && url.includes("/rotate"),
@@ -283,6 +291,56 @@ describe("RecipientsPanel", () => {
     };
     const userIds = body.new_wraps.map((w) => w.user_id).sort();
     expect(userIds).toEqual(["owner-1", "user-3"]);
+  });
+
+  it("rotation fails если survivor не настроил vault — atomic invariant", async () => {
+    const vaultKey = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["wrapKey", "unwrapKey"],
+    );
+    setVaultKey(vaultKey);
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: [
+          { user_id: "owner-1", group_id: null },
+          { user_id: "user-2", group_id: null },
+          { user_id: "user-3-no-vault", group_id: null },
+        ],
+      }),
+    );
+    // bulk pubkey — user-3-no-vault отсутствует.
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    const onRotated = vi.fn();
+    render(
+      <RecipientsPanel
+        secretId="s-1"
+        ownerId="owner-1"
+        plaintextTitle="title"
+        plaintextPayload="payload"
+        currentVersion={1}
+        onCancel={vi.fn()}
+        onRotated={onRotated}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Отозвать" }).length).toBe(2);
+    });
+    // Отзываем user-2 → survivor user-3-no-vault должен получить wrap, но нет pubkey.
+    fireEvent.click(screen.getAllByRole("button", { name: "Отозвать" })[0]!);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/настроили vault/);
+    });
+    // /rotate POST не делался.
+    expect(
+      fetchMock.mock.calls.find(
+        ([url]) => typeof url === "string" && url.includes("/rotate"),
+      ),
+    ).toBeUndefined();
+    expect(onRotated).not.toHaveBeenCalled();
   });
 
   it("onCancel вызывает callback", async () => {

@@ -410,6 +410,31 @@ class VaultSecretAddWrapsInput(BaseModel):
     wraps: list[VaultSecretWrapInput] = Field(min_length=1, max_length=1000)
 
 
+class VaultUserPubkeysBulkInput(BaseModel):
+    """POST /vault/users/pubkeys — batch pubkey lookup для groups >50.
+
+    Sequential GET /users/{id}/pubkey даёт N round-trip'ов; для группы
+    50+ участников это заметная latency. Bulk endpoint сокращает до 1.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+class VaultUserPubkeysBulkResponse(BaseModel):
+    """Response для bulk pubkey lookup.
+
+    `data` содержит только setup'нувшие vault user'ы; missing user_id'ы
+    пропускаются (не error, не упомянуты в ответе). Caller сравнивает
+    `data` против input list и сам решает fallback ("skip + warn").
+    Order соответствует input'у — даёт deterministic UX для progress
+    indication'а.
+    """
+
+    data: list[VaultUserPubkeyView]
+
+
 # ---------------------------------------------------------------------------
 # View builders
 

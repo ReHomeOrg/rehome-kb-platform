@@ -281,6 +281,33 @@ export async function getUserPubkey(
   );
 }
 
+export interface VaultUserPubkeysBulkResponse {
+  data: VaultUserPubkeyView[];
+}
+
+/**
+ * Batch X25519 pubkey lookup для share-with-group / rotation flows.
+ *
+ * Один POST вместо N sequential GET'ов; решает latency для групп >50.
+ * Backend пропускает user'ов без vault setup (не error); caller сам
+ * решает skip+warn.
+ *
+ * Order `data` соответствует `userIds` input order'у, что упрощает
+ * progress indication в UI.
+ */
+export async function getUserPubkeysBulk(
+  userIds: string[],
+): Promise<VaultUserPubkeysBulkResponse> {
+  return apiFetch<VaultUserPubkeysBulkResponse>(
+    "/api/v1/vault/users/pubkeys",
+    {
+      method: "POST",
+      body: JSON.stringify({ user_ids: userIds }),
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}
+
 export async function addSecretWraps(
   secretId: string,
   body: VaultSecretAddWrapsBody,
