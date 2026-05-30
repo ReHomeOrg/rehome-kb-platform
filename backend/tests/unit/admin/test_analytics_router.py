@@ -54,9 +54,7 @@ def override_deps(
 ) -> Iterator[dict[str, AsyncMock]]:
     app.dependency_overrides[get_search_query_log_repository] = lambda: search_repo_mock
     app.dependency_overrides[get_article_question_repository] = lambda: question_repo_mock
-    app.dependency_overrides[get_chat_unanswered_query_repository] = (
-        lambda: unanswered_repo_mock
-    )
+    app.dependency_overrides[get_chat_unanswered_query_repository] = lambda: unanswered_repo_mock
     yield {
         "search": search_repo_mock,
         "questions": question_repo_mock,

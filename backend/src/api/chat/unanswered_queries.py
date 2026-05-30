@@ -184,8 +184,7 @@ class ChatUnansweredQueryRepository:
         )
         result = await self._session.execute(stmt)
         return [
-            (row.normalized, int(row.cnt), row.first_seen, row.last_seen)
-            for row in result.all()
+            (row.normalized, int(row.cnt), row.first_seen, row.last_seen) for row in result.all()
         ]
 
     async def mark_attached(
