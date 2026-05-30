@@ -23,6 +23,7 @@ import { getVaultKey } from "@/lib/vault/session";
 import {
   base32Encode,
   generateTotpSecret,
+  otpauthQrDataUrl,
   otpauthUri,
   verifyTotpCode,
 } from "@/lib/vault/totp";
@@ -47,6 +48,7 @@ export default function TotpSetupForm({
   onSuccess,
 }: Props): JSX.Element {
   const [secret, setSecret] = useState<Uint8Array | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +57,23 @@ export default function TotpSetupForm({
     // Generate один раз — re-mount cycle получит новый secret.
     setSecret(generateTotpSecret());
   }, []);
+
+  useEffect(() => {
+    if (secret === null) return;
+    let cancelled = false;
+    const uri = otpauthUri(secret, accountLabel, "reHome Vault");
+    otpauthQrDataUrl(uri)
+      .then((dataUrl) => {
+        if (!cancelled) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        // QR render fail — UI silently falls back to plain URI ниже.
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret, accountLabel]);
 
   async function onSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -128,6 +147,26 @@ export default function TotpSetupForm({
       </header>
 
       <div className="flex flex-col gap-2 rounded-md bg-white p-3 text-xs">
+        {qrDataUrl ? (
+          <div className="flex flex-col items-center gap-1">
+            {/*
+              next/image не подходит для inline data: URL — нет remote
+              optimisation, fixed 132×132, нет сетевого хита.
+            */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={qrDataUrl}
+              alt="QR-код для otpauth URI"
+              width={132}
+              height={132}
+              data-testid="totp-qr"
+              className="rounded border border-gray-200 bg-white"
+            />
+            <span className="text-[10px] text-gray-500">
+              Отсканируйте в приложении-аутентификаторе.
+            </span>
+          </div>
+        ) : null}
         <label className="flex flex-col gap-1">
           <span className="font-medium text-gray-700">
             Секрет (base32, ручной ввод)
@@ -141,7 +180,7 @@ export default function TotpSetupForm({
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-medium text-gray-700">
-            otpauth URI (для сканирования)
+            otpauth URI (для сканирования вручную)
           </span>
           <code
             data-testid="totp-uri"
@@ -149,10 +188,6 @@ export default function TotpSetupForm({
           >
             {uri}
           </code>
-          <span className="text-[10px] text-gray-500">
-            QR-код пока не показывается (backlog) — скопируйте URI в
-            приложение либо используйте секрет вручную.
-          </span>
         </label>
       </div>
 

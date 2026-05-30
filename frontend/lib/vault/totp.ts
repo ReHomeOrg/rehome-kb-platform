@@ -21,6 +21,8 @@
  * 3. Compare с user-entered code. Pass → submit auth_hash на /unlock.
  */
 
+import QRCode from "qrcode";
+
 import { randomBytes } from "./crypto";
 
 const TOTP_DIGITS = 6;
@@ -86,6 +88,34 @@ export function otpauthUri(secret: Uint8Array, label: string, issuer: string): s
   params.set("digits", String(TOTP_DIGITS));
   params.set("period", String(TOTP_STEP_SECONDS));
   return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
+/**
+ * Render otpauth URI as PNG data URL для embedding в `<img src>`.
+ *
+ * Параметры QR кодирования:
+ * - `errorCorrectionLevel: 'M'` (15% recovery) — стандарт otpauth,
+ *   достаточно для печатного / экранного скана камерой телефона.
+ * - `margin: 1` — минимальная quiet zone (модули). 0 ломает scan'инг
+ *   у некоторых scanner'ов; 4 (default) визуально избыточен в форме.
+ * - `scale: 4` — 4 px на модуль; для otpauth URI типичный QR ~33
+ *   модуля → ~132 px image, хорошо помещается в форму setup wizard'а.
+ *
+ * Wrapper нужен по двум причинам: (а) центральная конфигурация QR
+ * params, (б) тестируемость — UI компоненты мокают эту функцию вместо
+ * вытягивания `qrcode` lib в jsdom.
+ *
+ * `uri` пустой → throw — caller обязан передавать готовый otpauth URI.
+ */
+export async function otpauthQrDataUrl(uri: string): Promise<string> {
+  if (!uri) {
+    throw new Error("otpauthQrDataUrl: empty uri");
+  }
+  return QRCode.toDataURL(uri, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    scale: 4,
+  });
 }
 
 /**
