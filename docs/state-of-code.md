@@ -916,3 +916,78 @@ Skipped explicitly (deferred):
 - **Real LLM creds + golden dataset 200 pairs** — без изменений
   с CS.11 (ops + content team).
 
+## CS.14. Intra-day backlog drain 2026-05-30 (PR'ы #352-#354)
+
+Одна сессия, три code-PR'а подряд после CS.13 refresh (этот же
+`docs/state-of-code-2026-05-30` PR — #351). Все три закрывают item'ы
+из «Что осталось self-serve» в CS.13. **Все три открыты одновременно,
+не merged на момент пушa этой ревизии state-of-code; CI / Reviewer
+approval pending.**
+
+### Admin analytics — trend по unanswered chat queries (1 PR)
+
+- **#352** `feat(kb-help): admin analytics — trend по unanswered chat queries`
+  — расширяет admin analytics (#344) и chat moderation queue (#350)
+  трендовым сигналом. Backend: `ChatUnansweredQueryRepository.find_top_normalized(window_hours, limit, status_filter)`
+  с GROUP BY `lower(query_masked)` + `COUNT` + first/last seen;
+  `GET /api/v1/admin/analytics/unanswered-queries` (window_hours / limit /
+  status, default `status=NEW`). HTTP surface ограничен `NEW / ATTACHED /
+  DISMISSED` (cross-status aggregation `status_filter=None` доступна
+  только через repo — упростило OpenAPI 3.1 и client typing). Frontend:
+  `getTopUnansweredQueries` + новая секция в `/admin/analytics`,
+  выделена в `_components/unanswered-trend-section.tsx` для testability
+  (pure presentation, hot threshold подсветка count >= 5).
+  Тесты: 13 backend (6 repo + 7 router) + 5 frontend unit-тестов.
+
+### Vault Stage 2 — QR-код для TOTP setup (1 PR)
+
+- **#353** `feat(kb-vault): QR-код для TOTP setup wizard`
+  — закрывает существующий TODO в `frontend/app/vault/_components/totp-setup-form.tsx`
+  («QR-код пока не показывается (backlog)»). Подключена npm
+  `qrcode ^1.5.4` + `@types/qrcode` (open-source MIT, pure-JS,
+  ~30 KB; не сервис категории C — ADR не требуется). Новый async
+  export `otpauthQrDataUrl(uri)` в `lib/vault/totp.ts` с фиксированной
+  конфигурацией (`errorCorrectionLevel: 'M'`, `margin: 1`, `scale: 4`
+  → ~132×132 PNG). UI: `<img>` с `alt="QR-код для otpauth URI"` +
+  graceful fallback на текстовый URI при reject. Zero-knowledge
+  invariant (ADR-0017 / ADR-0011) сохранён: TOTP secret генерится
+  client-side, QR кодирует уже-известный клиенту URI, никакие новые
+  данные не уезжают на сервер. 4 новых теста (2 wrapper + 2 UI).
+
+### Vault Stage 2 — batch pubkey endpoint для groups >50 (1 PR)
+
+- **#354** `feat(kb-vault): batch pubkey endpoint для groups >50 (ADR-0017)`
+  — закрывает остаток CS.4 / CS.11 §610 Vault Stage 2 backlog'а.
+  Sequential `GET /users/{id}/pubkey` в share-secret + rotation
+  flow давал N round-trip'ов; для группы 50+ — заметная latency.
+  Backend: `POST /api/v1/vault/users/pubkeys` (body `{user_ids: [UUID]}`,
+  1..200) с `require_authenticated` RBAC (pubkey public by design per
+  ADR-0011); один SQL `SELECT user_id, x25519_pubkey WHERE user_id IN (...)`.
+  Missing users отсутствуют в результате; response order соответствует
+  input order'у; duplicates dedupe'ятся.
+  Frontend: `getUserPubkeysBulk(userIds)` + миграция двух callers.
+  Asymmetric missing-handling:
+  - `share-secret-panel` — partial-missing допустим (POST wraps для
+    sharable + warning, panel остаётся открытой).
+  - `recipients-panel` (rotation) — partial-missing запрещён, atomic
+    invariant (survivor без vault потеряет доступ после rotate);
+    rotation прерывается до POST /rotate с явной ошибкой.
+  Single `GET /users/{id}/pubkey` оставлен (используется в
+  emergency_router + admin tooling). 10 backend + ~5 frontend
+  тестов (миграция + новые scenario).
+
+### Что закрыто из CS.13 self-serve остатка
+
+- ~~Trend-аналитика по unanswered queue~~ ✅ #352.
+- ~~Vault Stage 2: QR-код для TOTP setup~~ ✅ #353.
+- ~~Vault Stage 2: batch pubkey endpoint для groups >50~~ ✅ #354.
+
+### Что остаётся self-serve (после #354)
+
+Code-only self-serve backlog **исчерпан** для текущего horizon'а.
+Открытые items требуют внешних зависимостей:
+
+- **Grafana validation** — JSON dashboards из #267 ещё не прогоняли
+  против running Grafana (ops dep).
+- **Real LLM creds + golden dataset 200 pairs** — без изменений
+  с CS.11 (ops + content team).
