@@ -163,4 +163,40 @@ describe("TotpSetupForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it("показывает QR-код после mount с корректным alt-текстом", async () => {
+    render(
+      <TotpSetupForm
+        accountLabel="alice"
+        onCancel={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    const qr = await screen.findByTestId("totp-qr");
+    expect(qr.tagName).toBe("IMG");
+    expect(qr.getAttribute("alt")).toMatch(/QR-код для otpauth URI/);
+    expect(qr.getAttribute("src") ?? "").toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("если QR не сгенерирован — секрет и URI остаются доступными", async () => {
+    // Mock'аем wrapper на reject, чтобы симулировать ошибку рендера QR.
+    const totpModule = await import("@/lib/vault/totp");
+    const spy = vi
+      .spyOn(totpModule, "otpauthQrDataUrl")
+      .mockRejectedValue(new Error("simulated render fail"));
+
+    render(
+      <TotpSetupForm
+        accountLabel="alice"
+        onCancel={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    // Secret и URI должны быть видны (graceful fallback).
+    await screen.findByTestId("totp-secret");
+    expect(await screen.findByTestId("totp-uri")).toBeInTheDocument();
+    expect(screen.queryByTestId("totp-qr")).not.toBeInTheDocument();
+
+    spy.mockRestore();
+  });
 });

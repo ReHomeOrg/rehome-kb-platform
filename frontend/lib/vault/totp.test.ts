@@ -14,6 +14,7 @@ import {
   base32Decode,
   base32Encode,
   generateTotpSecret,
+  otpauthQrDataUrl,
   otpauthUri,
   totpCode,
   verifyTotpCode,
@@ -128,5 +129,19 @@ describe("verifyTotpCode", () => {
 
   it("rejects wrong code", async () => {
     expect(await verifyTotpCode(RFC_SECRET, "000000")).toBe(false);
+  });
+});
+
+describe("otpauthQrDataUrl", () => {
+  it("returns PNG data URL для valid otpauth URI", async () => {
+    const uri = otpauthUri(RFC_SECRET, "alice", "reHome Vault");
+    const dataUrl = await otpauthQrDataUrl(uri);
+    expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+    // Base64-payload должен быть нетривиальным (QR с ~33 модулей → kb-sized image).
+    expect(dataUrl.length).toBeGreaterThan(200);
+  });
+
+  it("throws при empty URI", async () => {
+    await expect(otpauthQrDataUrl("")).rejects.toThrow(/empty uri/);
   });
 });
