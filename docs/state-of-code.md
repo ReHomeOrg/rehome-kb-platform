@@ -749,3 +749,170 @@ Skipped explicitly (deferred):
 - Observability: Grafana dashboards для hot paths (нужен running
   Grafana для validation), alert tuning (нужны operational данные).
 
+---
+
+# Current State (2026-05-30)
+
+> Refresh после landing'а 14 PR'ов (#337-#350) с момента CS.12. Vault
+> Stage 2 завершён (ADR-0017 §E true revoke + frontend); help-центр
+> запущен в production (seeded 138 articles); Article Q&A прорастает
+> в RAG corpus; chat-queries без RAG hits ловятся в admin moderation
+> queue.
+
+**Метрики проекта (delta vs 2026-05-25):**
+- Backend: 14 PR'ов merged, добавлены unit/integration тестовые модули
+  (`test_capture_no_answer`, `test_unanswered_queries_repository`,
+  `test_unanswered_router`, `test_qa_indexer`, расширенный
+  `test_questions_router`, `test_article_questions_check_constraint`,
+  `test_analytics_router`, vault `test_repository` / `test_router`
+  расширены rotation+wraps). Frontend: новые тестовые модули
+  (`citations-block.test`, `recipients-panel.test`,
+  `qa-moderation-panel`, `unanswered-moderation-panel.test`,
+  `rotation.test`). Точный счёт через `pytest -q` не выполнялся —
+  документ обновлён без re-run тестов.
+- Frontend: 3 новые admin-страницы (`article-questions`, `analytics`,
+  `chat-unanswered-queries`) + vault `RecipientsPanel` под secret-detail.
+- 3 новые Alembic миграции:
+  `20260528_010000_article_questions`,
+  `20260529_010000_article_question_embeddings`,
+  `20260529_020000_chat_unanswered_queries`.
+- **27 ADRs** (0001-0027; +ADR-0027 kb-seed source of truth, accepted
+  в #348).
+- 0 open PR'ов / 0 open Issues на 2026-05-30 09:00 UTC.
+- CI: статус по последним merged PR'ам не re-verified в рамках этого
+  refresh; revert'ов в git log за окно #337-#350 нет.
+
+## CS.13. Sessions 2026-05-26 … 2026-05-29
+
+14 PR'ов merged между CS.12 refresh (#336) и 2026-05-29 EOD.
+Распределение по темам:
+
+### Vault Stage 2 finale (3 PR'а)
+
+- **#337** `feat(kb-vault): ADR-0017 §E true revoke — POST /vault/secrets/{id}/rotate`
+  — backend rotation endpoint: новый `vault.secret_rotated` audit
+  action, schemas + repository expansion (rotate → re-wrap workflow
+  для всех recipients). 91 + 193 строк тестов
+  (`test_repository` + `test_router`).
+- **#338** `feat(kb-vault): ADR-0017 §E rotation — frontend RecipientsPanel + GET /wraps`
+  — full-stack завершение rotation: `GET /vault/secrets/{id}/wraps`
+  endpoint, frontend `RecipientsPanel` в `/vault/secret-detail`
+  с revoke → rotation flow, 311 + 116 + 44 строк тестов (frontend +
+  backend repo/router).
+- **#339** `chore(kb-vault): apply Reviewer backlog 2026-05-27 — e2e crypto + validator`
+  — schemas validator hardening, repository edge case, frontend
+  rotation e2e crypto test (193 строки в `rotation.test.ts`).
+
+После #337-#339 в CS.4 Vault Stage 2 backlog'е остаются только QR-код
+для TOTP setup + batch pubkey endpoint для groups >50.
+
+### Help center production launch (2 PR'а)
+
+- **#340** `feat(kb-help): help.rehome.one landing + KB content import scripts`
+  — landing `/` заменён с «Coming soon» на real help-центр (search +
+  categories + top FAQ tile-grid). Maintenance scripts
+  (`backend/scripts/import_kb_articles.py`, `reindex_articles.py`).
+  В production seeded 138 articles (15 FAQ + 120 KB + 3 baseline).
+- **#341** `fix(kb-search,kb-admin): close 2 ortho bugs from CS.12 known issues`
+  — закрыты обе known issue из CS.12:
+  - `admin_task` race — handler делал `create()` (flush only) → spawn'ил
+    background task, который падал на `LookupError` в свежей сессии. Fix:
+    explicit `await session.commit()` перед `runner.spawn_*` в
+    `operational_router.reindex`, `audit_log_router.export`,
+    `eval_runs_router.start`.
+  - pgvector deserialize — `embedding.op("<=>")(...)` не типизировал
+    return value → Vector type пытался `._from_db()` на float scalar.
+    Fix: `ArticleEmbedding.embedding.cosine_distance(query_vector)`.
+
+### kb-search retrieval + Q&A → RAG (3 PR'а)
+
+- **#342** `feat(kb-search): symmetric RRF — include BM25-only article hits`
+  — RRF теперь симметричный: BM25-only hits (без vector match) включены
+  в final ranking. Изменения в `search/retrieval.py` + калибровка тестов.
+- **#343** `feat(kb-help): Article Q&A — full-stack module (TZ §2 community-driven help)`
+  — community-driven Q&A под articles. Backend:
+  `articles/questions_router.py`, `questions_repository.py`,
+  `questions_schemas.py`, миграция
+  `20260528_010000_article_questions` с CHECK constraint статусной
+  машины (PENDING / ANSWERED / REJECTED), новые audit actions.
+  Frontend: admin `article-questions/qa-moderation-panel` + public
+  `articles/[slug]/article-qa-section`. +105 строк в OpenAPI.
+  Реализует ТЗ §2 «community-driven help».
+- **#349** `feat(kb-search): Q&A → RAG corpus с separate vector index`
+  — answered Q&A pairs включены в RAG corpus: таблица
+  `article_question_embeddings` (миграция
+  `20260529_010000_article_question_embeddings`), модуль
+  `search/qa_indexer.py`, retrieval расширен `qa_corpus`
+  (отдельный vector index), system_prompt знает про Q&A citations,
+  frontend `citations-block` отображает Q&A citations отдельно от
+  article citations, backfill script для existing answered Q&A.
+
+### Chat moderation queue (1 PR)
+
+- **#350** `feat(chat): capture chat queries без RAG hits в admin moderation queue`
+  — chat queries, на которые RAG не нашёл hits, ловятся в
+  `chat_unanswered_queries` (миграция
+  `20260529_020000_chat_unanswered_queries`) с PII-маскировкой at
+  capture time. Admin queue:
+  `GET /admin/chat-unanswered-queries`,
+  `POST .../{id}/attach` (создаёт PENDING `article_question`),
+  `POST .../{id}/dismiss`. Full-stack frontend admin page
+  `/admin/chat-unanswered-queries` с moderation panel. 354 + 198 + 120
+  строк backend тестов, 205 строк frontend test'а. ADR-0026 atomic
+  transaction соблюдён (один `session.commit()` после business writes
+  + audit row).
+
+### Admin analytics (1 PR)
+
+- **#344** `feat(kb-help): admin analytics dashboard (C) — KB usage observability`
+  — admin analytics dashboard агрегирует KB usage signals:
+  `admin/analytics_router.py` (173 строки) + тесты (187 строк),
+  методы агрегации в `query_log` и `questions_repository`,
+  +54 строки в OpenAPI. Frontend admin page `/admin/analytics`
+  (235 строк) + nav link в admin landing.
+
+### Hygiene / refactor / tests (4 PR'а)
+
+- **#345** `chore: apply Reviewer backlog 2026-05-28 — 7 items closed`
+  — questions_repository ordering fix, query_log normalization edge
+  case, `import_kb_articles.py` / `reindex_articles.py` portability,
+  retrieval test расширение, frontend `audit-filters` test gap.
+  `architect-deviations.md` обновлён (+37 строк).
+- **#346** `refactor(kb-auth): consolidate 9 копий require_staff_admin в один FastAPI dep`
+  — 9 копий `require_staff_admin` (analytics, eval_runs, operational,
+  pd_requests, admin/router, security_incidents, users, categories,
+  vault/emergency) сведены в один dependency в `auth/dependency.py`.
+  Net diff −51 строка.
+- **#347** `test(kb-help): integration tests для article_questions CHECK constraint`
+  — 272 строки integration tests на CHECK constraint статусной машины
+  Q&A. Закрыты DB-level invariant scenarios для PENDING / ANSWERED /
+  REJECTED transitions.
+- **#348** `chore(kb-help): ADR-0027 .docx seed → MinIO bucket kb-seed`
+  — ADR-0027 принят: source of truth для KB seed контента — `.docx`
+  файлы в MinIO bucket `kb-seed` (не в git). `import_kb_articles.py`
+  расширен MinIO source mode + `backend/scripts/seed/README.md`.
+  Зачем: версионирование контента отделено от кода, content team
+  может править без code commits.
+
+### Что закрыто из предыдущего backlog'а
+
+- ~~Vault Stage 2 §E true revoke + frontend~~ ✅ #337 + #338 + #339.
+- ~~Article Q&A community module~~ ✅ #343 (full stack).
+- ~~Q&A → RAG corpus (TZ §2 fold)~~ ✅ #349.
+- ~~Chat queries без RAG hits moderation~~ ✅ #350 (full stack).
+- ~~Admin analytics dashboard~~ ✅ #344.
+- ~~`require_staff_admin` DRY duplication~~ ✅ #346.
+- ~~`admin_task` race + pgvector deserialize bugs из CS.12 known issues~~ ✅ #341.
+
+### Что осталось self-serve (после #350)
+
+- **Vault Stage 2 остатки** (CS.4 backlog): QR-код для TOTP setup;
+  batch pubkey endpoint для groups >50.
+- **Trend-аналитика по unanswered queue** — потенциальный extension
+  #344 + #350 (топ-N часто повторяющихся unanswered queries для
+  staff prioritization).
+- **Grafana validation** — JSON dashboards из #267 ещё не прогоняли
+  против running Grafana (зависит от ops инфра).
+- **Real LLM creds + golden dataset 200 pairs** — без изменений
+  с CS.11 (ops + content team).
+
