@@ -4,9 +4,13 @@
  * Surfaces aggregate KB usage:
  * - Top search queries в window (с content-gap breakdown).
  * - Per-article Q&A counts (PENDING/ANSWERED/DISMISSED).
+ * - Top unanswered chat queries (trend buckets) — moderation
+ *   prioritization сверх #350 capture queue.
  */
 
 import { apiFetch } from "./client";
+
+export type UnansweredStatus = "NEW" | "ATTACHED" | "DISMISSED";
 
 export interface TopQuery {
   query: string;
@@ -55,5 +59,36 @@ export async function getArticleQuestionsCounts(
   const tail = qs.toString();
   return apiFetch<ArticleQuestionsCountResponse>(
     `/api/v1/admin/analytics/article-questions${tail ? `?${tail}` : ""}`,
+  );
+}
+
+export interface UnansweredTrend {
+  normalized_query: string;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface UnansweredTrendResponse {
+  window_hours: number;
+  status: UnansweredStatus;
+  data: UnansweredTrend[];
+}
+
+export async function getTopUnansweredQueries(
+  params: {
+    windowHours?: number;
+    limit?: number;
+    status?: UnansweredStatus;
+  } = {},
+): Promise<UnansweredTrendResponse> {
+  const qs = new URLSearchParams();
+  if (params.windowHours !== undefined)
+    qs.set("window_hours", String(params.windowHours));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.status !== undefined) qs.set("status", params.status);
+  const tail = qs.toString();
+  return apiFetch<UnansweredTrendResponse>(
+    `/api/v1/admin/analytics/unanswered-queries${tail ? `?${tail}` : ""}`,
   );
 }

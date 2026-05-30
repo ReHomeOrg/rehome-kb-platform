@@ -10,12 +10,12 @@ encapsulates это в `record()` чтобы router/handler не мог обой
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Final, Literal
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import DateTime, ForeignKey, Text, func, select, text
+from sqlalchemy import DateTime, ForeignKey, Text, and_, func, select, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -137,6 +137,56 @@ class ChatUnansweredQueryRepository:
         rows = list(rows_result.scalars().all())
         total = (await self._session.execute(count_stmt)).scalar_one()
         return rows, int(total)
+
+    async def find_top_normalized(
+        self,
+        *,
+        window_hours: int = 168,
+        limit: int = 50,
+        status_filter: ChatUnansweredStatus | None = "NEW",
+    ) -> list[tuple[str, int, datetime, datetime]]:
+        """Aggregate top unanswered chat queries in time window.
+
+        Returns `(normalized_query, count, first_seen, last_seen)` tuples
+        ordered by count desc, then alphabetical (deterministic tiebreak).
+
+        Normalization here is `lower(query_masked)`. `query_masked` is
+        already stripped of edge whitespace in `record()` and PII-masked
+        at capture time, so this is sufficient for grouping case
+        variations. It is *not* identical to
+        `search.query_log.normalize_query` which also collapses inner
+        whitespace — collapsing inner whitespace via SQL across dialects
+        is awkward; if we later need exact parity, add a generated
+        column in a follow-up migration.
+
+        - `window_hours`: lookback window from now (UTC).
+        - `limit`: cap; pairs with router-side bound 1..200.
+        - `status_filter`: default `"NEW"` to surface unhandled queue
+          only. `None` aggregates across all statuses (incl. ATTACHED /
+          DISMISSED) for retrospective views.
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=window_hours)
+        normalized_col = func.lower(ChatUnansweredQuery.query_masked).label("normalized")
+        count_col = func.count().label("cnt")
+        first_seen_col = func.min(ChatUnansweredQuery.created_at).label("first_seen")
+        last_seen_col = func.max(ChatUnansweredQuery.created_at).label("last_seen")
+
+        where_clauses = [ChatUnansweredQuery.created_at >= cutoff]
+        if status_filter is not None:
+            where_clauses.append(ChatUnansweredQuery.status == status_filter)
+
+        stmt = (
+            select(normalized_col, count_col, first_seen_col, last_seen_col)
+            .where(and_(*where_clauses))
+            .group_by(normalized_col)
+            .order_by(count_col.desc(), normalized_col.asc())
+            .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return [
+            (row.normalized, int(row.cnt), row.first_seen, row.last_seen)
+            for row in result.all()
+        ]
 
     async def mark_attached(
         self,
