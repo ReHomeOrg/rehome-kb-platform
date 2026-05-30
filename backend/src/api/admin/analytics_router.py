@@ -8,6 +8,10 @@ external Grafana / Loki:
 - `GET /api/v1/admin/analytics/article-questions` — per-article Q&A
   counts (PENDING / ANSWERED / DISMISSED), сортировка по PENDING DESC
   (moderation backlog signal).
+- `GET /api/v1/admin/analytics/unanswered-queries` — top chat queries
+  без RAG hits, GROUP BY normalized form, с first/last seen timestamps
+  (трендовый сигнал для staff prioritization, дополнение к #350
+  capture queue).
 
 Pure read endpoints — no audit log (read'ы admin данных audit'ятся
 middleware-level в audit_log; не нужно дублировать).
@@ -17,7 +21,8 @@ RBAC: STAFF_ADMIN (STAFF + LEGAL) — те же scopes, что и admin/stats.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -33,6 +38,11 @@ from src.api.auth.dependency import (
     require_staff_admin,
 )
 from src.api.auth.scope import AccessLevel
+from src.api.chat.unanswered_queries import (
+    ChatUnansweredQueryRepository,
+    ChatUnansweredStatus,
+    get_chat_unanswered_query_repository,
+)
 from src.api.search.query_log import (
     SearchQueryLogRepository,
     get_search_query_log_repository,
@@ -81,6 +91,25 @@ class ArticleQuestionsCountResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: list[ArticleQuestionsCountView]
+
+
+class UnansweredTrendView(BaseModel):
+    """Aggregated unanswered chat query — один normalized bucket."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    normalized_query: str
+    count: int
+    first_seen: datetime
+    last_seen: datetime
+
+
+class UnansweredTrendResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    window_hours: int
+    status: ChatUnansweredStatus
+    data: list[UnansweredTrendView]
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +189,59 @@ async def get_article_questions_counts(
             )
             for (article_id, slug, title, pending, answered, dismissed) in rows
         ]
+    )
+
+
+@router.get(
+    "/unanswered-queries",
+    response_model=UnansweredTrendResponse,
+    summary="Top unanswered chat queries trend (STAFF_ADMIN)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        403: {"description": "Требуется staff_admin scope"},
+    },
+)
+async def get_unanswered_queries_trend(
+    window_hours: int = Query(default=168, ge=1, le=24 * 30),
+    limit: int = Query(default=50, ge=1, le=200),
+    status_filter: Literal["NEW", "ATTACHED", "DISMISSED"] = Query(
+        default="NEW",
+        alias="status",
+    ),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    access_levels: frozenset[AccessLevel] = Depends(get_current_access_levels),
+    repo: ChatUnansweredQueryRepository = Depends(get_chat_unanswered_query_repository),
+) -> UnansweredTrendResponse:
+    """`GET /api/v1/admin/analytics/unanswered-queries`.
+
+    Aggregates `chat_unanswered_queries` rows by normalized query within
+    the window. Each bucket includes total occurrences + first/last
+    seen timestamps so staff can prioritise the most frequent or most
+    recent unhandled patterns.
+
+    Default `status=NEW` surfaces only the actionable queue; pass
+    `status=ATTACHED` / `status=DISMISSED` for retrospective views.
+    Cross-status aggregation доступна напрямую через repository
+    (`status_filter=None`) — не вынесена в HTTP surface.
+    """
+    require_staff_admin(access_levels)
+    rows = await repo.find_top_normalized(
+        window_hours=window_hours,
+        limit=limit,
+        status_filter=status_filter,
+    )
+    return UnansweredTrendResponse(
+        window_hours=window_hours,
+        status=status_filter,
+        data=[
+            UnansweredTrendView(
+                normalized_query=normalized,
+                count=count,
+                first_seen=first_seen,
+                last_seen=last_seen,
+            )
+            for (normalized, count, first_seen, last_seen) in rows
+        ],
     )
 
 
