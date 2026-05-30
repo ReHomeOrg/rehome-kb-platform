@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -196,3 +196,130 @@ async def test_mark_dismissed_returns_none_if_not_found() -> None:
     repo.get_by_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
     result = await repo.mark_dismissed(uuid4(), reason=None)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# find_top_normalized
+
+
+def _bucket(
+    normalized: str,
+    count: int,
+    *,
+    first_offset_h: int = 24,
+    last_offset_h: int = 1,
+) -> SimpleNamespace:
+    """Имитирует aggregator row."""
+    now = datetime.now(UTC)
+    return SimpleNamespace(
+        normalized=normalized,
+        cnt=count,
+        first_seen=now - timedelta(hours=first_offset_h),
+        last_seen=now - timedelta(hours=last_offset_h),
+    )
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_returns_buckets() -> None:
+    """Repo возвращает (normalized, count, first_seen, last_seen) tuples."""
+    session = _session()
+    buckets = [
+        _bucket("сервисный сбор", 7),
+        _bucket("оплата", 3),
+        _bucket("кэдо", 2),
+    ]
+    rows_result = MagicMock(all=MagicMock(return_value=buckets))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    result = await repo.find_top_normalized(window_hours=24, limit=10)
+    assert len(result) == 3
+    normalized_0, count_0, first_0, last_0 = result[0]
+    assert normalized_0 == "сервисный сбор"
+    assert count_0 == 7
+    assert isinstance(first_0, datetime)
+    assert isinstance(last_0, datetime)
+    assert first_0 <= last_0
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_empty_result() -> None:
+    session = _session()
+    rows_result = MagicMock(all=MagicMock(return_value=[]))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    result = await repo.find_top_normalized(window_hours=24, limit=10)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_default_status_is_new() -> None:
+    """По умолчанию метод фильтрует на NEW; SQL должен содержать WHERE на status."""
+    session = _session()
+    rows_result = MagicMock(all=MagicMock(return_value=[]))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    await repo.find_top_normalized(window_hours=24, limit=10)
+
+    # Стейтмент передан в execute — проверяем что compile содержит status filter.
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "status" in compiled
+    assert "NEW" in compiled
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_status_none_skips_filter() -> None:
+    """status_filter=None — нет фильтра по статусу в SQL."""
+    session = _session()
+    rows_result = MagicMock(all=MagicMock(return_value=[]))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    await repo.find_top_normalized(window_hours=24, limit=10, status_filter=None)
+
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    # Допустим SELECT может ссылаться на column "status" в `lower(query_masked)`
+    # alias / нет; ключевая проверка — нет equality WHERE на status'е.
+    assert "status = 'NEW'" not in compiled
+    assert "status = 'ATTACHED'" not in compiled
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_window_cutoff_in_sql() -> None:
+    """Окно применяется через created_at >= cutoff."""
+    session = _session()
+    rows_result = MagicMock(all=MagicMock(return_value=[]))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    await repo.find_top_normalized(window_hours=72, limit=10)
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "created_at" in compiled
+
+
+@pytest.mark.asyncio
+async def test_find_top_normalized_uses_lower_normalization() -> None:
+    """Группировка по lower(query_masked) — case-insensitive aggregation."""
+    session = _session()
+    rows_result = MagicMock(all=MagicMock(return_value=[]))
+    session.execute = AsyncMock(return_value=rows_result)
+
+    repo = ChatUnansweredQueryRepository(session)
+    await repo.find_top_normalized(window_hours=24, limit=10)
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "lower(" in compiled.lower()
+    assert "query_masked" in compiled

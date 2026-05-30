@@ -1,14 +1,18 @@
 /**
  * /admin/analytics — in-app KB analytics dashboard (C, 2026-05-28).
  *
- * Two sections:
+ * Three sections:
  * 1. Top search queries (window selectable) с content-gap breakdown.
  *    Visualises «что ищут пользователи» + «какие из этих query'ев
  *    не находят результат» (FTS no-result rate per query).
  * 2. Per-article Q&A counts — moderation backlog signal per статья.
+ * 3. Top unanswered chat queries (trend buckets) — что чаще всего
+ *    спрашивают в чате без RAG-grounded ответа; quick-link на
+ *    moderation queue из #350.
  *
  * Server Component с initial fetch (graceful degradation на ApiError).
- * Window selector — query param `?window_hours=N`.
+ * Window selector — query param `?window_hours=N` (общий для всех
+ * window-bound секций).
  */
 
 import Link from "next/link";
@@ -17,8 +21,11 @@ import Nav from "@/app/_components/nav";
 import {
   getArticleQuestionsCounts,
   getTopQueries,
+  getTopUnansweredQueries,
 } from "@/lib/api/admin-analytics";
 import { ApiError } from "@/lib/api/client";
+
+import UnansweredTrendSection from "./_components/unanswered-trend-section";
 
 interface PageProps {
   searchParams: Promise<{ window_hours?: string }>;
@@ -45,11 +52,13 @@ export default async function AnalyticsPage({
 
   let queries;
   let questions;
+  let unanswered;
   let error: string | null = null;
   try {
-    [queries, questions] = await Promise.all([
+    [queries, questions, unanswered] = await Promise.all([
       getTopQueries({ windowHours, limit: 50 }),
       getArticleQuestionsCounts({ limit: 50 }),
+      getTopUnansweredQueries({ windowHours, limit: 50, status: "NEW" }),
     ]);
   } catch (err) {
     if (err instanceof ApiError) {
@@ -61,6 +70,7 @@ export default async function AnalyticsPage({
             : `Ошибка ${err.status}`;
       queries = { window_hours: windowHours, data: [] };
       questions = { data: [] };
+      unanswered = { window_hours: windowHours, status: "NEW" as const, data: [] };
     } else {
       throw err;
     }
@@ -229,6 +239,11 @@ export default async function AnalyticsPage({
             backlog модерации сверху.
           </p>
         </section>
+
+        <UnansweredTrendSection
+          data={unanswered.data}
+          windowHours={windowHours}
+        />
       </main>
     </>
   );
