@@ -264,7 +264,9 @@ async def test_find_top_normalized_default_status_is_new() -> None:
     await repo.find_top_normalized(window_hours=24, limit=10)
 
     # Стейтмент передан в execute — проверяем что compile содержит status filter.
-    stmt = session.execute.await_args.args[0]
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "status" in compiled
     assert "NEW" in compiled
@@ -280,7 +282,9 @@ async def test_find_top_normalized_status_none_skips_filter() -> None:
     repo = ChatUnansweredQueryRepository(session)
     await repo.find_top_normalized(window_hours=24, limit=10, status_filter=None)
 
-    stmt = session.execute.await_args.args[0]
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     # Допустим SELECT может ссылаться на column "status" в `lower(query_masked)`
     # alias / нет; ключевая проверка — нет equality WHERE на status'е.
@@ -297,7 +301,9 @@ async def test_find_top_normalized_window_cutoff_in_sql() -> None:
 
     repo = ChatUnansweredQueryRepository(session)
     await repo.find_top_normalized(window_hours=72, limit=10)
-    stmt = session.execute.await_args.args[0]
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "created_at" in compiled
 
@@ -311,7 +317,9 @@ async def test_find_top_normalized_uses_lower_normalization() -> None:
 
     repo = ChatUnansweredQueryRepository(session)
     await repo.find_top_normalized(window_hours=24, limit=10)
-    stmt = session.execute.await_args.args[0]
+    call = session.execute.await_args
+    assert call is not None
+    stmt = call.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "lower(" in compiled.lower()
     assert "query_masked" in compiled
