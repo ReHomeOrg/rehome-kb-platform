@@ -85,6 +85,7 @@ def repo_mocks() -> dict[str, AsyncMock]:
         "archive_secret": AsyncMock(return_value=False),
         # ADR-0017 sharing
         "get_user_pubkey": AsyncMock(return_value=None),
+        "get_user_pubkeys_bulk": AsyncMock(return_value={}),
         "add_secret_wraps": AsyncMock(return_value=0),
         "remove_secret_wrap": AsyncMock(return_value=False),
         # ADR-0017 §E true revoke
@@ -523,6 +524,107 @@ def test_get_user_pubkey_404_when_vault_not_setup(
 def test_get_user_pubkey_requires_auth(client: TestClient) -> None:
     resp = client.get(f"/api/v1/vault/users/{uuid4()}/pubkey")
     assert resp.status_code == 401
+
+
+# --- bulk pubkey ---
+
+
+def test_bulk_pubkeys_requires_auth(client: TestClient) -> None:
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        json={"user_ids": [str(uuid4())]},
+    )
+    assert resp.status_code == 401
+
+
+def test_bulk_pubkeys_returns_subset_for_setup_users(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Из 3 input user'ов 2 setup'нули vault — response содержит 2 в input-order'е."""
+    u1, u2, u3 = uuid4(), uuid4(), uuid4()
+    pk1, pk2 = b"\x10" * 32, b"\x20" * 32
+    override_deps["get_user_pubkeys_bulk"].return_value = {u1: pk1, u2: pk2}
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_ids": [str(u1), str(u3), str(u2)]},  # u3 не setup'нул
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["data"]) == 2
+    # Order соответствует input'у — u1, потом u2 (u3 пропущен).
+    assert body["data"][0]["user_id"] == str(u1)
+    assert body["data"][1]["user_id"] == str(u2)
+    # u3 отсутствует.
+    assert all(row["user_id"] != str(u3) for row in body["data"])
+
+
+def test_bulk_pubkeys_dedupes_input(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Duplicates в input — упомянуты в response один раз."""
+    u1 = uuid4()
+    pk1 = b"\xab" * 32
+    override_deps["get_user_pubkeys_bulk"].return_value = {u1: pk1}
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_ids": [str(u1), str(u1), str(u1)]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["data"]) == 1
+
+
+def test_bulk_pubkeys_empty_input_422(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_ids": []},
+    )
+    assert resp.status_code == 422
+
+
+def test_bulk_pubkeys_oversize_input_422(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """> 200 user_ids → 422."""
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_ids": [str(uuid4()) for _ in range(201)]},
+    )
+    assert resp.status_code == 422
+
+
+def test_bulk_pubkeys_all_missing_returns_empty_data(
+    client: TestClient,
+    override_deps: dict[str, AsyncMock],
+    make_jwt: Callable[..., str],
+) -> None:
+    """Ни один user не setup'нул vault → 200 + empty data."""
+    override_deps["get_user_pubkeys_bulk"].return_value = {}
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        "/api/v1/vault/users/pubkeys",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_ids": [str(uuid4()), str(uuid4())]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"] == []
 
 
 def test_add_wraps_success(

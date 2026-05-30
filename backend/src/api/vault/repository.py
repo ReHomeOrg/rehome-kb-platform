@@ -309,6 +309,28 @@ class VaultRepository:
         user = await self.get_user(user_id)
         return None if user is None else user.x25519_pubkey
 
+    async def get_user_pubkeys_bulk(
+        self,
+        user_ids: list[UUID],
+    ) -> dict[UUID, bytes]:
+        """Batch pubkey lookup для wrap-for-group flow (ADR-0017 §C).
+
+        Один SQL `SELECT id, x25519_pubkey WHERE id IN (...)`. Возвращает
+        mapping `user_id → x25519_pubkey`. User'ы без vault setup —
+        отсутствуют в результате (не error). Caller (router) затем
+        строит response, итерируя по input'у в порядке, для deterministic
+        UX progress indication'а.
+
+        Пустой `user_ids` → пустой dict (без SQL hit'а).
+        """
+        if not user_ids:
+            return {}
+        stmt = select(VaultUser.user_id, VaultUser.x25519_pubkey).where(
+            VaultUser.user_id.in_(user_ids)
+        )
+        result = await self._session.execute(stmt)
+        return {row.user_id: row.x25519_pubkey for row in result.all()}
+
     async def add_secret_wraps(
         self,
         *,

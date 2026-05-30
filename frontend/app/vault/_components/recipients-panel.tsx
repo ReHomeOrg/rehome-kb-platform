@@ -23,7 +23,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
 import {
-  getUserPubkey,
+  getUserPubkeysBulk,
   listSecretWraps,
   rotateVaultSecret,
   type VaultSecretView,
@@ -138,20 +138,46 @@ export default function RecipientsPanel({
       });
 
       // Остальные survivors через X25519 (исключая owner'а — он уже добавлен).
+      // Один bulk-запрос вместо N sequential GET'ов — критично для групп >50.
       const externalSurvivors = survivors.filter((s) => s.user_id !== ownerId);
-      for (let i = 0; i < externalSurvivors.length; i++) {
-        const r = externalSurvivors[i]!;
+      if (externalSurvivors.length > 0) {
         setProgress(
-          `Шифруем для ${i + 1}/${externalSurvivors.length}: ${r.user_id.slice(0, 8)}…`,
+          `Запрашиваем pubkey'и (${externalSurvivors.length})…`,
         );
-        const pkResp = await getUserPubkey(r.user_id);
-        const pubkey = fromBase64(pkResp.x25519_pubkey_b64);
-        const wrapped = await wrapSecretKeyForGroup(pubkey, newSecretKey);
-        newWraps.push({
-          user_id: r.user_id,
-          group_id: r.group_id,
-          wrapped_key_b64: toBase64(wrapped),
-        });
+        const pubkeysResp = await getUserPubkeysBulk(
+          externalSurvivors.map((s) => s.user_id),
+        );
+        const pubkeyByUserId = new Map<string, string>();
+        for (const row of pubkeysResp.data) {
+          pubkeyByUserId.set(row.user_id, row.x25519_pubkey_b64);
+        }
+        const missing = externalSurvivors.filter(
+          (s) => !pubkeyByUserId.has(s.user_id),
+        );
+        if (missing.length > 0) {
+          // Rotation атомарна — пропускать survivors нельзя (они потеряют
+          // доступ после rotate). Прерываем с явной ошибкой.
+          throw new Error(
+            `Не могу выполнить rotation: ${missing.length} участников ` +
+              `(${missing.map((s) => s.user_id.slice(0, 8)).join(", ")}) ` +
+              `ещё не настроили vault. Попросите их выполнить setup или ` +
+              `сначала revoke их доступа.`,
+          );
+        }
+        const sharable = externalSurvivors;
+        for (let i = 0; i < sharable.length; i++) {
+          const r = sharable[i]!;
+          setProgress(
+            `Шифруем для ${i + 1}/${sharable.length}: ${r.user_id.slice(0, 8)}…`,
+          );
+          const pubkey = fromBase64(pubkeyByUserId.get(r.user_id)!);
+          const wrapped = await wrapSecretKeyForGroup(pubkey, newSecretKey);
+          newWraps.push({
+            user_id: r.user_id,
+            group_id: r.group_id,
+            wrapped_key_b64: toBase64(wrapped),
+          });
+        }
       }
 
       // 4. POST /rotate.

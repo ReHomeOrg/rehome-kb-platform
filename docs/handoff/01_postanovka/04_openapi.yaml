@@ -3933,6 +3933,38 @@ paths:
           description: Pubkey + algorithm
         '404':
           description: User не setup'нул vault (нет pubkey'я)
+  /api/v1/vault/users/pubkeys:
+    post:
+      tags: [Vault]
+      summary: Batch X25519 pubkey lookup для wrap-for-group flow (ADR-0017)
+      operationId: getVaultUserPubkeysBulk
+      x-implementation-status: implemented
+      x-implementation-note: Сокращает N round-trip'ов до 1 для групп >50.
+        Missing user_ids (без vault setup) пропускаются в data — caller сам
+        обрабатывает skip+warn. Order data соответствует input order'у
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [user_ids]
+              properties:
+                user_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Pubkeys subset (only setup'нувшие vault users)
+        '401':
+          description: Не аутентифицирован
+        '422':
+          description: Пустой список или > 200 user_ids
   /api/v1/vault/secrets/{secret_id}/wraps:
     get:
       tags: [Vault]

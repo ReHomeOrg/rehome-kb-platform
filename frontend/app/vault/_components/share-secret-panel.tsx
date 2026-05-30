@@ -22,7 +22,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api/client";
 import {
   addSecretWraps,
-  getUserPubkey,
+  getUserPubkeysBulk,
   listGroupMembers,
   listVaultGroups,
   type VaultGroupView,
@@ -102,15 +102,26 @@ export default function ShareSecretPanel({
         setSharing(false);
         return;
       }
-      // 2. Iterate: pubkey lookup → wrap → collect.
+      // 2. Bulk pubkey lookup — один POST вместо N sequential GET'ов.
+      setProgress(`Запрашиваем pubkey'и (${recipients.length})…`);
+      const pubkeysResp = await getUserPubkeysBulk(
+        recipients.map((m) => m.user_id),
+      );
+      const pubkeyByUserId = new Map<string, string>();
+      for (const row of pubkeysResp.data) {
+        pubkeyByUserId.set(row.user_id, row.x25519_pubkey_b64);
+      }
+      const missing = recipients.filter((m) => !pubkeyByUserId.has(m.user_id));
+
+      // 3. Iterate: wrap → collect. Missing skip с warning накопителем.
       const wraps: { user_id: string; group_id: string; wrapped_key_b64: string }[] = [];
-      for (let i = 0; i < recipients.length; i++) {
-        const m = recipients[i]!;
+      const sharable = recipients.filter((m) => pubkeyByUserId.has(m.user_id));
+      for (let i = 0; i < sharable.length; i++) {
+        const m = sharable[i]!;
         setProgress(
-          `Шифруем для ${i + 1}/${recipients.length}: ${m.user_id.slice(0, 8)}…`,
+          `Шифруем для ${i + 1}/${sharable.length}: ${m.user_id.slice(0, 8)}…`,
         );
-        const pkResp = await getUserPubkey(m.user_id);
-        const pubkey = fromBase64(pkResp.x25519_pubkey_b64);
+        const pubkey = fromBase64(pubkeyByUserId.get(m.user_id)!);
         const wrapped = await wrapSecretKeyForGroup(pubkey, secretKey);
         wraps.push({
           user_id: m.user_id,
@@ -118,9 +129,24 @@ export default function ShareSecretPanel({
           wrapped_key_b64: toBase64(wrapped),
         });
       }
-      // 3. POST batch.
+      if (wraps.length === 0) {
+        setError(
+          `Ни один из ${recipients.length} участников группы не настроил vault — нечего шарить.`,
+        );
+        setSharing(false);
+        return;
+      }
+      // 4. POST batch.
       setProgress("Сохраняем wraps…");
       await addSecretWraps(secretId, { wraps });
+      if (missing.length > 0) {
+        // Partial success: warning остаётся видимым, owner закрывает вручную.
+        setError(
+          `Сохранено ${wraps.length} wraps; ${missing.length} из ${recipients.length} участников ещё не настроили vault — пропущены.`,
+        );
+        setSharing(false);
+        return;
+      }
       onSuccess();
     } catch (err) {
       setError(describeError(err));

@@ -218,3 +218,65 @@ async def test_rotate_secret_atomic_happy_path_updates_blob_and_bumps_version() 
     assert session.execute.await_count == 3
     assert session.add.call_count == 2
     session.flush.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# get_user_pubkeys_bulk
+
+
+@pytest.mark.asyncio
+async def test_get_user_pubkeys_bulk_returns_mapping() -> None:
+    """Repo возвращает {user_id: pubkey_bytes} для setup'нувших users."""
+    session = MagicMock()
+    u1, u2 = uuid4(), uuid4()
+    pk1, pk2 = b"\x01" * 32, b"\x02" * 32
+    rows = [
+        MagicMock(user_id=u1, x25519_pubkey=pk1),
+        MagicMock(user_id=u2, x25519_pubkey=pk2),
+    ]
+    session.execute = AsyncMock(return_value=MagicMock(all=lambda: rows))
+    repo = VaultRepository(session)
+
+    result = await repo.get_user_pubkeys_bulk([u1, u2])
+    assert result == {u1: pk1, u2: pk2}
+
+
+@pytest.mark.asyncio
+async def test_get_user_pubkeys_bulk_empty_input_no_sql_hit() -> None:
+    """Пустой input — return пустой dict, SQL не дёргается."""
+    session = MagicMock()
+    session.execute = AsyncMock()
+    repo = VaultRepository(session)
+
+    result = await repo.get_user_pubkeys_bulk([])
+    assert result == {}
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_user_pubkeys_bulk_missing_user_not_in_result() -> None:
+    """Один user setup'нул vault, другой — нет; missing просто отсутствует."""
+    session = MagicMock()
+    u_setup, u_missing = uuid4(), uuid4()
+    rows = [MagicMock(user_id=u_setup, x25519_pubkey=b"\xab" * 32)]
+    session.execute = AsyncMock(return_value=MagicMock(all=lambda: rows))
+    repo = VaultRepository(session)
+
+    result = await repo.get_user_pubkeys_bulk([u_setup, u_missing])
+    assert u_setup in result
+    assert u_missing not in result
+
+
+@pytest.mark.asyncio
+async def test_get_user_pubkeys_bulk_sql_uses_in_clause() -> None:
+    """Один SQL query с IN (...) — verify compile."""
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(all=lambda: []))
+    repo = VaultRepository(session)
+    ids = [uuid4(), uuid4(), uuid4()]
+
+    await repo.get_user_pubkeys_bulk(ids)
+    session.execute.assert_awaited_once()
+    stmt = session.execute.call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+    assert "user_id IN" in compiled or "user_id in " in compiled.lower()

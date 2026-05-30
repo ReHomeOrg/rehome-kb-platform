@@ -71,6 +71,8 @@ from src.api.vault.schemas import (
     VaultTotpSetupInput,
     VaultUnlockInput,
     VaultUnlockResponse,
+    VaultUserPubkeysBulkInput,
+    VaultUserPubkeysBulkResponse,
     VaultUserPubkeyView,
     group_view,
     me_view_from_user,
@@ -596,6 +598,57 @@ async def get_user_pubkey(
         user_id=user_id,
         x25519_pubkey_b64=b64encode(pubkey).decode("ascii"),
     )
+
+
+@router.post(
+    "/users/pubkeys",
+    response_model=VaultUserPubkeysBulkResponse,
+    summary="Batch X25519 pubkey lookup (ADR-0017)",
+    responses={
+        401: {"description": "Не аутентифицирован"},
+        422: {"description": "Пустой список или > 200 user_ids"},
+    },
+)
+async def get_user_pubkeys_bulk(
+    payload: VaultUserPubkeysBulkInput = Body(...),
+    _claims: dict[str, Any] = Depends(require_authenticated),
+    repo: VaultRepository = Depends(get_vault_repository),
+) -> VaultUserPubkeysBulkResponse:
+    """Batch lookup pubkey'ев для wrap-for-group flow.
+
+    POST потому что body может содержать до 200 UUIDs (~7 KB) — не
+    помещается в query string. Idempotent, no side-effects.
+
+    Behaviour:
+    - User'ы без vault setup пропускаются (не error). Frontend
+      сравнивает `data` с input list и сам решает skip+warn.
+    - Order `data` соответствует input order'у — даёт frontend'у
+      deterministic UX для progress indication.
+    - Дубликаты в input — упомянуты в `data` один раз (SQL DISTINCT
+      эффект).
+
+    RBAC: `require_authenticated` (same as single `/users/{id}/pubkey`).
+    Pubkey public by design per ADR-0011 §«Group keypair».
+    """
+    from base64 import b64encode
+
+    found = await repo.get_user_pubkeys_bulk(payload.user_ids)
+    seen: set[UUID] = set()
+    data: list[VaultUserPubkeyView] = []
+    for uid in payload.user_ids:
+        if uid in seen:
+            continue
+        seen.add(uid)
+        pubkey = found.get(uid)
+        if pubkey is None:
+            continue
+        data.append(
+            VaultUserPubkeyView(
+                user_id=uid,
+                x25519_pubkey_b64=b64encode(pubkey).decode("ascii"),
+            )
+        )
+    return VaultUserPubkeysBulkResponse(data=data)
 
 
 @router.post(

@@ -111,7 +111,7 @@ describe("ShareSecretPanel", () => {
     });
   });
 
-  it("happy path — fetches pubkey + POSTs wraps с group_id lineage", async () => {
+  it("happy path — bulk pubkey lookup + POSTs wraps с group_id lineage", async () => {
     // Real X25519 pubkey (32 bytes) — generate via WebCrypto helper.
     const { generateX25519Keypair, toBase64 } = await import(
       "@/lib/vault/crypto"
@@ -129,11 +129,15 @@ describe("ShareSecretPanel", () => {
           ],
         }),
       )
-      // getUserPubkey(user-2)
+      // bulk pubkeys (POST /users/pubkeys)
       .mockResolvedValueOnce(
         jsonResponse({
-          user_id: "user-2",
-          x25519_pubkey_b64: toBase64(recipientKp.pubkey),
+          data: [
+            {
+              user_id: "user-2",
+              x25519_pubkey_b64: toBase64(recipientKp.pubkey),
+            },
+          ],
         }),
       )
       // addSecretWraps
@@ -162,6 +166,14 @@ describe("ShareSecretPanel", () => {
       expect(onSuccess).toHaveBeenCalled();
     });
 
+    // Bulk pubkey call — POST /users/pubkeys c одним user_id в теле.
+    const pubkeysCall = fetchMock.mock.calls[2]!;
+    expect(pubkeysCall[0]).toBe("/api/kb/api/v1/vault/users/pubkeys");
+    const pubkeysBody = JSON.parse(
+      (pubkeysCall[1] as RequestInit).body as string,
+    );
+    expect(pubkeysBody.user_ids).toEqual(["user-2"]);
+
     // Assert wraps body имеет group_id lineage и user_id ректа.
     const wrapsCall = fetchMock.mock.calls[3]!;
     expect(wrapsCall[0]).toBe("/api/kb/api/v1/vault/secrets/s-1/wraps");
@@ -170,6 +182,108 @@ describe("ShareSecretPanel", () => {
     expect(body.wraps[0].user_id).toBe("user-2");
     expect(body.wraps[0].group_id).toBe("g-1");
     expect(body.wraps[0].wrapped_key_b64).toBeTruthy();
+  });
+
+  it("partial missing pubkey — saves для sharable, оставляет warning", async () => {
+    const { generateX25519Keypair, toBase64 } = await import(
+      "@/lib/vault/crypto"
+    );
+    const recipientKp = generateX25519Keypair();
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [groupFixture] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            memberFixture("owner-1"),
+            memberFixture("user-2"),
+            memberFixture("user-3-no-vault"),
+          ],
+        }),
+      )
+      // bulk pubkeys — user-3-no-vault не setup'нул vault, отсутствует в data
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            {
+              user_id: "user-2",
+              x25519_pubkey_b64: toBase64(recipientKp.pubkey),
+            },
+          ],
+        }),
+      )
+      // addSecretWraps — успешно для user-2
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const onSuccess = vi.fn();
+    const secretKey = await generateSecretKey();
+    render(
+      <ShareSecretPanel
+        secretId="s-1"
+        ownerId="owner-1"
+        secretKey={secretKey}
+        onCancel={vi.fn()}
+        onSuccess={onSuccess}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("backend-team")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText(/Группа/), {
+      target: { value: "g-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Поделиться" }));
+
+    // Wraps сохранены для user-2.
+    await waitFor(() => {
+      const wrapsCall = fetchMock.mock.calls[3];
+      expect(wrapsCall?.[0]).toBe("/api/kb/api/v1/vault/secrets/s-1/wraps");
+    });
+    // Warning видим, onSuccess не вызвана (panel остаётся открытой).
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/пропущены/);
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("all missing pubkey — error без POST wraps", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [groupFixture] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [
+            memberFixture("owner-1"),
+            memberFixture("user-no-vault"),
+          ],
+        }),
+      )
+      // bulk pubkeys — empty (никто не setup'нул vault)
+      .mockResolvedValueOnce(jsonResponse({ data: [] }));
+
+    const onSuccess = vi.fn();
+    const secretKey = await generateSecretKey();
+    render(
+      <ShareSecretPanel
+        secretId="s-1"
+        ownerId="owner-1"
+        secretKey={secretKey}
+        onCancel={vi.fn()}
+        onSuccess={onSuccess}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("backend-team")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByLabelText(/Группа/), {
+      target: { value: "g-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Поделиться" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/нечего шарить/);
+    });
+    // Нет 4-го fetch'а (wraps POST не делался).
+    expect(fetchMock.mock.calls.length).toBe(3);
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 
   it("Закрыть вызывает onCancel", async () => {
