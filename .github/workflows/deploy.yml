@@ -50,6 +50,10 @@ jobs:
 
           test -n "$CR_USERNAME" || { echo "::error::Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
           test -n "$CR_PUSH_TOKEN" || { echo "::error::Missing SELECTEL_CR_PUSH_TOKEN secret"; exit 1; }
+          echo "Registry username length: ${#CR_USERNAME}"
+          echo "Push token length: ${#CR_PUSH_TOKEN}"
+          echo "Push token first 6 chars: ${CR_PUSH_TOKEN:0:6}"
+          echo "Push token last 6 chars: ${CR_PUSH_TOKEN: -6}"
 
           echo "$CR_PUSH_TOKEN" | docker login cr.selcloud.ru \
             --username "$CR_USERNAME" \
