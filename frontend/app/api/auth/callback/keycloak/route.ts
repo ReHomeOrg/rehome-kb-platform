@@ -62,7 +62,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // Чистим временные cookies и устанавливаем session + refresh cookies.
-  const response = NextResponse.redirect(new URL("/", request.url));
+  const response = NextResponse.redirect(new URL("/help", request.url));
   response.cookies.set(
     COOKIE_SESSION,
     tokens.access_token,
