@@ -41,7 +41,7 @@ COPY --from=deps /app/node_modules ./node_modules
 # `.dockerignore` regress'ит, stray `.env.production` в repo root не
 # попадёт в layer. Список — это всё что `next build` realistically
 # нуждается. Vitest config / tests НЕ копируем — prod build их игнорирует.
-COPY package.json package-lock.json next.config.mjs next-env.d.ts \
+COPY package.json package-lock.json next.config.mjs \
      tsconfig.json tailwind.config.ts postcss.config.mjs ./
 COPY app ./app
 COPY lib ./lib
@@ -86,7 +86,7 @@ EXPOSE 3000
 # когда app routing работает. `node:slim` имеет node, не имеет curl —
 # inline HTTP check через node http module.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-    CMD node -e "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
+    CMD node -e "require('http').get('http://127.0.0.1:3000/help', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
 
 # Next.js standalone server entry point.
 CMD ["node", "server.js"]

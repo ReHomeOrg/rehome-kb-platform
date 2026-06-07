@@ -1,0 +1,65 @@
+# reHome KB — minimal LOCAL public-mode stack for the reHome integration (Slice 1).
+#
+# Purpose: run ONLY what the public Help-center + anonymous RAG chat need, so the
+# reHome app can embed it locally. NO Keycloak, NO MinIO, NO secrets/SOPS.
+#
+#   - postgres-kb : pgvector/postgres:16, host port 5433 (avoids reHome's 5432).
+#   - kb-backend  : FastAPI on host port 8001, mock LLM + mock embeddings.
+#
+# Anonymous access works because get_current_claims() returns None with no token
+# and JWKS is fetched lazily (Keycloak is never contacted for public requests).
+#
+# Boot:
+#   docker compose -f docker-compose.kb-local.yml up -d --build
+#   docker compose -f docker-compose.kb-local.yml exec kb-backend alembic upgrade head
+#   docker compose -f docker-compose.kb-local.yml exec kb-backend python -m scripts.seed.seed_rehome_faq
+#   docker compose -f docker-compose.kb-local.yml exec kb-backend python -m scripts.reindex_articles
+#
+# This file is git-ignored by the reHome monorepo (separate service, not vendored).
+
+services:
+  postgres-kb:
+    image: pgvector/pgvector:pg16
+    container_name: rehome-kb-local-postgres
+    environment:
+      POSTGRES_DB: rehome_kb
+      POSTGRES_USER: kb
+      POSTGRES_PASSWORD: kb
+    ports:
+      - "5433:5432"
+    volumes:
+      - kb-local-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kb -d rehome_kb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kb-backend:
+    build:
+      context: ./backend
+    container_name: rehome-kb-local-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kb:kb@postgres-kb:5432/rehome_kb
+      # Public/anonymous mode — no real auth, no external creds.
+      LLM_PROVIDER: mock
+      EMBEDDING_PROVIDER: mock
+      RAG_ENABLED: "True"
+      KC_VERIFY_AUD: "false"
+      REHOME_ENV: dev
+      LOG_FORMAT: json
+      # Trust the docker bridge so --proxy-headers doesn't drop forwarded reqs.
+      FORWARDED_ALLOW_IPS: "*"
+    ports:
+      - "8001:8000"
+    volumes:
+      # scripts/ is NOT copied into the runtime image (Dockerfile copies only
+      # src/alembic). Mount it so `python -m scripts.*` (seed, reindex) works.
+      - ./backend/scripts:/app/scripts:ro
+    depends_on:
+      postgres-kb:
+        condition: service_healthy
+
+volumes:
+  kb-local-postgres-data:
+    name: rehome-kb-local-postgres-data
