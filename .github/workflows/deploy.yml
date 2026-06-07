@@ -181,7 +181,7 @@ jobs:
 
             # Pull and restart KB containers
             docker compose -p staging --env-file /opt/rehome/staging/.env pull kb-backend kb-frontend
-            docker compose -p staging --env-file /opt/rehome/staging/.env up -d --no-deps kb-postgres kb-backend kb-frontend
+            docker compose -p staging --env-file /opt/rehome/staging/.env up -d --no-deps postgres-kb kb-backend kb-frontend
 
             # Run DB migrations
             echo "⚙️ Running database migrations..."
@@ -269,7 +269,7 @@ jobs:
 
             # Pull and restart KB containers
             docker compose -p prod --env-file /opt/rehome/prod/.env pull kb-backend kb-frontend
-            docker compose -p prod --env-file /opt/rehome/prod/.env up -d --no-deps kb-postgres kb-backend kb-frontend
+            docker compose -p prod --env-file /opt/rehome/prod/.env up -d --no-deps postgres-kb kb-backend kb-frontend
 
             # Run DB migrations
             echo "⚙️ Running database migrations..."
