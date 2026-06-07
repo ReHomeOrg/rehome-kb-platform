@@ -1,0 +1,175 @@
+name: Build & Deploy KB Platform
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+env:
+  BACKEND_IMAGE_NAME: rehome-kb-backend
+  FRONTEND_IMAGE_NAME: rehome-kb-frontend
+
+concurrency:
+  group: deploy-kb
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Selectel Container Registry
+        run: |
+          echo '${{ secrets.SELECTEL_CR_PUSH_TOKEN }}' | docker login \
+            --username '${{ secrets.SELECTEL_CR_TOKEN_USER }}' \
+            --password-stdin \
+            cr.selcloud.ru
+
+      - name: Build and push backend image
+        run: |
+          CR_PATH="${{ secrets.SELECTEL_CR_URL }}/${{ env.BACKEND_IMAGE_NAME }}"
+          docker build \
+            -t $CR_PATH:${{ steps.meta.outputs.tag }} \
+            -t $CR_PATH:latest \
+            ./backend
+          docker push $CR_PATH:${{ steps.meta.outputs.tag }}
+          docker push $CR_PATH:latest
+
+      - name: Build and push frontend image
+        run: |
+          CR_PATH="${{ secrets.SELECTEL_CR_URL }}/${{ env.FRONTEND_IMAGE_NAME }}"
+          docker build \
+            -t $CR_PATH:${{ steps.meta.outputs.tag }} \
+            -t $CR_PATH:latest \
+            ./frontend
+          docker push $CR_PATH:${{ steps.meta.outputs.tag }}
+          docker push $CR_PATH:latest
+
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to staging stack
+        uses: appleboy/ssh-action@master
+        env:
+          CR_TOKEN: ${{ secrets.SELECTEL_CR_PULL_TOKEN }}
+          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: CR_TOKEN,CR_TOKEN_USER,IMAGE_TAG,REGISTRY_URL
+          script: |
+            set -e
+            cd /app
+
+            # Serialize host docker mutations across deploys
+            exec 9>/tmp/rehome-deploy.lock
+            flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
+
+            echo "🚀 Deploying KB Platform to staging: $IMAGE_TAG"
+            echo "$CR_TOKEN" | docker login --username "$CR_TOKEN_USER" --password-stdin cr.selcloud.ru
+
+            # Pre-pull disk cleanup
+            echo "📦 Disk before cleanup: $(df -h / | awk 'NR==2 {print $4" free / "$2" total"}')"
+            docker container prune -f
+            docker image prune -af --filter "until=72h"
+            docker builder prune -af --filter "until=72h"
+            AVAIL_GB=$(df --output=avail -BG / | tail -1 | tr -d 'G ')
+            echo "📦 Disk after cleanup:  ${AVAIL_GB}G free"
+
+            # Inject image tags into staging .env
+            echo "KB_BACKEND_TAG=$IMAGE_TAG" >> /opt/rehome/staging/.env
+            echo "KB_FRONTEND_TAG=$IMAGE_TAG" >> /opt/rehome/staging/.env
+
+            # Pull and restart KB containers
+            docker compose -p staging --env-file /opt/rehome/staging/.env pull kb-backend kb-frontend
+            docker compose -p staging --env-file /opt/rehome/staging/.env up -d --no-deps kb-postgres kb-backend kb-frontend
+
+            # Run DB migrations
+            echo "⚙️ Running database migrations..."
+            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend alembic upgrade head
+
+            # Seed FAQ and reindex search
+            echo "🌱 Seeding FAQ articles..."
+            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.seed.seed_rehome_faq || true
+            echo "🔍 Reindexing search..."
+            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.reindex_articles || true
+
+            # Reload nginx ingress
+            docker exec rehome-nginx nginx -s reload || true
+
+            docker image prune -f
+            echo "✅ KB Platform staging deployed successfully."
+
+  deploy-prod:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to prod stack
+        uses: appleboy/ssh-action@master
+        env:
+          CR_TOKEN: ${{ secrets.SELECTEL_CR_PULL_TOKEN }}
+          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: CR_TOKEN,CR_TOKEN_USER,IMAGE_TAG,REGISTRY_URL
+          script: |
+            set -e
+            cd /app
+
+            # Serialize host docker mutations across deploys
+            exec 9>/tmp/rehome-deploy.lock
+            flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
+
+            echo "🚀 Deploying KB Platform to prod: $IMAGE_TAG"
+            echo "$CR_TOKEN" | docker login --username "$CR_TOKEN_USER" --password-stdin cr.selcloud.ru
+
+            # Pre-pull disk cleanup
+            echo "📦 Disk before cleanup: $(df -h / | awk 'NR==2 {print $4" free / "$2" total"}')"
+            docker container prune -f
+            docker image prune -af --filter "until=72h"
+            docker builder prune -af --filter "until=72h"
+            AVAIL_GB=$(df --output=avail -BG / | tail -1 | tr -d 'G ')
+            echo "📦 Disk after cleanup:  ${AVAIL_GB}G free"
+
+            # Inject image tags into prod .env
+            echo "KB_BACKEND_TAG=$IMAGE_TAG" >> /opt/rehome/prod/.env
+            echo "KB_FRONTEND_TAG=$IMAGE_TAG" >> /opt/rehome/prod/.env
+
+            # Pull and restart KB containers
+            docker compose -p prod --env-file /opt/rehome/prod/.env pull kb-backend kb-frontend
+            docker compose -p prod --env-file /opt/rehome/prod/.env up -d --no-deps kb-postgres kb-backend kb-frontend
+
+            # Run DB migrations
+            echo "⚙️ Running database migrations..."
+            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend alembic upgrade head
+
+            # Seed FAQ and reindex search
+            echo "🌱 Seeding FAQ articles..."
+            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.seed.seed_rehome_faq || true
+            echo "🔍 Reindexing search..."
+            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.reindex_articles || true
+
+            # Reload nginx ingress
+            docker exec rehome-nginx nginx -s reload || true
+
+            docker image prune -f
+            echo "✅ KB Platform prod deployed successfully."
