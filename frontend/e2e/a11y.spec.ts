@@ -19,7 +19,7 @@ const STANDARD_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 test.describe("a11y: /login", () => {
   test("no WCAG 2.1 AA violations", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("./login");
     const results = await new AxeBuilder({ page })
       .withTags(STANDARD_TAGS)
       .analyze();
@@ -35,7 +35,7 @@ test.describe("a11y: /login", () => {
 
 test.describe("a11y: 404 not-found", () => {
   test("no WCAG 2.1 AA violations on default 404", async ({ page }) => {
-    await page.goto("/this-route-does-not-exist");
+    await page.goto("./this-route-does-not-exist");
     const results = await new AxeBuilder({ page })
       .withTags(STANDARD_TAGS)
       .analyze();

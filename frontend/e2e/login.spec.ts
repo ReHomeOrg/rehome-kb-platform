@@ -12,12 +12,12 @@ import { expect, test } from "@playwright/test";
 
 test.describe("/login", () => {
   test("renders heading and SSO link", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("./login");
     const heading = page.getByRole("heading", { level: 1 });
     await expect(heading).toContainText("reHome KB");
     const loginLink = page.getByRole("link", { name: /войти через rehome sso/i });
     await expect(loginLink).toBeVisible();
-    await expect(loginLink).toHaveAttribute("href", "/api/auth/login");
+    await expect(loginLink).toHaveAttribute("href", "/help/api/auth/login");
   });
 
   test("has no console errors", async ({ page }) => {
@@ -26,12 +26,12 @@ test.describe("/login", () => {
     page.on("console", (msg) => {
       if (msg.type() === "error") errors.push(msg.text());
     });
-    await page.goto("/login");
+    await page.goto("./login");
     expect(errors).toEqual([]);
   });
 
   test("keyboard navigation reaches login link", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("./login");
     // Tab-jump к первому focusable element (login link).
     await page.keyboard.press("Tab");
     const active = await page.evaluate(() => document.activeElement?.tagName);
