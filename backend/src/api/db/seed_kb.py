@@ -50,119 +50,16 @@ AUDIENCE_MAP = {
 }
 ACCESS_MAP = {"PUBLIC", "LOGGED", "AGENT", "STAFF"}
 
-# Local mock data
-CATEGORIES: list[dict[str, str]] = [
-    {"slug": "arenda", "title": "Аренда жилья", "description": "Поиск, бронирование и заселение."},
-    {"slug": "platezhi", "title": "Оплата и эскроу", "description": "Платежи, гарантии, возврат залога."},
-    {"slug": "verifikatsiya", "title": "Верификация и KYC", "description": "Подтверждение личности и собственника."},
-    {"slug": "dogovor", "title": "Договор найма", "description": "Условия, подписание и расторжение."},
+# Slugs of mock articles & categories to delete
+MOCK_SLUGS = [
+    "kak-zabronirovat-kvartiru",
+    "kak-vernut-zalog",
+    "chto-takoe-eskrou",
+    "kak-projti-verifikaciyu",
+    "kak-podpisat-dogovor",
+    "kak-rastorgnut-dogovor",
 ]
-
-ARTICLES: list[dict[str, Any]] = [
-    {
-        "slug": "kak-zabronirovat-kvartiru",
-        "title": "Как забронировать квартиру",
-        "category": "arenda",
-        "summary": "Пошагово: от поиска объекта до подтверждённой брони.",
-        "tags": ["бронирование", "аренда", "начало"],
-        "body_markdown": (
-            "## Как забронировать квартиру в reHome\n\n"
-            "1. Найдите подходящий объект в каталоге и откройте его карточку.\n"
-            "2. Нажмите **«Забронировать»** и выберите даты заселения.\n"
-            "3. Пройдите проверку личности (KYC), если ещё не проходили.\n"
-            "4. Дождитесь подтверждения от собственника.\n\n"
-            "После подтверждения бронь переходит в статус активной, и вы можете "
-            "перейти к подписанию договора найма и оплате."
-        ),
-    },
-    {
-        "slug": "kak-vernut-zalog",
-        "title": "Как вернуть залог",
-        "category": "platezhi",
-        "summary": "Когда и как возвращается обеспечительный платёж после выезда.",
-        "tags": ["залог", "возврат", "выезд", "оплата"],
-        "body_markdown": (
-            "## Возврат залога\n\n"
-            "Обеспечительный платёж (залог) хранится на эскроу-счёте и "
-            "возвращается после выезда при отсутствии претензий.\n\n"
-            "**Порядок возврата:**\n\n"
-            "1. Подпишите акт приёма-передачи при выезде.\n"
-            "2. Собственник проверяет состояние квартиры.\n"
-            "3. Если претензий нет — залог возвращается на вашу карту в течение "
-            "нескольких рабочих дней.\n\n"
-            "Если возник спор по состоянию квартиры, возврат залога "
-            "приостанавливается до разбирательства."
-        ),
-    },
-    {
-        "slug": "chto-takoe-eskrou",
-        "title": "Что такое эскроу и зачем оно нужно",
-        "category": "platezhi",
-        "summary": "Как reHome защищает деньги нанимателя и собственника.",
-        "tags": ["эскроу", "безопасность", "оплата"],
-        "body_markdown": (
-            "## Эскроу в reHome\n\n"
-            "Эскроу — это защищённый счёт, на котором деньги удерживаются до "
-            "выполнения условий сделки. Наниматель вносит оплату, но собственник "
-            "получает её только после заселения и подтверждения.\n\n"
-            "Это защищает обе стороны: наниматель уверен, что деньги не уйдут до "
-            "заселения, а собственник — что оплата гарантирована."
-        ),
-    },
-    {
-        "slug": "kak-projti-verifikaciyu",
-        "title": "Как пройти верификацию личности",
-        "category": "verifikatsiya",
-        "summary": "Подтверждение личности через банк или оператора связи.",
-        "tags": ["kyc", "верификация", "паспорт"],
-        "body_markdown": (
-            "## Верификация личности (KYC)\n\n"
-            "Перед бронированием необходимо подтвердить личность. reHome "
-            "поддерживает несколько способов:\n\n"
-            "- через мобильного оператора (МТС);\n"
-            "- через банк (Сбер, Т-Банк);\n"
-            "- вводом паспортных данных вручную (для собственников).\n\n"
-            "Проверка занимает от нескольких секунд до пары минут. После успешной "
-            "верификации ваш профиль получает статус «подтверждён»."
-        ),
-    },
-    {
-        "slug": "kak-podpisat-dogovor",
-        "title": "Как подписать договор найма",
-        "category": "dogovor",
-        "summary": "Электронная подпись договора по SMS-коду.",
-        "tags": ["договор", "подпись", "sms"],
-        "body_markdown": (
-            "## Подписание договора найма\n\n"
-            "Договор найма подписывается электронно:\n\n"
-            "1. Откройте сформированный договор в разделе сделки.\n"
-            "2. Внимательно проверьте условия (сроки, сумма, адрес).\n"
-            "3. Нажмите **«Подписать»** — на ваш телефон придёт SMS-код.\n"
-            "4. Введите код для подтверждения подписи.\n\n"
-            "Обе стороны (наниматель и собственник) подписывают договор своими "
-            "кодами. После этого договор считается заключённым."
-        ),
-    },
-    {
-        "slug": "kak-rastorgnut-dogovor",
-        "title": "Как досрочно расторгнуть договор",
-        "category": "dogovor",
-        "summary": "Условия и порядок досрочного расторжения найма.",
-        "tags": ["договор", "расторжение", "выезд"],
-        "body_markdown": (
-            "## Досрочное расторжение договора\n\n"
-            "Досрочно расторгнуть договор можно по соглашению сторон или в "
-            "случаях, предусмотренных договором.\n\n"
-            "1. Уведомите вторую сторону через платформу заранее (срок указан "
-            "в договоре).\n"
-            "2. Согласуйте дату выезда и подпишите акт приёма-передачи.\n"
-            "3. После проверки квартиры производится взаиморасчёт и возврат "
-            "залога.\n\n"
-            "Если согласия достичь не удаётся, обращение передаётся в поддержку "
-            "для разбирательства."
-        ),
-    },
-]
+MOCK_CAT_SLUGS = ["arenda", "platezhi", "verifikatsiya", "dogovor"]
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +298,14 @@ async def main() -> int:
 
     try:
         async with factory() as session:
+            # 1. Clean up old mock articles & categories in all environments
+            from sqlalchemy import delete
+            print("Cleaning up old mock data...")
+            res_arts = await session.execute(delete(Article).where(Article.slug.in_(MOCK_SLUGS)))
+            res_cats = await session.execute(delete(Category).where(Category.slug.in_(MOCK_CAT_SLUGS)))
+            await session.commit()
+            print(f"Deleted {res_arts.rowcount} mock articles and {res_cats.rowcount} mock categories.")
+
             if env in ("prod", "staging"):
                 print(f"Running ACTUAL KB seed for environment: {env}")
                 try:
@@ -476,52 +381,7 @@ async def main() -> int:
                     print(f"FAILED to seed actual articles: {exc}")
                     raise exc
             else:
-                # Local dev mock seeding
-                print(f"Running MOCK KB seed for environment: {env}")
-                existing_cats = set(
-                    (await session.execute(select(Category.slug))).scalars().all()
-                )
-                for c in CATEGORIES:
-                    if c["slug"] in existing_cats:
-                        continue
-                    session.add(
-                        Category(
-                            slug=c["slug"],
-                            title=c["title"],
-                            description=c["description"],
-                        )
-                    )
-                    created_cats += 1
-
-                existing_arts = set(
-                    (await session.execute(select(Article.slug))).scalars().all()
-                )
-                for a in ARTICLES:
-                    if a["slug"] in existing_arts:
-                        skipped += 1
-                        continue
-                    session.add(
-                        Article(
-                            slug=a["slug"],
-                            title=a["title"],
-                            summary=a["summary"],
-                            body_markdown=a["body_markdown"],
-                            audience="all",
-                            language="ru",
-                            category=a["category"],
-                            tags=a["tags"],
-                            access_level="PUBLIC",
-                            status="PUBLISHED",
-                            published_at=now,
-                        )
-                    )
-                    created_arts += 1
-
-                await session.commit()
-                print(
-                    f"OK: categories_created={created_cats}, articles_created={created_arts}, "
-                    f"articles_skipped={skipped}"
-                )
+                print(f"Skipping actual KB seed for local environment: {env} (database is cleaned of mock data).")
     finally:
         await engine.dispose()
     return 0
