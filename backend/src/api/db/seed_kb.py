@@ -287,14 +287,17 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
 # Seeding Main Logic
 
 async def main() -> int:
+    env = os.environ.get("REHOME_ENV", "dev").lower()
+    if env in ("prod", "staging"):
+        os.environ["MINIO_ENABLED"] = "True"
+        print(f"Prod/Staging environment detected. Forcing MINIO_ENABLED=True for seeding actual articles.")
+
     settings = get_settings()
     db_url = os.environ.get("DATABASE_URL") or settings.database_url
     engine = create_async_engine(db_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     created_cats = created_arts = skipped = 0
     now = datetime.now(timezone.utc)
-
-    env = os.environ.get("REHOME_ENV", settings.environment).lower()
 
     try:
         async with factory() as session:
