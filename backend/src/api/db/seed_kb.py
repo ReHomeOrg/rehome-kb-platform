@@ -30,7 +30,7 @@ from src.api.config import get_settings
 # Seed pinning (ADR-0027)
 
 SEED_VERSION = "2026-05-28"
-SEED_BUCKET = "kb-seed"
+DEFAULT_SEED_BUCKET = "kb-seed"
 SEED_PREFIX = f"articles/{SEED_VERSION}"
 
 # Pinned sha256 для текущей seed-версии.
@@ -63,6 +63,80 @@ MOCK_SLUGS = [
 ]
 MOCK_CAT_SLUGS = ["arenda", "platezhi", "verifikatsiya", "dogovor"]
 
+FALLBACK_CATEGORIES: list[dict[str, str]] = [
+    {"slug": "arenda", "title": "Аренда жилья", "description": "Поиск, бронирование и заселение."},
+    {
+        "slug": "platezhi",
+        "title": "Оплата",
+        "description": "Оплата проживания и сервисного платежа.",
+    },
+    {
+        "slug": "verifikatsiya",
+        "title": "Верификация",
+        "description": "Проверка личности и документов.",
+    },
+    {"slug": "dogovor", "title": "Договор", "description": "Подписание и условия договора найма."},
+    {"slug": "support", "title": "Поддержка", "description": "Как связаться с командой reHome."},
+]
+
+FALLBACK_ARTICLES: list[dict[str, Any]] = [
+    {
+        "slug": "kak-zabronirovat-kvartiru",
+        "title": "Как забронировать квартиру",
+        "category": "arenda",
+        "summary": "Пошагово: от выбора квартиры до подтверждения брони.",
+        "tags": ["аренда", "бронирование"],
+        "body_markdown": (
+            "Выберите квартиру в каталоге, откройте карточку объекта и отправьте заявку "
+            "на бронирование. После подтверждения можно перейти к договору и оплате."
+        ),
+    },
+    {
+        "slug": "kak-platit",
+        "title": "Как платить в reHome",
+        "category": "platezhi",
+        "summary": "Где увидеть сумму к оплате и как провести платеж.",
+        "tags": ["оплата", "платежи"],
+        "body_markdown": (
+            "Сумма и статус оплаты отображаются в карточке сделки. Оплата проводится "
+            "через платформу после подтверждения условий и подписания необходимых документов."
+        ),
+    },
+    {
+        "slug": "kak-projti-verifikaciyu",
+        "title": "Как пройти верификацию",
+        "category": "verifikatsiya",
+        "summary": "Зачем нужна проверка личности и как она проходит.",
+        "tags": ["верификация", "документы"],
+        "body_markdown": (
+            "Верификация нужна для безопасности сделки. Следуйте шагам в личном кабинете "
+            "и загрузите данные, которые запросит платформа."
+        ),
+    },
+    {
+        "slug": "kak-podpisat-dogovor",
+        "title": "Как подписать договор",
+        "category": "dogovor",
+        "summary": "Электронное подписание договора найма.",
+        "tags": ["договор", "подпись"],
+        "body_markdown": (
+            "Откройте договор в сделке, проверьте условия и подтвердите подписание. "
+            "После подписания обеими сторонами договор становится активным."
+        ),
+    },
+    {
+        "slug": "kak-obratitsya-v-podderzhku",
+        "title": "Как обратиться в поддержку",
+        "category": "support",
+        "summary": "Что делать, если в чате не получилось решить вопрос.",
+        "tags": ["поддержка", "чат"],
+        "body_markdown": (
+            "Напишите вопрос в ассистенте поддержки. Если ответа недостаточно, перейдите "
+            "в раздел поддержки или создайте обращение, чтобы команда reHome разобрала ситуацию."
+        ),
+    },
+]
+
 
 # ---------------------------------------------------------------------------
 # S3 Fetching
@@ -82,6 +156,21 @@ def _fetch_s3(bucket: str, key: str) -> bytes:
         response.release_conn()
 
 
+def seed_bucket_name() -> str:
+    """Return the object-storage bucket used for pinned seed .docx files."""
+    return (
+        os.environ.get("KB_SEED_BUCKET")
+        or os.environ.get("MINIO_SEED_BUCKET")
+        or DEFAULT_SEED_BUCKET
+    )
+
+
+def is_seed_source_unavailable(exc: Exception) -> bool:
+    """True only for missing seed bucket/object, not parse/hash/config bugs."""
+    text = str(exc)
+    return "NoSuchBucket" in text or "NoSuchKey" in text
+
+
 def fetch_source(uri: str) -> tuple[bytes, str]:
     """Загружает .docx по URI; возвращает (bytes, basename)."""
     parsed = urlparse(uri)
@@ -98,7 +187,7 @@ def fetch_source(uri: str) -> tuple[bytes, str]:
         if not name:
             raise ValueError(f"seed:// URI без имени: {uri!r}")
         key = f"{SEED_PREFIX}/{name}"
-        return _fetch_s3(SEED_BUCKET, key), name
+        return _fetch_s3(seed_bucket_name(), key), name
 
     if scheme == "s3":
         bucket = parsed.netloc
@@ -289,6 +378,56 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
 # Seeding Main Logic
 
 
+async def count_published_articles(session: Any) -> int:
+    result = await session.execute(select(Article.id).where(Article.status == "PUBLISHED").limit(1))
+    return 1 if result.scalar_one_or_none() is not None else 0
+
+
+async def seed_fallback_public_articles(session: Any, now: datetime) -> tuple[int, int, int]:
+    """Emergency public FAQ seed used only when object-storage seed is absent."""
+    created_cats = created_arts = skipped = 0
+
+    existing_cats = set((await session.execute(select(Category.slug))).scalars().all())
+    for category in FALLBACK_CATEGORIES:
+        if category["slug"] in existing_cats:
+            continue
+        session.add(
+            Category(
+                slug=category["slug"],
+                title=category["title"],
+                description=category["description"],
+            )
+        )
+        created_cats += 1
+        existing_cats.add(category["slug"])
+
+    existing_arts = set((await session.execute(select(Article.slug))).scalars().all())
+    for article in FALLBACK_ARTICLES:
+        if article["slug"] in existing_arts:
+            skipped += 1
+            continue
+        session.add(
+            Article(
+                slug=article["slug"],
+                title=article["title"],
+                summary=article["summary"],
+                body_markdown=article["body_markdown"],
+                audience="all",
+                language="ru",
+                category=article["category"],
+                tags=article["tags"],
+                access_level="PUBLIC",
+                status="PUBLISHED",
+                published_at=now,
+            )
+        )
+        created_arts += 1
+        existing_arts.add(article["slug"])
+
+    await session.commit()
+    return created_cats, created_arts, skipped
+
+
 async def main() -> int:
     env = os.environ.get("REHOME_ENV", "dev").lower()
     if env in ("prod", "staging"):
@@ -359,6 +498,9 @@ async def main() -> int:
                     )
                     for a in all_articles:
                         base_slug = to_slug(a["title"])
+                        if base_slug in existing_arts:
+                            skipped += 1
+                            continue
                         slug = base_slug
                         suffix = 1
                         while slug in existing_arts:
@@ -393,8 +535,26 @@ async def main() -> int:
                         f"articles_skipped={skipped}"
                     )
                 except Exception as exc:
-                    print(f"FAILED to seed actual articles: {exc}")
-                    raise exc
+                    if not is_seed_source_unavailable(exc):
+                        print(f"FAILED to seed actual articles: {exc}")
+                        raise
+
+                    print(
+                        "WARN: pinned KB seed source is unavailable "
+                        f"(bucket={seed_bucket_name()}, prefix={SEED_PREFIX}): {exc}"
+                    )
+                    if await count_published_articles(session):
+                        print("Existing published articles found; keeping current KB content.")
+                        return 0
+
+                    print("No published articles found; creating emergency public FAQ fallback.")
+                    fallback_result = await seed_fallback_public_articles(session, now)
+                    fallback_cats, fallback_arts, fallback_skipped = fallback_result
+                    print(
+                        "OK: fallback_categories_created="
+                        f"{fallback_cats}, fallback_articles_created={fallback_arts}, "
+                        f"fallback_articles_skipped={fallback_skipped}"
+                    )
             else:
                 print(
                     f"Skipping actual KB seed for local environment: {env} "
