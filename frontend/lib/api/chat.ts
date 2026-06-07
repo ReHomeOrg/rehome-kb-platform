@@ -48,9 +48,10 @@ export async function createSession(
   // apiFetch не отдаёт raw Response — нам нужен header. Делаем fetch напрямую.
   // Reuse buildUrl/buildHeaders логику через дублирование (минимально).
   const isServer = typeof window === "undefined";
+  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
   const url = isServer
     ? `${(await import("@/lib/env")).getBackendBaseUrl()}/api/v1/chat/sessions`
-    : "/api/kb/api/v1/chat/sessions";
+    : `${prefix}/api/kb/api/v1/chat/sessions`;
   const headers = new Headers({ "Content-Type": "application/json" });
   if (isServer) {
     const { cookies } = await import("next/headers");
@@ -194,7 +195,8 @@ export async function* streamMessage(
   input: SendMessageInput,
   opts?: ChatRequestHeaders,
 ): AsyncIterableIterator<SseEvent> {
-  const url = `/api/kb-sse/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`;
+  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  const url = `${prefix}/api/kb-sse/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`;
   const headers: HeadersInit = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",

@@ -68,7 +68,7 @@ export default async function Home(): Promise<JSX.Element> {
           </p>
         </div>
         {isLoggedIn ? (
-          <form action="/api/auth/logout" method="post">
+          <form action="/help/api/auth/logout" method="post">
             <button
               type="submit"
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"

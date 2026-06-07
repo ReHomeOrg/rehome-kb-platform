@@ -26,3 +26,7 @@ python-multipart==0.0.27
 # attestation / assertion verification (COSE_Key decode, signature
 # verify against authenticator-provided public key).
 webauthn==2.5.2
+
+# Document parsing & seeding dependencies
+python-docx==1.1.2
+transliterate==1.10.2
