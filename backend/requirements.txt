@@ -2,7 +2,7 @@ fastapi==0.136.1
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
 pydantic-settings==2.7.0
-pyjwt[crypto]==2.12.1
+pyjwt[crypto]==2.13.0
 httpx==0.28.0
 cachetools==5.5.0
 sqlalchemy[asyncio]==2.0.36
@@ -26,4 +26,3 @@ python-multipart==0.0.27
 # attestation / assertion verification (COSE_Key decode, signature
 # verify against authenticator-provided public key).
 webauthn==2.5.2
-
