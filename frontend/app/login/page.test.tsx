@@ -11,9 +11,9 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders SSO button that links to /api/auth/login", () => {
+  it("renders SSO button that links to /help/api/auth/login", () => {
     render(<LoginPage />);
     const link = screen.getByRole("link", { name: /reHome SSO/i });
-    expect(link).toHaveAttribute("href", "/api/auth/login");
+    expect(link).toHaveAttribute("href", "/help/api/auth/login");
   });
 });
