@@ -12,7 +12,7 @@ import io
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from docx import Document
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from transliterate import translit  # type: ignore[import-untyped]
+from transliterate import translit  # type: ignore
 
 from src.api.articles.models import Article
 from src.api.categories.models import Category
@@ -35,8 +35,10 @@ SEED_PREFIX = f"articles/{SEED_VERSION}"
 
 # Pinned sha256 для текущей seed-версии.
 EXPECTED_SHA256: dict[str, str] = {
-    "reHome_FAQ_топ15.docx": "e4d0834db83e12d705176ba65e201fe9bf118eceea80186dcc328bb7d093272b",
-    "reHome_База_статей_120.docx": "3e9db4cb0385c44679fe9687861fd62569bb1f4032ddeee9849137887d3ac05f",
+    "reHome_FAQ_топ15.docx": ("e4d0834db83e12d705176ba65e201fe9bf118eceea80186dcc328bb7d093272b"),
+    "reHome_База_статей_120.docx": (
+        "3e9db4cb0385c44679fe9687861fd62569bb1f4032ddeee9849137887d3ac05f"
+    ),
 }
 
 # Маппинг audience значений из .docx → ArticleAudience literal.
@@ -64,6 +66,7 @@ MOCK_CAT_SLUGS = ["arenda", "platezhi", "verifikatsiya", "dogovor"]
 
 # ---------------------------------------------------------------------------
 # S3 Fetching
+
 
 def _fetch_s3(bucket: str, key: str) -> bytes:
     """Получает объект из MinIO (или любого S3-compatible) по env-credentials."""
@@ -121,15 +124,14 @@ def verify_sha256(data: bytes, basename: str, *, skip: bool = False) -> None:
         return
     if actual != expected:
         raise ValueError(
-            f"sha256 mismatch для {basename}:\n"
-            f"  expected: {expected}\n"
-            f"  actual:   {actual}"
+            f"sha256 mismatch для {basename}:\n  expected: {expected}\n  actual:   {actual}"
         )
     print(f"  [sha256] {basename}: ok")
 
 
 # ---------------------------------------------------------------------------
 # Parsing
+
 
 def to_slug(title: str, max_len: int = 80) -> str:
     """Cyrillic title → kebab-case latin slug."""
@@ -180,7 +182,7 @@ def parse_faq(data: bytes) -> list[dict[str, Any]]:
         text = p.text.strip()
         if not text:
             continue
-        if p.style.name == "Heading 2" and text.startswith("FAQ-"):
+        if p.style and p.style.name == "Heading 2" and text.startswith("FAQ-"):
             flush()
             cur = {
                 "category": "FAQ",
@@ -243,7 +245,7 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
         if not text:
             continue
 
-        if p.style.name == "Heading 1" and text.startswith("Категория"):
+        if p.style and p.style.name == "Heading 1" and text.startswith("Категория"):
             cat = re.sub(r"^Категория\s*\d+\.\s*", "", text).strip()
             current_category = cat[:100] or current_category
             flush()
@@ -251,7 +253,7 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
             body_lines = []
             continue
 
-        if p.style.name == "Heading 2" and text.startswith("Статья"):
+        if p.style and p.style.name == "Heading 2" and text.startswith("Статья"):
             flush()
             cur = {
                 "category": current_category,
@@ -286,28 +288,38 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Seeding Main Logic
 
+
 async def main() -> int:
     env = os.environ.get("REHOME_ENV", "dev").lower()
     if env in ("prod", "staging"):
         os.environ["MINIO_ENABLED"] = "True"
-        print(f"Prod/Staging environment detected. Forcing MINIO_ENABLED=True for seeding actual articles.")
+        print(
+            "Prod/Staging environment detected. "
+            "Forcing MINIO_ENABLED=True for seeding actual articles."
+        )
 
     settings = get_settings()
     db_url = os.environ.get("DATABASE_URL") or settings.database_url
     engine = create_async_engine(db_url)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     created_cats = created_arts = skipped = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         async with factory() as session:
             # 1. Clean up old mock articles & categories in all environments
             from sqlalchemy import delete
+
             print("Cleaning up old mock data...")
             res_arts = await session.execute(delete(Article).where(Article.slug.in_(MOCK_SLUGS)))
-            res_cats = await session.execute(delete(Category).where(Category.slug.in_(MOCK_CAT_SLUGS)))
+            res_cats = await session.execute(
+                delete(Category).where(Category.slug.in_(MOCK_CAT_SLUGS))
+            )
             await session.commit()
-            print(f"Deleted {res_arts.rowcount} mock articles and {res_cats.rowcount} mock categories.")
+            print(
+                f"Deleted {res_arts.rowcount} mock articles "
+                f"and {res_cats.rowcount} mock categories."
+            )
 
             if env in ("prod", "staging"):
                 print(f"Running ACTUAL KB seed for environment: {env}")
@@ -327,7 +339,7 @@ async def main() -> int:
                     existing_cats = set(
                         (await session.execute(select(Category.slug))).scalars().all()
                     )
-                    unique_categories = set(a["category"] for a in all_articles if a.get("category"))
+                    unique_categories = {a["category"] for a in all_articles if a.get("category")}
                     for cat_name in unique_categories:
                         if cat_name in existing_cats:
                             continue
@@ -384,7 +396,10 @@ async def main() -> int:
                     print(f"FAILED to seed actual articles: {exc}")
                     raise exc
             else:
-                print(f"Skipping actual KB seed for local environment: {env} (database is cleaned of mock data).")
+                print(
+                    f"Skipping actual KB seed for local environment: {env} "
+                    "(database is cleaned of mock data)."
+                )
     finally:
         await engine.dispose()
     return 0
