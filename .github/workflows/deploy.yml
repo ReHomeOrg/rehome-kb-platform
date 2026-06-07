@@ -30,15 +30,23 @@ jobs:
         run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Selectel Container Registry
+        env:
+          CR_PUSH_TOKEN: ${{ secrets.SELECTEL_CR_PUSH_TOKEN }}
+          CR_USERNAME: ${{ secrets.SELECTEL_CR_TOKEN_USER || secrets.SELECTEL_CR_USERNAME }}
         run: |
-          echo '${{ secrets.SELECTEL_CR_PUSH_TOKEN }}' | docker login \
-            --username '${{ secrets.SELECTEL_CR_TOKEN_USER }}' \
-            --password-stdin \
-            cr.selcloud.ru
+          test -n "$CR_USERNAME" || { echo "::error::Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
+          test -n "$CR_PUSH_TOKEN" || { echo "::error::Missing SELECTEL_CR_PUSH_TOKEN secret"; exit 1; }
+
+          echo "$CR_PUSH_TOKEN" | docker login cr.selcloud.ru \
+            --username "$CR_USERNAME" \
+            --password-stdin
 
       - name: Build and push backend image
+        env:
+          SELECTEL_CR_URL: ${{ secrets.SELECTEL_CR_URL }}
         run: |
-          CR_PATH="${{ secrets.SELECTEL_CR_URL }}/${{ env.BACKEND_IMAGE_NAME }}"
+          test -n "$SELECTEL_CR_URL" || { echo "::error::Missing SELECTEL_CR_URL secret"; exit 1; }
+          CR_PATH="${SELECTEL_CR_URL}/${{ env.BACKEND_IMAGE_NAME }}"
           docker build \
             -t $CR_PATH:${{ steps.meta.outputs.tag }} \
             -t $CR_PATH:latest \
@@ -47,8 +55,11 @@ jobs:
           docker push $CR_PATH:latest
 
       - name: Build and push frontend image
+        env:
+          SELECTEL_CR_URL: ${{ secrets.SELECTEL_CR_URL }}
         run: |
-          CR_PATH="${{ secrets.SELECTEL_CR_URL }}/${{ env.FRONTEND_IMAGE_NAME }}"
+          test -n "$SELECTEL_CR_URL" || { echo "::error::Missing SELECTEL_CR_URL secret"; exit 1; }
+          CR_PATH="${SELECTEL_CR_URL}/${{ env.FRONTEND_IMAGE_NAME }}"
           docker build \
             -t $CR_PATH:${{ steps.meta.outputs.tag }} \
             -t $CR_PATH:latest \
@@ -64,7 +75,7 @@ jobs:
         uses: appleboy/ssh-action@master
         env:
           CR_TOKEN: ${{ secrets.SELECTEL_CR_PULL_TOKEN }}
-          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER }}
+          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER || secrets.SELECTEL_CR_USERNAME }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
         with:
@@ -80,6 +91,10 @@ jobs:
             exec 9>/tmp/rehome-deploy.lock
             flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
 
+            test -n "$CR_TOKEN_USER" || { echo "Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
+            test -n "$CR_TOKEN" || { echo "Missing SELECTEL_CR_PULL_TOKEN secret"; exit 1; }
+            test -n "$REGISTRY_URL" || { echo "Missing SELECTEL_CR_URL secret"; exit 1; }
+
             echo "🚀 Deploying KB Platform to staging: $IMAGE_TAG"
             echo "$CR_TOKEN" | docker login --username "$CR_TOKEN_USER" --password-stdin cr.selcloud.ru
 
@@ -92,8 +107,18 @@ jobs:
             echo "📦 Disk after cleanup:  ${AVAIL_GB}G free"
 
             # Inject image tags into staging .env
-            echo "KB_BACKEND_TAG=$IMAGE_TAG" >> /opt/rehome/staging/.env
-            echo "KB_FRONTEND_TAG=$IMAGE_TAG" >> /opt/rehome/staging/.env
+            set_env() {
+              key="$1"
+              value="$2"
+              file="/opt/rehome/staging/.env"
+              if grep -q "^${key}=" "$file"; then
+                sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+              else
+                echo "${key}=${value}" >> "$file"
+              fi
+            }
+            set_env KB_BACKEND_TAG "$IMAGE_TAG"
+            set_env KB_FRONTEND_TAG "$IMAGE_TAG"
 
             # Pull and restart KB containers
             docker compose -p staging --env-file /opt/rehome/staging/.env pull kb-backend kb-frontend
@@ -123,7 +148,7 @@ jobs:
         uses: appleboy/ssh-action@master
         env:
           CR_TOKEN: ${{ secrets.SELECTEL_CR_PULL_TOKEN }}
-          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER }}
+          CR_TOKEN_USER: ${{ secrets.SELECTEL_CR_TOKEN_USER || secrets.SELECTEL_CR_USERNAME }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
           REGISTRY_URL: ${{ secrets.SELECTEL_CR_URL }}
         with:
@@ -139,6 +164,10 @@ jobs:
             exec 9>/tmp/rehome-deploy.lock
             flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
 
+            test -n "$CR_TOKEN_USER" || { echo "Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
+            test -n "$CR_TOKEN" || { echo "Missing SELECTEL_CR_PULL_TOKEN secret"; exit 1; }
+            test -n "$REGISTRY_URL" || { echo "Missing SELECTEL_CR_URL secret"; exit 1; }
+
             echo "🚀 Deploying KB Platform to prod: $IMAGE_TAG"
             echo "$CR_TOKEN" | docker login --username "$CR_TOKEN_USER" --password-stdin cr.selcloud.ru
 
@@ -151,8 +180,18 @@ jobs:
             echo "📦 Disk after cleanup:  ${AVAIL_GB}G free"
 
             # Inject image tags into prod .env
-            echo "KB_BACKEND_TAG=$IMAGE_TAG" >> /opt/rehome/prod/.env
-            echo "KB_FRONTEND_TAG=$IMAGE_TAG" >> /opt/rehome/prod/.env
+            set_env() {
+              key="$1"
+              value="$2"
+              file="/opt/rehome/prod/.env"
+              if grep -q "^${key}=" "$file"; then
+                sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+              else
+                echo "${key}=${value}" >> "$file"
+              fi
+            }
+            set_env KB_BACKEND_TAG "$IMAGE_TAG"
+            set_env KB_FRONTEND_TAG "$IMAGE_TAG"
 
             # Pull and restart KB containers
             docker compose -p prod --env-file /opt/rehome/prod/.env pull kb-backend kb-frontend

@@ -13,7 +13,7 @@ export default function LoginPage() {
       </p>
       <div className="mt-8">
         <a
-          href="/api/auth/login"
+          href="/help/api/auth/login"
           className="inline-flex items-center rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
         >
           Войти через reHome SSO
