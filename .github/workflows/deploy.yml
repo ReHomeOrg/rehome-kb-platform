@@ -189,7 +189,7 @@ jobs:
 
             # Seed FAQ and reindex search
             echo "🌱 Seeding FAQ articles..."
-            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.seed.seed_rehome_faq || true
+            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.seed_rehome_faq || true
             echo "🔍 Reindexing search..."
             docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.reindex_articles || true
 
@@ -277,7 +277,7 @@ jobs:
 
             # Seed FAQ and reindex search
             echo "🌱 Seeding FAQ articles..."
-            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.seed.seed_rehome_faq || true
+            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.seed_rehome_faq || true
             echo "🔍 Reindexing search..."
             docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.reindex_articles || true
 

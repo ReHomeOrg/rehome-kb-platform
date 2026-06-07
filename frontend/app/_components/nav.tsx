@@ -11,6 +11,7 @@
  */
 
 import { cookies } from "next/headers";
+import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 
@@ -33,25 +34,25 @@ export default async function Nav(): Promise<JSX.Element> {
     <nav className="border-b border-gray-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-6">
-          <a href="/" className="font-semibold tracking-tight">
+          <Link href="/" className="font-semibold tracking-tight">
             reHome
-          </a>
+          </Link>
           <ul className="flex items-center gap-4 text-sm text-gray-700">
             {NAV_LINKS.map((link) => (
               <li key={link.href}>
-                <a
+                <Link
                   href={link.href}
                   className="hover:text-gray-900 hover:underline"
                 >
                   {link.label}
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
         </div>
         <div className="flex items-center gap-2">
           {isLoggedIn ? (
-            <form action="/api/auth/logout" method="post">
+            <form action="/help/api/auth/logout" method="post">
               <button
                 type="submit"
                 className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -60,12 +61,12 @@ export default async function Nav(): Promise<JSX.Element> {
               </button>
             </form>
           ) : (
-            <a
+            <Link
               href="/login"
               className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
             >
               Войти
-            </a>
+            </Link>
           )}
         </div>
       </div>

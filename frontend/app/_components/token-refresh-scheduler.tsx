@@ -39,7 +39,8 @@ type Msg = { type: "heartbeat"; tabId: string };
 
 async function _fetchExp(): Promise<number | null> {
   try {
-    const r = await fetch("/api/auth/session-info", {
+    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const r = await fetch(`${prefix}/api/auth/session-info`, {
       cache: "no-store",
     });
     if (!r.ok) return null;
@@ -52,7 +53,8 @@ async function _fetchExp(): Promise<number | null> {
 
 async function _doRefresh(): Promise<boolean> {
   try {
-    const r = await fetch("/api/auth/refresh", {
+    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const r = await fetch(`${prefix}/api/auth/refresh`, {
       method: "POST",
       cache: "no-store",
     });

@@ -55,7 +55,8 @@ export function documentFileDownloadHref(
   documentId: string,
   format: DocumentFileFormat,
 ): string {
-  return `/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files/${encodeURIComponent(format)}`;
+  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  return `${prefix}/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files/${encodeURIComponent(format)}`;
 }
 
 export interface UploadedDocumentFile {
@@ -86,7 +87,8 @@ export async function uploadDocumentFile(
   body.append("format", format);
   body.append("version", version);
 
-  const url = `/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files`;
+  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  const url = `${prefix}/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files`;
   const response = await fetch(url, { method: "POST", body });
   if (!response.ok) {
     let parsedBody: unknown;

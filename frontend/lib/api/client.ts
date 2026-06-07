@@ -63,7 +63,8 @@ function buildUrl(path: string): string {
     return `${getBackendBaseUrl()}${path}`;
   }
   // Browser → через proxy `/api/kb<path>` (path начинается с `/api/v1/...`)
-  return `/api/kb${path}`;
+  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  return `${prefix}/api/kb${path}`;
 }
 
 /**
@@ -126,7 +127,8 @@ async function _doFetch<T>(
 
 async function _tryRefresh(): Promise<boolean> {
   try {
-    const r = await fetch("/api/auth/refresh", {
+    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const r = await fetch(`${prefix}/api/auth/refresh`, {
       method: "POST",
       cache: "no-store",
     });

@@ -148,46 +148,121 @@ async def main() -> int:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     created_cats = created_arts = skipped = 0
     now = datetime.now(timezone.utc)
+    
+    env = os.environ.get("REHOME_ENV", "dev").lower()
+    
     try:
         async with factory() as session:
-            existing_cats = set(
-                (await session.execute(select(Category.slug))).scalars().all()
-            )
-            for c in CATEGORIES:
-                if c["slug"] in existing_cats:
-                    continue
-                session.add(Category(slug=c["slug"], title=c["title"], description=c["description"]))
-                created_cats += 1
-
-            existing_arts = set(
-                (await session.execute(select(Article.slug))).scalars().all()
-            )
-            for a in ARTICLES:
-                if a["slug"] in existing_arts:
-                    skipped += 1
-                    continue
-                session.add(
-                    Article(
-                        slug=a["slug"],
-                        title=a["title"],
-                        summary=a["summary"],
-                        body_markdown=a["body_markdown"],
-                        audience="all",
-                        language="ru",
-                        category=a["category"],
-                        tags=a["tags"],
-                        access_level="PUBLIC",
-                        status="PUBLISHED",
-                        published_at=now,
+            if env in ("prod", "staging"):
+                print(f"Running ACTUAL KB seed for environment: {env}")
+                try:
+                    from scripts.import_kb_articles import parse_faq, parse_kb, fetch_source, to_slug
+                    
+                    # 1. Fetch and parse actual articles from S3/MinIO
+                    faq_bytes, _ = fetch_source("seed://reHome_FAQ_топ15.docx")
+                    kb_bytes, _ = fetch_source("seed://reHome_База_статей_120.docx")
+                    
+                    faq_articles = parse_faq(faq_bytes)
+                    kb_articles = parse_kb(kb_bytes)
+                    all_articles = faq_articles + kb_articles
+                    
+                    # 2. Extract and insert unique categories
+                    existing_cats = set(
+                        (await session.execute(select(Category.slug))).scalars().all()
                     )
+                    unique_categories = set(a["category"] for a in all_articles if a.get("category"))
+                    for cat_name in unique_categories:
+                        if cat_name in existing_cats:
+                            continue
+                        session.add(Category(slug=cat_name, title=cat_name, description=f"Статьи из категории {cat_name}"))
+                        created_cats += 1
+                        existing_cats.add(cat_name)
+                        
+                    # 3. Generate stable slugs and insert articles
+                    existing_arts = set(
+                        (await session.execute(select(Article.slug))).scalars().all()
+                    )
+                    for a in all_articles:
+                        base_slug = to_slug(a["title"])
+                        slug = base_slug
+                        suffix = 1
+                        while slug in existing_arts:
+                            suffix += 1
+                            slug = f"{base_slug}-{suffix}"[:80].rstrip("-")
+                            
+                        if slug in existing_arts:
+                            skipped += 1
+                            continue
+                            
+                        session.add(
+                            Article(
+                                slug=slug,
+                                title=a["title"],
+                                summary=a.get("summary", ""),
+                                body_markdown=a["body_markdown"],
+                                audience=a.get("audience", "all"),
+                                language=a.get("language", "ru"),
+                                category=a.get("category", "Общее"),
+                                tags=a.get("tags", []),
+                                access_level=a.get("access_level", "PUBLIC"),
+                                status=a.get("status", "PUBLISHED"),
+                                published_at=now,
+                            )
+                        )
+                        created_arts += 1
+                        existing_arts.add(slug)
+                        
+                    await session.commit()
+                    print(
+                        f"OK: categories_created={created_cats}, articles_created={created_arts}, "
+                        f"articles_skipped={skipped}"
+                    )
+                except Exception as exc:
+                    print(f"FAILED to seed actual articles: {exc}")
+                    # We print the error but do not crash the script to avoid breaking deployments,
+                    # similar to the legacy || true safety fallback.
+                    return 1
+            else:
+                # Local dev mock seeding
+                print(f"Running MOCK KB seed for environment: {env}")
+                existing_cats = set(
+                    (await session.execute(select(Category.slug))).scalars().all()
                 )
-                created_arts += 1
+                for c in CATEGORIES:
+                    if c["slug"] in existing_cats:
+                        continue
+                    session.add(Category(slug=c["slug"], title=c["title"], description=c["description"]))
+                    created_cats += 1
 
-            await session.commit()
-            print(
-                f"OK: categories_created={created_cats}, articles_created={created_arts}, "
-                f"articles_skipped={skipped}"
-            )
+                existing_arts = set(
+                    (await session.execute(select(Article.slug))).scalars().all()
+                )
+                for a in ARTICLES:
+                    if a["slug"] in existing_arts:
+                        skipped += 1
+                        continue
+                    session.add(
+                        Article(
+                            slug=a["slug"],
+                            title=a["title"],
+                            summary=a["summary"],
+                            body_markdown=a["body_markdown"],
+                            audience="all",
+                            language="ru",
+                            category=a["category"],
+                            tags=a["tags"],
+                            access_level="PUBLIC",
+                            status="PUBLISHED",
+                            published_at=now,
+                        )
+                    )
+                    created_arts += 1
+
+                await session.commit()
+                print(
+                    f"OK: categories_created={created_cats}, articles_created={created_arts}, "
+                    f"articles_skipped={skipped}"
+                )
     finally:
         await engine.dispose()
     return 0
