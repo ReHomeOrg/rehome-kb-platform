@@ -187,9 +187,30 @@ jobs:
             echo "⚙️ Running database migrations..."
             docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend alembic upgrade head
 
+            # Read MinIO/S3 variables from staging .env
+            S3_ENDPOINT="$(grep "^S3_ENDPOINT_URL=" /opt/rehome/staging/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+            S3_KEY="$(grep "^S3_ACCESS_KEY=" /opt/rehome/staging/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+            S3_SECRET="$(grep "^S3_SECRET_KEY=" /opt/rehome/staging/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+
+            # Format endpoint hostname for MinIO python SDK (strip protocol)
+            MINIO_HOST=$(echo "$S3_ENDPOINT" | sed -e 's|^https\?://||')
+
+            # Detect secure mode
+            if echo "$S3_ENDPOINT" | grep -q "^https"; then
+              MINIO_SECURE="True"
+            else
+              MINIO_SECURE="False"
+            fi
+
             # Seed FAQ and reindex search
             echo "🌱 Seeding FAQ articles..."
-            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m src.api.db.seed_kb
+            docker compose -p staging --env-file /opt/rehome/staging/.env exec -T \
+              -e MINIO_ENDPOINT="$MINIO_HOST" \
+              -e MINIO_ACCESS_KEY="$S3_KEY" \
+              -e MINIO_SECRET_KEY="$S3_SECRET" \
+              -e MINIO_SECURE="$MINIO_SECURE" \
+              -e MINIO_BUCKET="kb-seed" \
+              kb-backend python -m src.api.db.seed_kb
             echo "🔍 Reindexing search..."
             docker compose -p staging --env-file /opt/rehome/staging/.env exec -T kb-backend python -m scripts.reindex_articles || true
 
@@ -275,9 +296,30 @@ jobs:
             echo "⚙️ Running database migrations..."
             docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend alembic upgrade head
 
+            # Read MinIO/S3 variables from prod .env
+            S3_ENDPOINT="$(grep "^S3_ENDPOINT_URL=" /opt/rehome/prod/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+            S3_KEY="$(grep "^S3_ACCESS_KEY=" /opt/rehome/prod/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+            S3_SECRET="$(grep "^S3_SECRET_KEY=" /opt/rehome/prod/.env | cut -d= -f2- | tr -d '"' | tr -d "'")"
+
+            # Format endpoint hostname for MinIO python SDK (strip protocol)
+            MINIO_HOST=$(echo "$S3_ENDPOINT" | sed -e 's|^https\?://||')
+
+            # Detect secure mode
+            if echo "$S3_ENDPOINT" | grep -q "^https"; then
+              MINIO_SECURE="True"
+            else
+              MINIO_SECURE="False"
+            fi
+
             # Seed FAQ and reindex search
             echo "🌱 Seeding FAQ articles..."
-            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m src.api.db.seed_kb
+            docker compose -p prod --env-file /opt/rehome/prod/.env exec -T \
+              -e MINIO_ENDPOINT="$MINIO_HOST" \
+              -e MINIO_ACCESS_KEY="$S3_KEY" \
+              -e MINIO_SECRET_KEY="$S3_SECRET" \
+              -e MINIO_SECURE="$MINIO_SECURE" \
+              -e MINIO_BUCKET="kb-seed" \
+              kb-backend python -m src.api.db.seed_kb
             echo "🔍 Reindexing search..."
             docker compose -p prod --env-file /opt/rehome/prod/.env exec -T kb-backend python -m scripts.reindex_articles || true
 
