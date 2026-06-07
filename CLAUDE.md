@@ -218,6 +218,34 @@ npx @stoplight/prism-cli mock docs/handoff/01_postanovka/04_openapi.yaml --port 
 pytest tests/contract/
 ```
 
+## CI/CD и deploy — помнить всегда
+
+- `CI` и `Build & Deploy KB Platform` — разные workflow. Зелёный `CI` не
+  означает, что KB Platform уже live.
+- Статус “live” проверяется только по зелёному `Build & Deploy KB Platform`
+  (`build-and-push`, `deploy-staging`, `deploy-prod`).
+- Security job в `.github/workflows/ci.yml` запускает
+  `pip-audit --requirement backend/requirements.txt`. Для таких падений чинить
+  нужно pin в `backend/requirements.txt`.
+- Deploy workflow работает против живого `/app/docker-compose.yml` на сервере
+  `95.213.154.92`, а не против `infra/docker-compose.yml` из репозитория.
+- Корректные service names для KB Platform в `/app/docker-compose.yml`:
+  `postgres-kb`, `kb-backend`, `kb-frontend`.
+  Имя `kb-postgres` неверно.
+- Registry secrets:
+  `SELECTEL_CR_URL=cr.selcloud.ru/rehome`,
+  `SELECTEL_CR_TOKEN_USER=token`,
+  `SELECTEL_CR_PUSH_TOKEN=<40-char token>`,
+  `SELECTEL_CR_PULL_TOKEN=<40-char token>`.
+- SSH secrets:
+  `HOST=95.213.154.92`,
+  `USERNAME=root`,
+  `SSH_PRIVATE_KEY=<private key>`.
+- Failure в GitHub-hosted CI на этапе service container startup с
+  `docker pull postgres:16-alpine` / timeout до `registry-1.docker.io` —
+  это внешний Docker Hub / runner network flake, не автоматический regression
+  проекта.
+
 ## Версионирование коммитов (Conventional Commits)
 
 Формат:
