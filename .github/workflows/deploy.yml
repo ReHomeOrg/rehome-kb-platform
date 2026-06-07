@@ -34,6 +34,20 @@ jobs:
           CR_PUSH_TOKEN: ${{ secrets.SELECTEL_CR_PUSH_TOKEN }}
           CR_USERNAME: ${{ secrets.SELECTEL_CR_TOKEN_USER || secrets.SELECTEL_CR_USERNAME }}
         run: |
+          normalize_secret() {
+            printf '%s' "$1" \
+              | tr -d '\r\n' \
+              | sed -e 's/^[[:space:]]*//' \
+                -e 's/[[:space:]]*$//' \
+                -e 's/^"//' \
+                -e 's/"$//' \
+                -e "s/^'//" \
+                -e "s/'$//"
+          }
+
+          CR_USERNAME="$(normalize_secret "$CR_USERNAME")"
+          CR_PUSH_TOKEN="$(normalize_secret "$CR_PUSH_TOKEN")"
+
           test -n "$CR_USERNAME" || { echo "::error::Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
           test -n "$CR_PUSH_TOKEN" || { echo "::error::Missing SELECTEL_CR_PUSH_TOKEN secret"; exit 1; }
 
@@ -45,6 +59,19 @@ jobs:
         env:
           SELECTEL_CR_URL: ${{ secrets.SELECTEL_CR_URL }}
         run: |
+          normalize_secret() {
+            printf '%s' "$1" \
+              | tr -d '\r\n' \
+              | sed -e 's/^[[:space:]]*//' \
+                -e 's/[[:space:]]*$//' \
+                -e 's/^"//' \
+                -e 's/"$//' \
+                -e "s/^'//" \
+                -e "s/'$//"
+          }
+
+          SELECTEL_CR_URL="$(normalize_secret "$SELECTEL_CR_URL")"
+
           test -n "$SELECTEL_CR_URL" || { echo "::error::Missing SELECTEL_CR_URL secret"; exit 1; }
           CR_PATH="${SELECTEL_CR_URL}/${{ env.BACKEND_IMAGE_NAME }}"
           docker build \
@@ -58,6 +85,19 @@ jobs:
         env:
           SELECTEL_CR_URL: ${{ secrets.SELECTEL_CR_URL }}
         run: |
+          normalize_secret() {
+            printf '%s' "$1" \
+              | tr -d '\r\n' \
+              | sed -e 's/^[[:space:]]*//' \
+                -e 's/[[:space:]]*$//' \
+                -e 's/^"//' \
+                -e 's/"$//' \
+                -e "s/^'//" \
+                -e "s/'$//"
+          }
+
+          SELECTEL_CR_URL="$(normalize_secret "$SELECTEL_CR_URL")"
+
           test -n "$SELECTEL_CR_URL" || { echo "::error::Missing SELECTEL_CR_URL secret"; exit 1; }
           CR_PATH="${SELECTEL_CR_URL}/${{ env.FRONTEND_IMAGE_NAME }}"
           docker build \
@@ -90,6 +130,21 @@ jobs:
             # Serialize host docker mutations across deploys
             exec 9>/tmp/rehome-deploy.lock
             flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
+
+            normalize_secret() {
+              printf '%s' "$1" \
+                | tr -d '\r\n' \
+                | sed -e 's/^[[:space:]]*//' \
+                  -e 's/[[:space:]]*$//' \
+                  -e 's/^"//' \
+                  -e 's/"$//' \
+                  -e "s/^'//" \
+                  -e "s/'$//"
+            }
+
+            CR_TOKEN_USER="$(normalize_secret "$CR_TOKEN_USER")"
+            CR_TOKEN="$(normalize_secret "$CR_TOKEN")"
+            REGISTRY_URL="$(normalize_secret "$REGISTRY_URL")"
 
             test -n "$CR_TOKEN_USER" || { echo "Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
             test -n "$CR_TOKEN" || { echo "Missing SELECTEL_CR_PULL_TOKEN secret"; exit 1; }
@@ -163,6 +218,21 @@ jobs:
             # Serialize host docker mutations across deploys
             exec 9>/tmp/rehome-deploy.lock
             flock -w 900 9 || { echo "❌ Timed out waiting for deploy lock"; exit 1; }
+
+            normalize_secret() {
+              printf '%s' "$1" \
+                | tr -d '\r\n' \
+                | sed -e 's/^[[:space:]]*//' \
+                  -e 's/[[:space:]]*$//' \
+                  -e 's/^"//' \
+                  -e 's/"$//' \
+                  -e "s/^'//" \
+                  -e "s/'$//"
+            }
+
+            CR_TOKEN_USER="$(normalize_secret "$CR_TOKEN_USER")"
+            CR_TOKEN="$(normalize_secret "$CR_TOKEN")"
+            REGISTRY_URL="$(normalize_secret "$REGISTRY_URL")"
 
             test -n "$CR_TOKEN_USER" || { echo "Missing SELECTEL_CR_TOKEN_USER or SELECTEL_CR_USERNAME secret"; exit 1; }
             test -n "$CR_TOKEN" || { echo "Missing SELECTEL_CR_PULL_TOKEN secret"; exit 1; }
