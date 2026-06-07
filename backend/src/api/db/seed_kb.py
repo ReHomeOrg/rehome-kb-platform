@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from docx import Document
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from transliterate import translit  # type: ignore
 
@@ -379,8 +379,10 @@ def parse_kb(data: bytes) -> list[dict[str, Any]]:
 
 
 async def count_published_articles(session: Any) -> int:
-    result = await session.execute(select(Article.id).where(Article.status == "PUBLISHED").limit(1))
-    return 1 if result.scalar_one_or_none() is not None else 0
+    result = await session.execute(
+        select(func.count()).select_from(Article).where(Article.status == "PUBLISHED")
+    )
+    return int(result.scalar_one())
 
 
 async def seed_fallback_public_articles(session: Any, now: datetime) -> tuple[int, int, int]:
@@ -543,11 +545,18 @@ async def main() -> int:
                         "WARN: pinned KB seed source is unavailable "
                         f"(bucket={seed_bucket_name()}, prefix={SEED_PREFIX}): {exc}"
                     )
-                    if await count_published_articles(session):
-                        print("Existing published articles found; keeping current KB content.")
+                    published_count = await count_published_articles(session)
+                    if published_count >= len(FALLBACK_ARTICLES):
+                        print(
+                            "Existing published articles found "
+                            f"(count={published_count}); keeping current KB content."
+                        )
                         return 0
 
-                    print("No published articles found; creating emergency public FAQ fallback.")
+                    print(
+                        "Published KB content is empty or partial "
+                        f"(count={published_count}); ensuring emergency public FAQ fallback."
+                    )
                     fallback_result = await seed_fallback_public_articles(session, now)
                     fallback_cats, fallback_arts, fallback_skipped = fallback_result
                     print(
