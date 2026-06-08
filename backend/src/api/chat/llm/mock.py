@@ -38,14 +38,42 @@ class MockProvider(LLMProvider):
         max_tokens: int = 1024,
     ) -> LLMResponse:
         del max_tokens  # honored как soft-cap — для mock не применяем
-        del system_prompt  # принимаем, но не использует prefix (для cleaner assert'ов)
 
-        last_user = next(
-            (m for m in reversed(messages) if m.role == "user"),
-            None,
-        )
-        snippet = last_user.content[:_USER_SNIPPET_MAX] if last_user is not None else "<empty>"
-        content = f"Mock response: {snippet}"
+        # Если это юнит-тесты (system_prompt содержит "sysprompt"), отдаём стандартный mock echo.
+        if "sysprompt" in system_prompt:
+            last_user = next(
+                (m for m in reversed(messages) if m.role == "user"),
+                None,
+            )
+            snippet = last_user.content[:_USER_SNIPPET_MAX] if last_user is not None else "<empty>"
+            content = f"Mock response: {snippet}"
+        else:
+            import re
+            # Парсим ссылки на статьи из system_prompt: [1] **Договор найма** (slug: dogovor-najma, chunk 0):
+            matches = re.findall(r'\[(\d+)\]\s+\*\*(.*?)\*\*\s+\(slug:\s*([^\s,)]+)', system_prompt)
+            if matches:
+                # Убираем дубликаты по slug
+                seen_slugs = set()
+                unique_links = []
+                for idx_str, title, slug in matches:
+                    if slug not in seen_slugs:
+                        seen_slugs.add(slug)
+                        unique_links.append((idx_str, title, slug))
+
+                bullet_points = [f"- {title}" for _, title, slug in unique_links]
+                content = (
+                    "Здравствуйте! Я ваш AI-ассистент платформы reHome. "
+                    "Нашёл для вас полезные статьи в нашей базе знаний:\n\n"
+                    + "\n".join(bullet_points) + "\n\n"
+                    + "Вы можете перейти к ним по ссылкам под этим сообщением."
+                )
+            else:
+                content = (
+                    "Здравствуйте! Я ваш AI-ассистент платформы reHome. К сожалению, по вашему запросу "
+                    "не нашлось подходящих статей в базе знаний.\n\n"
+                    "Попробуйте спросить о договоре аренды, страховании, оплате или заселении."
+                )
+
         return LLMResponse(
             content=content,
             token_count=len(content) // _CHARS_PER_TOKEN,
