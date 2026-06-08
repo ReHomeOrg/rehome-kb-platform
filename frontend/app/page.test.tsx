@@ -11,9 +11,14 @@ vi.mock("@/lib/api/articles", () => ({
   listArticles: vi.fn(),
 }));
 
+vi.mock("@/lib/api/categories", () => ({
+  listCategories: vi.fn(),
+}));
+
 import { cookies } from "next/headers";
 
 import { listArticles } from "@/lib/api/articles";
+import { listCategories } from "@/lib/api/categories";
 
 import Home from "./page";
 
@@ -42,10 +47,92 @@ function mockFaq(items: { slug: string; title: string; tags: string[] }[]): void
   });
 }
 
+function mockCategories(
+  items: { slug: string; title: string; description: string | null; article_count: number }[] = [
+    {
+      slug: "1_start",
+      title: "Начало работы и регистрация",
+      description: "Регистрация, верификация, типы аккаунтов",
+      article_count: 12,
+    },
+    {
+      slug: "2_search",
+      title: "Поиск и выбор квартиры",
+      description: "Фильтры, объявления, просмотр",
+      article_count: 11,
+    },
+    {
+      slug: "3_booking",
+      title: "Бронирование и договор",
+      description: "Бронь, договор найма, КЭП",
+      article_count: 10,
+    },
+    {
+      slug: "4_payments",
+      title: "Платежи и финансы",
+      description: "Сервисный сбор, оплата, налоги",
+      article_count: 9,
+    },
+    {
+      slug: "5_movein",
+      title: "Заезд и приёмка квартиры",
+      description: "Передача ключей, акт, ремонт",
+      article_count: 8,
+    },
+    {
+      slug: "6_living",
+      title: "Проживание и эксплуатация",
+      description: "Правила, ремонт, аварии",
+      article_count: 7,
+    },
+    {
+      slug: "7_utilities",
+      title: "Коммунальные услуги",
+      description: "Счётчики, оплата, провайдеры",
+      article_count: 9,
+    },
+    {
+      slug: "8_services",
+      title: "Услуги и коллаборанты",
+      description: "Уборка, ремонт, доп. сервисы",
+      article_count: 6,
+    },
+    {
+      slug: "9_moveout",
+      title: "Выезд и расторжение",
+      description: "Уведомление, депозит, акт",
+      article_count: 5,
+    },
+    {
+      slug: "10_owners",
+      title: "Для собственников",
+      description: "Размещение, проверка, выплаты",
+      article_count: 14,
+    },
+    {
+      slug: "11_security",
+      title: "Безопасность, данные и поддержка",
+      description: "ФЗ-152, инциденты, поддержка",
+      article_count: 7,
+    },
+  ],
+): void {
+  (listCategories as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+    data: items.map((it) => ({
+      slug: it.slug,
+      title: it.title,
+      description: it.description,
+      article_count: it.article_count,
+      children: [],
+    })),
+  });
+}
+
 describe("Home (help.rehome.one landing)", () => {
   beforeEach(() => {
     setCookies({ has: () => false });
     mockFaq([]);
+    mockCategories();
   });
 
   it("renders the help-center heading", async () => {
@@ -69,14 +156,15 @@ describe("Home (help.rehome.one landing)", () => {
     const tree = await Home();
     render(tree);
     expect(screen.getByText("Начало работы и регистрация")).toBeInTheDocument();
-    expect(screen.getByText("Платежи и финансы")).toBeInTheDocument();
-    expect(screen.getByText("Для собственников")).toBeInTheDocument();
+    expect(screen.getByText("Коммунальные услуги")).toBeInTheDocument();
     expect(screen.getByText("Безопасность, данные и поддержка")).toBeInTheDocument();
-    // Все category card'ы — это ссылки на /articles?category=...
-    const categoryLinks = screen.getAllByRole("link", { name: /Начало работы/i });
+    expect(screen.getAllByText("Открыть статьи")).toHaveLength(11);
+    const categoryLinks = screen.getAllByRole("link", {
+      name: /Открыть категорию Начало работы и регистрация/i,
+    });
     expect(categoryLinks[0]).toHaveAttribute(
       "href",
-      expect.stringContaining("/articles?category="),
+      "/articles?category=1_start",
     );
   });
 

@@ -15,23 +15,44 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
+import { listCategories } from "@/lib/api/categories";
 import { listArticles } from "@/lib/api/articles";
-import type { ArticleSummary } from "@/lib/api/types";
+import type { ArticleSummary, Category } from "@/lib/api/types";
 
-// 11 категорий из ПЗ «База знаний v1.4» §2. Иконки — emoji для simplicity.
-const CATEGORIES: { name: string; emoji: string; description: string }[] = [
-  { name: "Начало работы и регистрация", emoji: "👋", description: "Регистрация, верификация, типы аккаунтов" },
-  { name: "Поиск и выбор квартиры", emoji: "🔍", description: "Фильтры, объявления, просмотр" },
-  { name: "Бронирование и договор", emoji: "📝", description: "Бронь, договор найма, КЭП" },
-  { name: "Платежи и финансы", emoji: "💳", description: "Сервисный сбор, оплата, налоги" },
-  { name: "Заезд и приёмка квартиры", emoji: "🔑", description: "Передача ключей, акт, ремонт" },
-  { name: "Проживание и эксплуатация", emoji: "🏠", description: "Правила, ремонт, аварии" },
-  { name: "Коммунальные услуги", emoji: "💡", description: "Счётчики, оплата, провайдеры" },
-  { name: "Услуги и коллаборанты", emoji: "🛠️", description: "Уборка, ремонт, доп. сервисы" },
-  { name: "Выезд и расторжение", emoji: "🚪", description: "Уведомление, депозит, акт" },
-  { name: "Для собственников", emoji: "🏢", description: "Размещение, проверка, выплаты" },
-  { name: "Безопасность, данные и поддержка", emoji: "🛡️", description: "ФЗ-152, инциденты, поддержка" },
-];
+type CategoryCard = {
+  slug: string;
+  title: string;
+  emoji: string;
+  description: string;
+};
+
+const CATEGORY_VISUALS: Record<string, Omit<CategoryCard, "slug" | "title">> = {
+  "1_start": { emoji: "👋", description: "Регистрация, верификация, типы аккаунтов" },
+  "2_search": { emoji: "🔍", description: "Фильтры, объявления, просмотр" },
+  "3_booking": { emoji: "📝", description: "Бронь, договор найма, КЭП" },
+  "4_payments": { emoji: "💳", description: "Сервисный сбор, оплата, налоги" },
+  "5_movein": { emoji: "🔑", description: "Передача ключей, акт, ремонт" },
+  "6_living": { emoji: "🏠", description: "Правила, ремонт, аварии" },
+  "7_utilities": { emoji: "💡", description: "Счётчики, оплата, провайдеры" },
+  "8_services": { emoji: "🛠️", description: "Уборка, ремонт, доп. сервисы" },
+  "9_moveout": { emoji: "🚪", description: "Уведомление, депозит, акт" },
+  "10_owners": { emoji: "🏢", description: "Размещение, проверка, выплаты" },
+  "11_security": { emoji: "🛡️", description: "ФЗ-152, инциденты, поддержка" },
+};
+
+const CATEGORY_ORDER = [
+  "1_start",
+  "2_search",
+  "3_booking",
+  "4_payments",
+  "5_movein",
+  "6_living",
+  "7_utilities",
+  "8_services",
+  "9_moveout",
+  "10_owners",
+  "11_security",
+] as const;
 
 // FAQ — пять самых востребованных (по импортированному order'у).
 const TOP_FAQ_LIMIT = 6;
@@ -51,11 +72,48 @@ async function loadTopFaq(): Promise<ArticleSummary[]> {
   }
 }
 
+async function loadCategories(): Promise<Category[]> {
+  try {
+    const resp = await listCategories();
+    return resp.data;
+  } catch {
+    return [];
+  }
+}
+
+function toCategoryCards(categories: Category[]): CategoryCard[] {
+  const bySlug = new Map(categories.map((category) => [category.slug, category] as const));
+  const orderedSlugSet = new Set<string>(CATEGORY_ORDER);
+  const cards = CATEGORY_ORDER.flatMap((slug) => {
+    const category = bySlug.get(slug);
+    if (!category) return [];
+    const visuals = CATEGORY_VISUALS[slug];
+    return [{
+      slug,
+      title: category.title,
+      emoji: visuals.emoji,
+      description: visuals.description,
+    }];
+  });
+
+  const remaining = categories
+    .filter((category) => !orderedSlugSet.has(category.slug))
+    .map((category) => ({
+      slug: category.slug,
+      title: category.title,
+      emoji: "📚",
+      description: category.description ?? "Статьи по этой теме",
+    }));
+
+  return [...cards, ...remaining];
+}
+
 export default async function Home(): Promise<JSX.Element> {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.has(COOKIE_SESSION);
 
-  const topFaq = await loadTopFaq();
+  const [topFaq, categories] = await Promise.all([loadTopFaq(), loadCategories()]);
+  const categoryCards = toCategoryCards(categories);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col px-6 py-12">
@@ -153,15 +211,20 @@ export default async function Home(): Promise<JSX.Element> {
           </Link>
         </div>
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {CATEGORIES.map((c) => (
-            <li key={c.name}>
+          {categoryCards.map((c) => (
+            <li key={c.slug}>
               <Link
-                href={`/articles?category=${encodeURIComponent(c.name)}`}
-                className="block h-full rounded-md border border-gray-200 bg-white p-4 hover:border-blue-300 hover:bg-blue-50/30"
+                href={`/articles?category=${encodeURIComponent(c.slug)}`}
+                aria-label={`Открыть категорию ${c.title}`}
+                className="group block h-full rounded-md border border-gray-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
               >
                 <p className="text-2xl">{c.emoji}</p>
-                <p className="mt-2 text-sm font-medium text-gray-900">{c.name}</p>
+                <p className="mt-2 text-sm font-medium text-gray-900">{c.title}</p>
                 <p className="mt-1 text-xs text-gray-600">{c.description}</p>
+                <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-blue-600">
+                  <span>Открыть статьи</span>
+                  <span className="transition group-hover:translate-x-0.5">→</span>
+                </div>
               </Link>
             </li>
           ))}
@@ -185,7 +248,7 @@ export default async function Home(): Promise<JSX.Element> {
       <footer className="mt-auto border-t border-gray-200 pt-6 text-xs text-gray-500">
         <p>
           reHome — платформа долгосрочной аренды жилья в РФ.{" "}
-          <Link href="/articles?category=Безопасность%2C+данные+и+поддержка" className="underline">
+          <Link href="/articles?category=11_security" className="underline">
             Политика обработки ПДн (ФЗ-152)
           </Link>
         </p>
