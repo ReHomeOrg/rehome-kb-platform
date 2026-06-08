@@ -20,7 +20,21 @@ export default function ArticleMarkdown({
 }: ArticleMarkdownProps): JSX.Element {
   return (
     <div className="prose prose-gray max-w-none">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              className="font-medium text-blue-600 underline decoration-blue-300 decoration-1 underline-offset-2 hover:text-blue-700 hover:decoration-blue-500"
+            >
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

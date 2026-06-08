@@ -23,6 +23,14 @@ describe("ArticleMarkdown", () => {
     expect(link).toHaveAttribute("href", "https://example.org");
   });
 
+  it("renders internal article links", async () => {
+    render(<ArticleMarkdown content="[Перейти к статье 137](/articles/foo)" />);
+    const link = await screen.findByRole("link", {
+      name: "Перейти к статье 137",
+    });
+    expect(link).toHaveAttribute("href", "/articles/foo");
+  });
+
   it("escapes raw HTML (no rehype-raw)", async () => {
     const { container } = render(
       <ArticleMarkdown content='<script>alert("xss")</script>' />,
