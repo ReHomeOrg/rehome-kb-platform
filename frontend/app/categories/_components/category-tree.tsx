@@ -21,19 +21,18 @@ interface CategoryNodeProps {
 function CategoryNode({ node, depth }: CategoryNodeProps): JSX.Element {
   return (
     <li className="flex flex-col gap-1">
-      <div
-        className="flex items-baseline gap-2"
-        style={{ paddingLeft: `${depth * 16}px` }}
-      >
+      <div style={{ paddingLeft: `${depth * 16}px` }}>
         <Link
           href={`/articles?category=${encodeURIComponent(node.slug)}`}
-          className="text-sm hover:underline"
+          aria-label={`Открыть категорию ${node.title}`}
+          className="group flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
         >
-          {node.title}
+          <span className="font-medium text-gray-900">{node.title}</span>
+          <span className="ml-3 flex shrink-0 items-center gap-2 text-xs text-gray-500">
+            <span>({node.article_count})</span>
+            <span className="text-blue-600 transition group-hover:translate-x-0.5">→</span>
+          </span>
         </Link>
-        <span className="text-xs text-gray-500">
-          ({node.article_count})
-        </span>
       </div>
       {node.children.length > 0 ? (
         <ul className="flex flex-col gap-1">
