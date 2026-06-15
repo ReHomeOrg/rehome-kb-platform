@@ -37,4 +37,23 @@ describe("Nav", () => {
     expect(screen.getByText("Документы")).toBeInTheDocument();
     expect(screen.getByText("Чат")).toBeInTheDocument();
   });
+
+  it("прячет Кадры/Вебхуки/Админ от незалогиненного", async () => {
+    cookieStoreMock.has.mockReturnValueOnce(false);
+    render(await Nav());
+    expect(screen.queryByText("Кадры")).not.toBeInTheDocument();
+    expect(screen.queryByText("Вебхуки")).not.toBeInTheDocument();
+    expect(screen.queryByText("Админ")).not.toBeInTheDocument();
+    // англоязычные старые подписи тоже не должны просочиться
+    expect(screen.queryByText("Webhooks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Admin")).not.toBeInTheDocument();
+  });
+
+  it("показывает Кадры/Вебхуки/Админ залогиненному", async () => {
+    cookieStoreMock.has.mockReturnValueOnce(true);
+    render(await Nav());
+    expect(screen.getByText("Кадры")).toBeInTheDocument();
+    expect(screen.getByText("Вебхуки")).toBeInTheDocument();
+    expect(screen.getByText("Админ")).toBeInTheDocument();
+  });
 });
