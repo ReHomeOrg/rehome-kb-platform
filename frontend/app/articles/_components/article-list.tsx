@@ -44,7 +44,7 @@ export default function ArticleList({
             </Link>
             <p className="mt-1 text-xs text-gray-500">
               {article.category}
-              {isStaffAdmin ? ` · ${article.audience}` : ""} · {article.status}
+              {isStaffAdmin ? ` · ${article.audience}` : ""}
             </p>
             {article.tags.length > 0 ? (
               <p className="mt-2 flex flex-wrap gap-1 text-xs">
