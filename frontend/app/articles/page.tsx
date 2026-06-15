@@ -13,19 +13,24 @@ import { listCategories } from "@/lib/api/categories";
 import { getSessionAccess } from "@/lib/auth/access";
 import type { Category } from "@/lib/api/types";
 
-import ArticleFilters from "./_components/article-filters";
+import ArticleFilters, {
+  type CategoryOption,
+} from "./_components/article-filters";
 import ArticleList from "./_components/article-list";
 
-/** Плоский список названий категорий (title) для выпадающего фильтра. */
-function flattenCategoryTitles(categories: Category[]): string[] {
-  const titles: string[] = [];
+/**
+ * Плоский список категорий для выпадающего фильтра. Значение опции — `slug`
+ * (бэкенд фильтрует `Article.category == categories.slug`), подпись — `title`.
+ */
+function flattenCategories(categories: Category[]): CategoryOption[] {
+  const out: CategoryOption[] = [];
   for (const cat of categories) {
-    titles.push(cat.title);
+    out.push({ slug: cat.slug, title: cat.title });
     if (cat.children.length > 0) {
-      titles.push(...flattenCategoryTitles(cat.children));
+      out.push(...flattenCategories(cat.children));
     }
   }
-  return Array.from(new Set(titles)).sort((a, b) => a.localeCompare(b, "ru"));
+  return out.sort((a, b) => a.title.localeCompare(b.title, "ru"));
 }
 
 interface PageProps {
@@ -58,10 +63,10 @@ export default async function ArticlesPage({
 
   // Список категорий для выпадающего фильтра. Сбой не должен ронять
   // страницу — деградируем до пустого списка (фильтр останется без опций).
-  let categoryOptions: string[] = [];
+  let categoryOptions: CategoryOption[] = [];
   try {
     const categories = await listCategories();
-    categoryOptions = flattenCategoryTitles(categories.data);
+    categoryOptions = flattenCategories(categories.data);
   } catch {
     categoryOptions = [];
   }

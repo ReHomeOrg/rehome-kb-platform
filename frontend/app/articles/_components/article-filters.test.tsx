@@ -11,14 +11,19 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParamsMock,
 }));
 
-const CATS = ["rental", "Глоссарий", "Платежи и финансы"];
+// slug ≠ title намеренно — чтобы тест ловил отправку именно slug, а не title.
+const CATS = [
+  { slug: "glossary", title: "Глоссарий" },
+  { slug: "payments", title: "Платежи и финансы" },
+  { slug: "rental", title: "Аренда жилья" },
+];
 
 describe("ArticleFilters", () => {
   it("renders with initial values (staff видит аудиторию/язык)", () => {
     render(
       <ArticleFilters
         initial={{
-          category: "rental",
+          category: "glossary",
           audience: "tenant",
           language: "ru",
           tags: "договор",
@@ -27,13 +32,13 @@ describe("ArticleFilters", () => {
         isStaffAdmin={true}
       />,
     );
-    expect((screen.getByDisplayValue("rental") as HTMLSelectElement).value).toBe(
-      "rental",
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(
+      "glossary",
     );
     expect(screen.getByDisplayValue("tenant")).toBeInTheDocument();
   });
 
-  it("категория — выпадающий список со всеми категориями", () => {
+  it("категория — выпадающий список: value=slug, подпись=title", () => {
     render(
       <ArticleFilters
         initial={{ category: "", audience: "", language: "", tags: "" }}
@@ -41,11 +46,13 @@ describe("ArticleFilters", () => {
         isStaffAdmin={false}
       />,
     );
-    // option «Все категории» + по одной на каждую категорию
-    expect(screen.getByRole("option", { name: "Все категории" })).toBeInTheDocument();
-    for (const cat of CATS) {
-      expect(screen.getByRole("option", { name: cat })).toBeInTheDocument();
-    }
+    expect(
+      screen.getByRole("option", { name: "Все категории" }),
+    ).toBeInTheDocument();
+    const glossary = screen.getByRole("option", {
+      name: "Глоссарий",
+    }) as HTMLOptionElement;
+    expect(glossary.value).toBe("glossary");
   });
 
   it("скрывает фильтры аудитории и языка для обычного пользователя", () => {
@@ -58,16 +65,15 @@ describe("ArticleFilters", () => {
     );
     expect(screen.queryByText("Аудитория")).not.toBeInTheDocument();
     expect(screen.queryByText("Язык")).not.toBeInTheDocument();
-    // категория и теги остаются
     expect(screen.getByText("Категория")).toBeInTheDocument();
     expect(screen.getByText(/Теги/)).toBeInTheDocument();
   });
 
-  it("submits to /articles with URL params", () => {
+  it("submits slug (не title) в URL", () => {
     pushMock.mockReset();
     render(
       <ArticleFilters
-        initial={{ category: "rental", audience: "", language: "", tags: "" }}
+        initial={{ category: "glossary", audience: "", language: "", tags: "" }}
         categories={CATS}
         isStaffAdmin={false}
       />,
@@ -76,7 +82,8 @@ describe("ArticleFilters", () => {
     expect(pushMock).toHaveBeenCalled();
     const arg = pushMock.mock.calls[0][0];
     expect(arg).toContain("/articles");
-    expect(arg).toContain("category=rental");
+    expect(arg).toContain("category=glossary");
+    expect(arg).not.toContain("Глоссарий");
   });
 
   it("submits without params if all empty → bare /articles", () => {

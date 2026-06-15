@@ -10,6 +10,13 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
+export interface CategoryOption {
+  /** Значение фильтра — `slug` (бэкенд матчит `Article.category == slug`). */
+  slug: string;
+  /** Подпись для пользователя. */
+  title: string;
+}
+
 interface ArticleFiltersProps {
   initial: {
     category: string;
@@ -17,8 +24,8 @@ interface ArticleFiltersProps {
     language: string;
     tags: string;
   };
-  /** Названия категорий (title) для выпадающего списка. */
-  categories: string[];
+  /** Категории для выпадающего списка (value=slug, label=title). */
+  categories: CategoryOption[];
   /** Аудитория/язык — фильтры только для админ-стаффа. */
   isStaffAdmin: boolean;
 }
@@ -65,8 +72,8 @@ export default function ArticleFilters({
         >
           <option value="">Все категории</option>
           {categories.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
+            <option key={cat.slug} value={cat.slug}>
+              {cat.title}
             </option>
           ))}
         </select>
