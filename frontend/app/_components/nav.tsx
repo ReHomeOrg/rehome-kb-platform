@@ -15,20 +15,29 @@ import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 
-const NAV_LINKS: ReadonlyArray<{ href: string; label: string }> = [
+const NAV_LINKS: ReadonlyArray<{
+  href: string;
+  label: string;
+  authOnly?: boolean;
+}> = [
   { href: "/", label: "Главная" },
   { href: "/articles", label: "Статьи" },
   { href: "/premises", label: "Квартиры" },
   { href: "/documents", label: "Документы" },
   { href: "/chat", label: "Чат" },
-  { href: "/hr", label: "Кадры" },
-  { href: "/webhooks", label: "Webhooks" },
-  { href: "/admin", label: "Admin" },
+  { href: "/hr", label: "Кадры", authOnly: true },
+  { href: "/webhooks", label: "Вебхуки", authOnly: true },
+  { href: "/admin", label: "Админ", authOnly: true },
 ];
 
 export default async function Nav(): Promise<JSX.Element> {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.has(COOKIE_SESSION);
+  // Кадры / Вебхуки / Админ — только для залогиненных (UX; сами страницы
+  // всё равно гейтятся бэкендом по RBAC).
+  const visibleLinks = NAV_LINKS.filter(
+    (link) => !link.authOnly || isLoggedIn,
+  );
 
   return (
     <nav className="border-b border-gray-200 bg-white">
@@ -38,7 +47,7 @@ export default async function Nav(): Promise<JSX.Element> {
             reHome
           </Link>
           <ul className="flex items-center gap-4 text-sm text-gray-700">
-            {NAV_LINKS.map((link) => (
+            {visibleLinks.map((link) => (
               <li key={link.href}>
                 <Link
                   href={link.href}
