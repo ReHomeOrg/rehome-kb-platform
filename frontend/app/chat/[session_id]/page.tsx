@@ -6,18 +6,20 @@
  * Client Component (SSE consume + localStorage token чтение).
  */
 
-import { use, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import MessageThread from "../_components/message-thread";
 import { getSessionToken } from "@/lib/chat-storage";
 
 interface PageProps {
-  params: Promise<{ session_id: string }>;
+  params: { session_id: string };
 }
 
 export default function ChatThreadPage({ params }: PageProps): JSX.Element {
-  // React 19 hook `use()` для unwrap Promise params в Client Component.
-  const { session_id } = use(params);
+  // Next 14 / React 18: в Client Component `params` — обычный объект (НЕ
+  // Promise), читаем напрямую. `use(params)` бросил бы на не-thenable
+  // ("An unsupported type was passed to use()") → error boundary.
+  const { session_id } = params;
   const [token, setToken] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
