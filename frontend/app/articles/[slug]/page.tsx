@@ -5,14 +5,13 @@
  * `not-found.tsx`. Render с react-markdown (без raw HTML).
  */
 
-import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import Nav from "@/app/_components/nav";
 import { getArticle } from "@/lib/api/articles";
 import { ApiError } from "@/lib/api/client";
-import { COOKIE_SESSION } from "@/lib/auth/cookies";
+import { getSessionAccess } from "@/lib/auth/access";
 
 import ArticleMarkdown from "../_components/article-markdown";
 import ArticleQaSection from "../_components/article-qa-section";
@@ -36,8 +35,7 @@ export default async function ArticleDetailPage({
     throw err;
   }
 
-  const cookieStore = await cookies();
-  const isLoggedIn = cookieStore.has(COOKIE_SESSION);
+  const { isLoggedIn, isStaffAdmin } = await getSessionAccess();
 
   return (
     <>
@@ -47,15 +45,17 @@ export default async function ArticleDetailPage({
           <Link href="/articles" className="text-sm text-gray-600 hover:underline">
             ← Назад к списку
           </Link>
-          <div className="flex items-center gap-2">
-            <Link
-              href={`/articles/${encodeURIComponent(article.slug)}/edit`}
-              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-            >
-              Редактировать
-            </Link>
-            <DeleteArticleButton slug={article.slug} />
-          </div>
+          {isStaffAdmin ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/articles/${encodeURIComponent(article.slug)}/edit`}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                Редактировать
+              </Link>
+              <DeleteArticleButton slug={article.slug} />
+            </div>
+          ) : null}
         </div>
         <header>
           <h1 className="text-3xl font-semibold tracking-tight">
@@ -69,14 +69,18 @@ export default async function ArticleDetailPage({
               <dt className="font-medium text-gray-700">Категория</dt>
               <dd>{article.category}</dd>
             </div>
-            <div>
-              <dt className="font-medium text-gray-700">Аудитория</dt>
-              <dd>{article.audience}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-gray-700">Язык</dt>
-              <dd>{article.language}</dd>
-            </div>
+            {isStaffAdmin ? (
+              <>
+                <div>
+                  <dt className="font-medium text-gray-700">Аудитория</dt>
+                  <dd>{article.audience}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-gray-700">Язык</dt>
+                  <dd>{article.language}</dd>
+                </div>
+              </>
+            ) : null}
             <div>
               <dt className="font-medium text-gray-700">Обновлено</dt>
               <dd>{new Date(article.updated_at).toLocaleDateString("ru-RU")}</dd>

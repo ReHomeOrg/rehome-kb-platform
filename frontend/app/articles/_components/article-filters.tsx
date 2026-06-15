@@ -10,6 +10,13 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
+export interface CategoryOption {
+  /** Значение фильтра — `slug` (бэкенд матчит `Article.category == slug`). */
+  slug: string;
+  /** Подпись для пользователя. */
+  title: string;
+}
+
 interface ArticleFiltersProps {
   initial: {
     category: string;
@@ -17,10 +24,16 @@ interface ArticleFiltersProps {
     language: string;
     tags: string;
   };
+  /** Категории для выпадающего списка (value=slug, label=title). */
+  categories: CategoryOption[];
+  /** Аудитория/язык — фильтры только для админ-стаффа. */
+  isStaffAdmin: boolean;
 }
 
 export default function ArticleFilters({
   initial,
+  categories,
+  isStaffAdmin,
 }: ArticleFiltersProps): JSX.Element {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -52,34 +65,43 @@ export default function ArticleFilters({
     >
       <label className="flex flex-col text-sm">
         <span className="text-gray-700">Категория</span>
-        <input
-          type="text"
+        <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          placeholder="rental"
           className="mt-1 rounded border border-gray-300 px-2 py-1"
-        />
+        >
+          <option value="">Все категории</option>
+          {categories.map((cat) => (
+            <option key={cat.slug} value={cat.slug}>
+              {cat.title}
+            </option>
+          ))}
+        </select>
       </label>
-      <label className="flex flex-col text-sm">
-        <span className="text-gray-700">Аудитория</span>
-        <input
-          type="text"
-          value={audience}
-          onChange={(e) => setAudience(e.target.value)}
-          placeholder="tenant"
-          className="mt-1 rounded border border-gray-300 px-2 py-1"
-        />
-      </label>
-      <label className="flex flex-col text-sm">
-        <span className="text-gray-700">Язык</span>
-        <input
-          type="text"
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          placeholder="ru"
-          className="mt-1 rounded border border-gray-300 px-2 py-1"
-        />
-      </label>
+      {isStaffAdmin ? (
+        <>
+          <label className="flex flex-col text-sm">
+            <span className="text-gray-700">Аудитория</span>
+            <input
+              type="text"
+              value={audience}
+              onChange={(e) => setAudience(e.target.value)}
+              placeholder="tenant"
+              className="mt-1 rounded border border-gray-300 px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col text-sm">
+            <span className="text-gray-700">Язык</span>
+            <input
+              type="text"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              placeholder="ru"
+              className="mt-1 rounded border border-gray-300 px-2 py-1"
+            />
+          </label>
+        </>
+      ) : null}
       <label className="flex flex-col text-sm sm:col-span-2">
         <span className="text-gray-700">Теги (через запятую)</span>
         <input
