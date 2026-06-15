@@ -23,7 +23,12 @@ const HAS_MORE: PaginationInfo = { cursor_next: "abc123", has_more: true };
 describe("ArticleList", () => {
   it("renders empty state when no data", () => {
     render(
-      <ArticleList data={[]} pagination={NO_MORE} currentParamsString="" />,
+      <ArticleList
+        data={[]}
+        pagination={NO_MORE}
+        currentParamsString=""
+        isStaffAdmin={false}
+      />,
     );
     expect(screen.getByText(/Ничего не найдено/)).toBeInTheDocument();
   });
@@ -34,11 +39,36 @@ describe("ArticleList", () => {
         data={[sample]}
         pagination={NO_MORE}
         currentParamsString=""
+        isStaffAdmin={false}
       />,
     );
     expect(screen.getByText("Тестовая статья")).toBeInTheDocument();
     expect(screen.getByText(/rental/)).toBeInTheDocument();
     expect(screen.getByText("договор")).toBeInTheDocument();
+  });
+
+  it("скрывает аудиторию в превью для обычного пользователя", () => {
+    render(
+      <ArticleList
+        data={[sample]}
+        pagination={NO_MORE}
+        currentParamsString=""
+        isStaffAdmin={false}
+      />,
+    );
+    expect(screen.queryByText(/tenant/)).not.toBeInTheDocument();
+  });
+
+  it("показывает аудиторию в превью админ-стаффу", () => {
+    render(
+      <ArticleList
+        data={[sample]}
+        pagination={NO_MORE}
+        currentParamsString=""
+        isStaffAdmin={true}
+      />,
+    );
+    expect(screen.getByText(/tenant/)).toBeInTheDocument();
   });
 
   it("renders next page link when has_more", () => {
@@ -47,6 +77,7 @@ describe("ArticleList", () => {
         data={[sample]}
         pagination={HAS_MORE}
         currentParamsString="category=rental"
+        isStaffAdmin={false}
       />,
     );
     const nextLink = screen.getByText(/Следующая страница/);
@@ -62,6 +93,7 @@ describe("ArticleList", () => {
         data={[sample]}
         pagination={NO_MORE}
         currentParamsString=""
+        isStaffAdmin={false}
       />,
     );
     expect(screen.queryByText(/Следующая страница/)).not.toBeInTheDocument();

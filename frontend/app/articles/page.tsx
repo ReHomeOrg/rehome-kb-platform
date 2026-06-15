@@ -9,9 +9,29 @@ import Link from "next/link";
 
 import Nav from "@/app/_components/nav";
 import { listArticles } from "@/lib/api/articles";
+import { listCategories } from "@/lib/api/categories";
+import { getSessionAccess } from "@/lib/auth/access";
+import type { Category } from "@/lib/api/types";
 
-import ArticleFilters from "./_components/article-filters";
+import ArticleFilters, {
+  type CategoryOption,
+} from "./_components/article-filters";
 import ArticleList from "./_components/article-list";
+
+/**
+ * Плоский список категорий для выпадающего фильтра. Значение опции — `slug`
+ * (бэкенд фильтрует `Article.category == categories.slug`), подпись — `title`.
+ */
+function flattenCategories(categories: Category[]): CategoryOption[] {
+  const out: CategoryOption[] = [];
+  for (const cat of categories) {
+    out.push({ slug: cat.slug, title: cat.title });
+    if (cat.children.length > 0) {
+      out.push(...flattenCategories(cat.children));
+    }
+  }
+  return out.sort((a, b) => a.title.localeCompare(b.title, "ru"));
+}
 
 interface PageProps {
   searchParams: Promise<{
@@ -30,6 +50,8 @@ export default async function ArticlesPage({
   const params = await searchParams;
   const limit = params.limit ? Number(params.limit) : undefined;
 
+  const { isStaffAdmin } = await getSessionAccess();
+
   const response = await listArticles({
     category: params.category,
     audience: params.audience,
@@ -38,6 +60,16 @@ export default async function ArticlesPage({
     cursor: params.cursor,
     limit: typeof limit === "number" && !Number.isNaN(limit) ? limit : undefined,
   });
+
+  // Список категорий для выпадающего фильтра. Сбой не должен ронять
+  // страницу — деградируем до пустого списка (фильтр останется без опций).
+  let categoryOptions: CategoryOption[] = [];
+  try {
+    const categories = await listCategories();
+    categoryOptions = flattenCategories(categories.data);
+  } catch {
+    categoryOptions = [];
+  }
 
   // currentParamsString — все фильтры БЕЗ cursor (для "next page" link).
   const queryWithoutCursor = new URLSearchParams();
@@ -57,12 +89,14 @@ export default async function ArticlesPage({
               База знаний reHome — справочник, политики, FAQ и инструкции.
             </p>
           </div>
-          <Link
-            href="/articles/new"
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            + Создать
-          </Link>
+          {isStaffAdmin ? (
+            <Link
+              href="/articles/new"
+              className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              + Создать
+            </Link>
+          ) : null}
         </header>
         <ArticleFilters
           initial={{
@@ -71,11 +105,14 @@ export default async function ArticlesPage({
             language: params.language ?? "",
             tags: params.tags ?? "",
           }}
+          categories={categoryOptions}
+          isStaffAdmin={isStaffAdmin}
         />
         <ArticleList
           data={response.data}
           pagination={response.pagination}
           currentParamsString={queryWithoutCursor.toString()}
+          isStaffAdmin={isStaffAdmin}
         />
       </main>
     </>

@@ -20,6 +20,9 @@ export interface JwtClaims {
   acr?: string | number;
   /** OIDC nonce — replay-protection (must match nonce sent в `/auth`). */
   nonce?: string;
+  /** Keycloak realm roles, напр. `{ roles: ["staff_admin"] }`. Только для
+   * UI-видимости (скрытие кнопок) — авторизацию enforce'ит backend. */
+  realm_access?: { roles?: string[] };
 }
 
 function _b64urlDecode(str: string): string | null {
