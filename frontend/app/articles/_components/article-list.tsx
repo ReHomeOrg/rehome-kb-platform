@@ -10,12 +10,15 @@ interface ArticleListProps {
   data: ArticleSummary[];
   pagination: PaginationInfo;
   currentParamsString: string; // URL query без cursor, для построения "next page" link
+  /** Аудиторию в превью показываем только админ-стаффу. */
+  isStaffAdmin: boolean;
 }
 
 export default function ArticleList({
   data,
   pagination,
   currentParamsString,
+  isStaffAdmin,
 }: ArticleListProps): JSX.Element {
   if (data.length === 0) {
     return (
@@ -40,7 +43,8 @@ export default function ArticleList({
               {article.title}
             </Link>
             <p className="mt-1 text-xs text-gray-500">
-              {article.category} · {article.audience} · {article.status}
+              {article.category}
+              {isStaffAdmin ? ` · ${article.audience}` : ""} · {article.status}
             </p>
             {article.tags.length > 0 ? (
               <p className="mt-2 flex flex-wrap gap-1 text-xs">

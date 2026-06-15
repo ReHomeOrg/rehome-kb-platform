@@ -13,6 +13,7 @@ import Link from "next/link";
 import Nav from "@/app/_components/nav";
 import { listPremises, searchPremises } from "@/lib/api/premises";
 import { ApiError } from "@/lib/api/client";
+import { getSessionAccess } from "@/lib/auth/access";
 import type {
   PremisesSearchHit,
   PremisesSummary,
@@ -46,6 +47,32 @@ function searchHitsToSummaries(hits: PremisesSearchHit[]): PremisesSummary[] {
 export default async function PremisesPage({
   searchParams,
 }: PageProps): Promise<JSX.Element> {
+  const { isLoggedIn } = await getSessionAccess();
+
+  // Каталог квартир доступен только авторизованным — иначе показываем
+  // приглашение войти и НЕ обращаемся к API (бэкенд тоже гейтит доступ).
+  if (!isLoggedIn) {
+    return (
+      <>
+        <Nav />
+        <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-8">
+          <h1 className="text-2xl font-semibold tracking-tight">Квартиры</h1>
+          <div className="rounded-md border border-gray-200 bg-gray-50 p-6 text-center">
+            <p className="text-sm text-gray-700">
+              Для просмотра, пожалуйста, авторизуйтесь
+            </p>
+            <Link
+              href="/login"
+              className="mt-4 inline-block rounded-md bg-gray-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              Войти
+            </Link>
+          </div>
+        </main>
+      </>
+    );
+  }
+
   const params = await searchParams;
   const query = (params.q ?? "").trim();
   const limit = params.limit ? Number(params.limit) : undefined;
