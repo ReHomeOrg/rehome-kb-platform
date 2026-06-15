@@ -59,6 +59,18 @@ describe("ArticleList", () => {
     expect(screen.queryByText(/tenant/)).not.toBeInTheDocument();
   });
 
+  it("не показывает статус (PUBLISHED) в превью", () => {
+    render(
+      <ArticleList
+        data={[sample]}
+        pagination={NO_MORE}
+        currentParamsString=""
+        isStaffAdmin={true}
+      />,
+    );
+    expect(screen.queryByText(/PUBLISHED/)).not.toBeInTheDocument();
+  });
+
   it("показывает аудиторию в превью админ-стаффу", () => {
     render(
       <ArticleList
