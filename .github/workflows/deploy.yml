@@ -1,12 +1,10 @@
 name: Build & Deploy KB Platform
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - ".github/workflows/deploy.yml"
+  # ТОЛЬКО ручной запуск (решение Архитектора 2026-06-18 при переводе репо в
+  # public): авто-триггер на push:main убран, чтобы публичный репо + бесплатные
+  # Actions не деплоили боевой rehome.one на каждый merge. Прод-выкат — явной
+  # кнопкой workflow_dispatch когда нужно.
   workflow_dispatch:
 
 env:
