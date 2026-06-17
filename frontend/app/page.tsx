@@ -15,6 +15,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
+import { BASE_PATH } from "@/lib/base-path";
 import { listCategories } from "@/lib/api/categories";
 import { listArticles } from "@/lib/api/articles";
 import type { ArticleSummary, Category } from "@/lib/api/types";
@@ -126,7 +127,7 @@ export default async function Home(): Promise<JSX.Element> {
           </p>
         </div>
         {isLoggedIn ? (
-          <form action="/help/api/auth/logout" method="post">
+          <form action={`${BASE_PATH}/api/auth/logout`} method="post">
             <button
               type="submit"
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"

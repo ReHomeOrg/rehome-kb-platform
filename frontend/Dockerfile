@@ -46,6 +46,12 @@ COPY package.json package-lock.json next.config.mjs \
 COPY app ./app
 COPY lib ./lib
 
+# basePath приложения (см. lib/base-path.ts). Дефолт "/help" (Selectel);
+# для поддомен-деплоя собирать с `--build-arg NEXT_PUBLIC_BASE_PATH=`.
+# NEXT_PUBLIC_* инлайнится в бандл во время `next build`.
+ARG NEXT_PUBLIC_BASE_PATH=/help
+ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
+
 # Next.js telemetry — отключаем (privacy + slight perf).
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -56,10 +62,13 @@ RUN npm run build
 # ============================================================================
 FROM ${NODE_IMAGE} AS runtime
 
+# Re-declare (ARG не пересекает stage-границы) — нужен для healthcheck-пути.
+ARG NEXT_PUBLIC_BASE_PATH=/help
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
 
 # `node:bookworm-slim` ships with user `node` (uid 1000) ready-to-use —
 # не создаём дубликат. uid 1000 совпадает с k8s securityContext.runAsUser:1000.
@@ -86,7 +95,7 @@ EXPOSE 3000
 # когда app routing работает. `node:slim` имеет node, не имеет curl —
 # inline HTTP check через node http module.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-    CMD node -e "require('http').get('http://127.0.0.1:3000/help', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
+    CMD node -e "const b=process.env.NEXT_PUBLIC_BASE_PATH ?? '/help'; require('http').get('http://127.0.0.1:3000'+(b||'/'), r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
 
 # Next.js standalone server entry point.
 CMD ["node", "server.js"]
