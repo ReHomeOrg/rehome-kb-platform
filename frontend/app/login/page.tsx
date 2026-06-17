@@ -2,6 +2,8 @@
  * Login page — минимальный UI с одной кнопкой redirect на /api/auth/login.
  */
 
+import { BASE_PATH } from "@/lib/base-path";
+
 export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
@@ -13,7 +15,7 @@ export default function LoginPage() {
       </p>
       <div className="mt-8">
         <a
-          href="/help/api/auth/login"
+          href={`${BASE_PATH}/api/auth/login`}
           className="inline-flex items-center rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
         >
           Войти через reHome SSO

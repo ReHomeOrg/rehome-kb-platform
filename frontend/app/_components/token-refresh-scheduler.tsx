@@ -27,6 +27,8 @@
 
 import { useEffect } from "react";
 
+import { BASE_PATH } from "@/lib/base-path";
+
 const LEAD_TIME_SECONDS = 60;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutes safety cap
@@ -39,7 +41,7 @@ type Msg = { type: "heartbeat"; tabId: string };
 
 async function _fetchExp(): Promise<number | null> {
   try {
-    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const prefix = BASE_PATH;
     const r = await fetch(`${prefix}/api/auth/session-info`, {
       cache: "no-store",
     });
@@ -53,7 +55,7 @@ async function _fetchExp(): Promise<number | null> {
 
 async function _doRefresh(): Promise<boolean> {
   try {
-    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const prefix = BASE_PATH;
     const r = await fetch(`${prefix}/api/auth/refresh`, {
       method: "POST",
       cache: "no-store",

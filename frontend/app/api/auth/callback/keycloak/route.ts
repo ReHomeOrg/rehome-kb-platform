@@ -19,6 +19,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
+import { BASE_PATH } from "@/lib/base-path";
 import { getAuthConfig } from "@/lib/auth/config";
 import {
   COOKIE_OAUTH_STATE,
@@ -62,7 +63,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // Чистим временные cookies и устанавливаем session + refresh cookies.
-  const response = NextResponse.redirect(new URL("/help", request.url));
+  // Относительный Location (а не `new URL(..., request.url)`): за nginx-прокси
+  // у standalone-сервера request.url несёт внутренний HOSTNAME (0.0.0.0:3000),
+  // и абсолютный redirect увёл бы браузер в никуда. Относительный путь браузер
+  // резолвит на свой origin. Цель — корень приложения = basePath ("/" если пуст).
+  const response = new NextResponse(null, {
+    status: 303,
+    headers: { Location: BASE_PATH || "/" },
+  });
   response.cookies.set(
     COOKIE_SESSION,
     tokens.access_token,

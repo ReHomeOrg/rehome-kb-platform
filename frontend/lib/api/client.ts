@@ -14,6 +14,7 @@
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 import { getBackendBaseUrl } from "@/lib/env";
+import { BASE_PATH } from "@/lib/base-path";
 
 /**
  * HTTP error от API. Содержит status code + parsed body (если был JSON).
@@ -63,7 +64,7 @@ function buildUrl(path: string): string {
     return `${getBackendBaseUrl()}${path}`;
   }
   // Browser → через proxy `/api/kb<path>` (path начинается с `/api/v1/...`)
-  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  const prefix = BASE_PATH;
   return `${prefix}/api/kb${path}`;
 }
 
@@ -127,7 +128,7 @@ async function _doFetch<T>(
 
 async function _tryRefresh(): Promise<boolean> {
   try {
-    const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+    const prefix = BASE_PATH;
     const r = await fetch(`${prefix}/api/auth/refresh`, {
       method: "POST",
       cache: "no-store",

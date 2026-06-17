@@ -11,9 +11,10 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders SSO button that links to /help/api/auth/login", () => {
+  it("renders SSO button that links to the basePath-aware login route", () => {
     render(<LoginPage />);
     const link = screen.getByRole("link", { name: /reHome SSO/i });
-    expect(link).toHaveAttribute("href", "/help/api/auth/login");
+    // В тестовой среде NEXT_PUBLIC_BASE_PATH="" (см. vitest.config) → без префикса.
+    expect(link).toHaveAttribute("href", "/api/auth/login");
   });
 });

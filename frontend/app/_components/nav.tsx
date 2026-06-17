@@ -14,6 +14,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
+import { BASE_PATH } from "@/lib/base-path";
 
 const NAV_LINKS: ReadonlyArray<{
   href: string;
@@ -61,7 +62,7 @@ export default async function Nav(): Promise<JSX.Element> {
         </div>
         <div className="flex items-center gap-2">
           {isLoggedIn ? (
-            <form action="/help/api/auth/logout" method="post">
+            <form action={`${BASE_PATH}/api/auth/logout`} method="post">
               <button
                 type="submit"
                 className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"

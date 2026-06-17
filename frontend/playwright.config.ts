@@ -29,7 +29,9 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   // Базовый URL — Next dev server. Override через PLAYWRIGHT_BASE_URL.
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000/help/",
+    baseURL:
+      process.env.PLAYWRIGHT_BASE_URL ??
+      `http://localhost:3000${process.env.NEXT_PUBLIC_BASE_PATH ?? "/help"}/`,
     // Trace на retry — debugging help'er.
     trace: "on-first-retry",
     // Default timeout per action — 10s достаточно для local;
@@ -49,7 +51,7 @@ export default defineConfig({
   // spawn если localhost:3000 уже занят (для local iteration).
   webServer: {
     command: "npm run dev",
-    url: "http://localhost:3000/help/login",
+    url: `http://localhost:3000${process.env.NEXT_PUBLIC_BASE_PATH ?? "/help"}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
