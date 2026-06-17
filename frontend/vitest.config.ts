@@ -8,6 +8,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    // basePath в юнит-тестах — пустой (поддомен-режим): API-клиенты бьют в
+    // `/api/kb` без префикса (как ожидают моки fetch), а basePath-зависимые
+    // компоненты рендерят пути без `/help`. Прод-значение задаётся при сборке.
+    env: { NEXT_PUBLIC_BASE_PATH: "" },
     // E2E tests (Playwright) живут в `e2e/` — отдельный runner;
     // vitest их не подбирает. Default Vitest matcher — `*.test.*`,
     // а e2e использует `*.spec.*` — fail-safe overlap.

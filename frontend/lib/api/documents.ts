@@ -8,6 +8,7 @@
  */
 
 import { ApiError, apiFetch } from "./client";
+import { BASE_PATH } from "@/lib/base-path";
 import type {
   Document,
   DocumentCategory,
@@ -55,7 +56,7 @@ export function documentFileDownloadHref(
   documentId: string,
   format: DocumentFileFormat,
 ): string {
-  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  const prefix = BASE_PATH;
   return `${prefix}/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files/${encodeURIComponent(format)}`;
 }
 
@@ -87,7 +88,7 @@ export async function uploadDocumentFile(
   body.append("format", format);
   body.append("version", version);
 
-  const prefix = typeof process !== "undefined" && process.env.VITEST ? "" : "/help";
+  const prefix = BASE_PATH;
   const url = `${prefix}/api/kb/api/v1/documents/${encodeURIComponent(documentId)}/files`;
   const response = await fetch(url, { method: "POST", body });
   if (!response.ok) {

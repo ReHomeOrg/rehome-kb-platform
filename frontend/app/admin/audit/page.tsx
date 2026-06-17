@@ -8,6 +8,7 @@
 import Nav from "@/app/_components/nav";
 import { listAudit, type AuditFilters } from "@/lib/api/audit";
 import { ApiError } from "@/lib/api/client";
+import { BASE_PATH } from "@/lib/base-path";
 
 import AuditFiltersBar from "./_components/audit-filters";
 import AuditTable from "./_components/audit-table";
@@ -103,7 +104,7 @@ export default async function AuditPage({
               triggers download через Content-Disposition attachment.
               Anti-DoS hard cap 10000 rows backend-side. */}
           <a
-            href={`/help/api/kb/api/v1/audit-log/export.csv?${baseParams.toString()}`}
+            href={`${BASE_PATH}/api/kb/api/v1/audit-log/export.csv?${baseParams.toString()}`}
             className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
           >
             ↓ Экспорт CSV
