@@ -1,8 +1,9 @@
 /**
- * /articles — список статей с фильтрами + cursor пагинацией.
+ * /articles — статьи списком, сгруппированным по категориям, с нумерацией.
  *
- * Server Component. Reads URL search params → calls `listArticles()`
- * → renders ArticleList + ArticleFilters.
+ * Server Component. Reads URL search params → fetches ВСЕ статьи (с учётом
+ * фильтров, листая cursor до конца) → renders ArticleCategoryList +
+ * ArticleFilters.
  */
 
 import Link from "next/link";
@@ -11,12 +12,16 @@ import Nav from "@/app/_components/nav";
 import { listArticles } from "@/lib/api/articles";
 import { listCategories } from "@/lib/api/categories";
 import { getSessionAccess } from "@/lib/auth/access";
-import type { Category } from "@/lib/api/types";
+import type { ArticleSummary, Category } from "@/lib/api/types";
 
 import ArticleFilters, {
   type CategoryOption,
 } from "./_components/article-filters";
-import ArticleList from "./_components/article-list";
+import ArticleCategoryList from "./_components/article-category-list";
+
+/** Размер страницы при выборке всех статей; cap на число страниц. */
+const FETCH_PAGE_SIZE = 100;
+const MAX_PAGES = 50;
 
 /**
  * Плоский список категорий для выпадающего фильтра. Значение опции — `slug`
@@ -39,8 +44,6 @@ interface PageProps {
     audience?: string;
     language?: string;
     tags?: string;
-    cursor?: string;
-    limit?: string;
   }>;
 }
 
@@ -48,35 +51,39 @@ export default async function ArticlesPage({
   searchParams,
 }: PageProps): Promise<JSX.Element> {
   const params = await searchParams;
-  const limit = params.limit ? Number(params.limit) : undefined;
 
   const { isStaffAdmin } = await getSessionAccess();
 
-  const response = await listArticles({
-    category: params.category,
-    audience: params.audience,
-    language: params.language,
-    tags: params.tags,
-    cursor: params.cursor,
-    limit: typeof limit === "number" && !Number.isNaN(limit) ? limit : undefined,
-  });
-
-  // Список категорий для выпадающего фильтра. Сбой не должен ронять
-  // страницу — деградируем до пустого списка (фильтр останется без опций).
-  let categoryOptions: CategoryOption[] = [];
-  try {
-    const categories = await listCategories();
-    categoryOptions = flattenCategories(categories.data);
-  } catch {
-    categoryOptions = [];
+  // Все статьи (с учётом фильтров) — для группировки по категориям. Листаем
+  // cursor до конца; MAX_PAGES — backstop на аномально большую базу.
+  const articles: ArticleSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const response = await listArticles({
+      category: params.category,
+      audience: params.audience,
+      language: params.language,
+      tags: params.tags,
+      cursor,
+      limit: FETCH_PAGE_SIZE,
+    });
+    articles.push(...response.data);
+    if (!response.pagination.has_more || !response.pagination.cursor_next) {
+      break;
+    }
+    cursor = response.pagination.cursor_next;
   }
 
-  // currentParamsString — все фильтры БЕЗ cursor (для "next page" link).
-  const queryWithoutCursor = new URLSearchParams();
-  if (params.category) queryWithoutCursor.set("category", params.category);
-  if (params.audience) queryWithoutCursor.set("audience", params.audience);
-  if (params.language) queryWithoutCursor.set("language", params.language);
-  if (params.tags) queryWithoutCursor.set("tags", params.tags);
+  // Категории (дерево) — для группировки и для выпадающего фильтра. Сбой не
+  // должен ронять страницу — деградируем до пустого списка.
+  let categoriesTree: Category[] = [];
+  try {
+    const categories = await listCategories();
+    categoriesTree = categories.data;
+  } catch {
+    categoriesTree = [];
+  }
+  const categoryOptions = flattenCategories(categoriesTree);
 
   return (
     <>
@@ -108,10 +115,9 @@ export default async function ArticlesPage({
           categories={categoryOptions}
           isStaffAdmin={isStaffAdmin}
         />
-        <ArticleList
-          data={response.data}
-          pagination={response.pagination}
-          currentParamsString={queryWithoutCursor.toString()}
+        <ArticleCategoryList
+          articles={articles}
+          categories={categoriesTree}
           isStaffAdmin={isStaffAdmin}
         />
       </main>
