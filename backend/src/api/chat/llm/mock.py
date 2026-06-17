@@ -49,9 +49,10 @@ class MockProvider(LLMProvider):
             content = f"Mock response: {snippet}"
         else:
             import re
+
             # Парсим ссылки на статьи из system_prompt:
             # [1] **Договор найма** (slug: dogovor-najma, chunk 0):
-            matches = re.findall(r'\[(\d+)\]\s+\*\*(.*?)\*\*\s+\(slug:\s*([^\s,)]+)', system_prompt)
+            matches = re.findall(r"\[(\d+)\]\s+\*\*(.*?)\*\*\s+\(slug:\s*([^\s,)]+)", system_prompt)
             if matches:
                 # Убираем дубликаты по slug
                 seen_slugs = set()
@@ -65,7 +66,8 @@ class MockProvider(LLMProvider):
                 content = (
                     "Здравствуйте! Я ваш AI-ассистент платформы reHome. "
                     "Нашёл для вас полезные статьи в нашей базе знаний:\n\n"
-                    + "\n".join(bullet_points) + "\n\n"
+                    + "\n".join(bullet_points)
+                    + "\n\n"
                     + "Вы можете перейти к ним по ссылкам под этим сообщением."
                 )
             else:

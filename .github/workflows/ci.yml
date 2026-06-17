@@ -12,7 +12,7 @@ jobs:
   # ============================================================
   backend:
     name: Backend (Python)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: backend
@@ -69,7 +69,7 @@ jobs:
   # ============================================================
   rag-smoke:
     name: RAG smoke (HF embeddings + eval CLI)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: backend
@@ -129,7 +129,7 @@ jobs:
   # ============================================================
   frontend:
     name: Frontend (Next.js)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: frontend
@@ -171,7 +171,7 @@ jobs:
   # ============================================================
   e2e:
     name: E2E (Playwright smoke)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: frontend
@@ -225,7 +225,7 @@ jobs:
   # ============================================================
   openapi:
     name: OpenAPI spec validation
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -267,11 +267,21 @@ jobs:
   # ============================================================
   security:
     name: Security scan
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Toolchain для pip-audit / npm audit — на self-hosted runner'е нет
+      # предустановленных pip/node (в отличие от GitHub-hosted ubuntu-latest).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       # TruffleHog — бесплатен для personal и org аккаунтов (в отличие от
       # gitleaks-action@v2, требующего GITLEAKS_LICENSE для org). Пиннинг
@@ -303,7 +313,7 @@ jobs:
   # ============================================================
   integration:
     name: Integration (Keycloak)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     # ADR-0009: compose теперь требует `${VAR:?required}` для secrets — без
     # этих env vars даже `compose down -v` падает при попытке распарсить YAML.
     # CI integration job — isolated environment, hardcoded dev-only creds OK
@@ -392,7 +402,7 @@ jobs:
   # ============================================================
   anti-crutches:
     name: Anti-crutches checks
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
 
