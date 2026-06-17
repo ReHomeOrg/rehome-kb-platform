@@ -273,6 +273,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Toolchain для pip-audit / npm audit — на self-hosted runner'е нет
+      # предустановленных pip/node (в отличие от GitHub-hosted ubuntu-latest).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       # TruffleHog — бесплатен для personal и org аккаунтов (в отличие от
       # gitleaks-action@v2, требующего GITLEAKS_LICENSE для org). Пиннинг
       # на конкретный тег вместо @main — supply-chain hygiene.
