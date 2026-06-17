@@ -2,8 +2,9 @@
 
 Покрывает:
 - POST → 200, assistant ответ записан в БД.
-- Conversation continuity: 2nd POST включает history в LLM call (косвенно
-  через mock provider echo last user).
+- Conversation continuity: оба хода сохранены (history передаётся в LLM
+  call; mock-провайдер в RAG-режиме больше не echo'ит last user —
+  continuity проверяем по числу сообщений в сессии).
 - POST без token → 404 mask.
 - Accept: text/event-stream → 406.
 
@@ -63,8 +64,10 @@ def test_post_message_e2e_creates_assistant_response(
     assert r2.status_code == 200, r2.text
     body = r2.json()
     assert body["role"] == "assistant"
-    # MockProvider echo's last user message
-    assert "Какой сервисный платёж?" in body["content"]
+    # MockProvider в RAG-пайплайне отдаёт детерминированный ответ
+    # AI-ассистента (echo-контракт снят при переходе на RAG; в CI БД пустая
+    # → ветка «не нашлось статей»). Проверяем, что ассистент реально ответил.
+    assert "AI-ассистент" in body["content"]
     assert body["token_count"] > 0
     assert body["duration_ms"] >= 0
 
@@ -84,8 +87,9 @@ def test_post_message_e2e_creates_assistant_response(
 def test_post_message_continuity_includes_history(
     kb_client: httpx.Client, cleanup_sessions: list[str]
 ) -> None:
-    """2nd POST: assistant content всё ещё echo's последнего user message
-    (последнее, что мы прислали), но history передана в LLM call."""
+    """2nd POST: оба хода сохраняются; continuity проверяем по числу
+    сообщений в сессии (history передаётся в LLM call, но mock-провайдер
+    в RAG-режиме больше не echo'ит — см. src/api/chat/llm/mock.py)."""
     r1 = kb_client.post("/api/v1/chat/sessions")
     session_id = r1.json()["id"]
     cleanup_sessions.append(session_id)
@@ -103,8 +107,7 @@ def test_post_message_continuity_includes_history(
         headers=auth,
     )
     assert r3.status_code == 200
-    # MockProvider всегда echo's последний user message (второй)
-    assert "второй вопрос" in r3.json()["content"]
+    assert "AI-ассистент" in r3.json()["content"]
 
     # Verify GET session detail возвращает 4 messages (2 user + 2 assistant)
     r4 = kb_client.get(
