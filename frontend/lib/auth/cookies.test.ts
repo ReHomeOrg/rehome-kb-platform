@@ -18,8 +18,8 @@ describe("auth/cookies constants", () => {
     expect(COOKIE_OAUTH_STATE).toBe("kb_oauth_state");
   });
 
-  it("short flow TTL = 5 минут", () => {
-    expect(SHORT_FLOW_MAX_AGE_SECONDS).toBe(300);
+  it("short flow TTL = 30 минут (== Keycloak accessCodeLifespanLogin)", () => {
+    expect(SHORT_FLOW_MAX_AGE_SECONDS).toBe(1800);
   });
 
   it("refresh TTL = 30 дней", () => {

@@ -10,8 +10,13 @@ export const COOKIE_REFRESH = "kb_refresh";
 export const COOKIE_PKCE_VERIFIER = "kb_pkce_verifier";
 export const COOKIE_OAUTH_STATE = "kb_oauth_state";
 
-/** TTL для коротких login-flow cookies (state, verifier) — 5 минут. */
-export const SHORT_FLOW_MAX_AGE_SECONDS = 300;
+/** TTL для login-flow cookies (state, PKCE verifier) — 30 минут.
+ *
+ * ДОЛЖНО совпадать с Keycloak `accessCodeLifespanLogin` (login timeout, 1800с).
+ * Если cookie живёт меньше, чем пользователь вводит креды на странице Keycloak
+ * (менеджер паролей, первый вход, MFA), то к моменту колбэка `kb_oauth_state`
+ * уже истекла → проверка state падает с "Invalid state" (HTTP 400). */
+export const SHORT_FLOW_MAX_AGE_SECONDS = 1800;
 
 /** Refresh token cookie TTL — 30 дней. Keycloak default refresh expiry
  * обычно 30 дней; cookie не должна жить дольше серверного токена. */
