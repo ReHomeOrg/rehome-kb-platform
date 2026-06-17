@@ -1,7 +1,7 @@
 """audit_log composite index for keyset pagination (#343, follow-up)
 
 Revision ID: 0028_audit_log_keyset_index
-Revises: 0027_vault_emergency_access
+Revises: 0024_system_config
 Create Date: 2026-05-26 01:00:00.000000
 
 Composite index `ix_audit_log_created_at_id_desc` на `(created_at DESC,
@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "0028_audit_log_keyset_index"
-down_revision: str | None = "0027_vault_emergency_access"
+down_revision: str | None = "0024_system_config"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

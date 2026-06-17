@@ -38,14 +38,6 @@ from src.api.premises.router import router as premises_router
 from src.api.search.router import router as search_router
 from src.api.tags.router import router as tags_router
 from src.api.v1 import auth, health
-from src.api.vault.emergency_router import (
-    admin_router as vault_emergency_admin_router,
-)
-from src.api.vault.emergency_router import (
-    owner_router as vault_emergency_owner_router,
-)
-from src.api.vault.fido2_router import router as vault_fido2_router
-from src.api.vault.router import router as vault_router
 from src.api.webhooks.router import router as webhooks_router
 
 router = APIRouter(prefix="/api/v1")
@@ -68,10 +60,6 @@ router.include_router(chat_unanswered_admin_router)
 router.include_router(search_router)
 router.include_router(premises_router)
 router.include_router(hr_router)
-router.include_router(vault_router)
-router.include_router(vault_fido2_router)
-router.include_router(vault_emergency_owner_router)
-router.include_router(vault_emergency_admin_router)
 router.include_router(webhooks_router)
 router.include_router(admin_router)
 router.include_router(admin_users_router)

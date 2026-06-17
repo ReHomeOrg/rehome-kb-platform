@@ -53,9 +53,6 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
           <option value="document">document</option>
           <option value="premises_card">premises_card</option>
           <option value="hr_employee">hr_employee</option>
-          <option value="vault_secret">vault_secret</option>
-          <option value="vault_user">vault_user</option>
-          <option value="vault_group">vault_group</option>
           <option value="webhook">webhook</option>
           <option value="chat_session">chat_session</option>
           <option value="chat_unanswered">chat_unanswered</option>

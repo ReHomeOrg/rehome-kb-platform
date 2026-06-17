@@ -81,35 +81,6 @@ groups:
           description: "Outbox набирает retries. Subscribers likely down."
 
   # -------------------------------------------------------------------
-  - name: vault
-    interval: 30s
-    rules:
-      - alert: VaultUnlockFailureSpike
-        # > 10 failed unlock'ов за 5 минут — potential brute-force.
-        # ФЗ-152 §17.1 security_incident candidate.
-        expr: sum(increase(kb_vault_unlock_total{result="failed"}[5m])) > 10
-        for: 0m  # fire immediately (brute force signal)
-        labels:
-          severity: critical
-          component: vault
-          security: brute_force
-        annotations:
-          summary: "Vault failed-unlock spike: >10 за 5m"
-          description: "{{ $value }} failed unlock attempts. Investigate IP/user pattern; create security_incident."
-
-      - alert: VaultUnusualSecretAccessVolume
-        # Anomaly: > 100 secret reads/min от одного user normally.
-        # Catch insider threat / compromised credentials.
-        expr: sum by (action) (rate(kb_vault_secret_access_total{action="read"}[5m])) > 1.67
-        for: 10m
-        labels:
-          severity: warning
-          component: vault
-        annotations:
-          summary: "Vault secret read rate >100/min sustained"
-          description: "Possible automation / leak. Audit log review."
-
-  # -------------------------------------------------------------------
   - name: chat
     interval: 30s
     rules:
@@ -174,15 +145,6 @@ groups:
         annotations:
           summary: "popular_query worker: >5 errors за час"
           description: "Worker scan failing. Restart / check DB connectivity."
-
-      - alert: VaultRemindersWorkerErrors
-        expr: sum(increase(kb_vault_reminders_scan_errors_total[1h])) > 5
-        for: 0m
-        labels:
-          severity: warning
-          component: workers
-        annotations:
-          summary: "vault_reminders worker: >5 errors за час"
 
       - alert: IndexerBacklog
         # > 100 pending articles 30+ минут — indexer stuck.

@@ -229,34 +229,6 @@ class Settings(BaseSettings):
     # backend transition'ит на новый primary key. None = только primary.
     hr_encryption_key_legacy: str | None = Field(default=None, alias="HR_ENCRYPTION_KEY_LEGACY")
 
-    # FIDO2 / WebAuthn settings (ADR-0022 A). RP = Relying Party.
-    # `rp_id` должен matched domain'у браузера (origin check); `localhost`
-    # для local dev, production выставляет `rehome.one`. Изменение RP_ID
-    # инвалидирует все registered keys (security feature, не bug).
-    webauthn_rp_id: str = Field(default="localhost", alias="WEBAUTHN_RP_ID")
-    webauthn_rp_name: str = Field(default="reHome Vault", alias="WEBAUTHN_RP_NAME")
-    # Origin для assertion validation. Comma-separated если multiple
-    # (e.g. `https://rehome.one,https://app.rehome.one`).
-    webauthn_origins: str = Field(
-        default="http://localhost:3000",
-        alias="WEBAUTHN_ORIGINS",
-    )
-    # `preferred` accept'ит auth UV если authenticator supports; не
-    # требует — иначе users без biometric authenticator locked out.
-    webauthn_user_verification: Literal["required", "preferred", "discouraged"] = Field(
-        default="preferred",
-        alias="WEBAUTHN_USER_VERIFICATION",
-    )
-    # Max FIDO2 credentials per vault user. ADR-0022 §approve note: 5 = primary
-    # + 4 backups. Env-overridable для realms с different threat models.
-    # Frontend mirror через NEXT_PUBLIC_VAULT_MAX_FIDO2_KEYS (#339).
-    vault_fido2_max_keys_per_user: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        alias="VAULT_FIDO2_MAX_KEYS_PER_USER",
-    )
-
     # PD requests OVERDUE worker (ФЗ-152 §15 SLA enforcement, #340).
     # Periodic check sets `personal_data_requests.status = OVERDUE` для
     # NEW/IN_PROGRESS заявок с `due_at < now`. Hourly default — granularity
@@ -325,12 +297,6 @@ class Settings(BaseSettings):
     def keycloak_jwks_url(self) -> str:
         """JWKS endpoint для получения публичных ключей realm."""
         return f"{self.keycloak_issuer}/protocol/openid-connect/certs"
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def webauthn_origin_list(self) -> tuple[str, ...]:
-        """Parsed origin list (comma-separated) для WebAuthn validation."""
-        return tuple(o.strip() for o in self.webauthn_origins.split(",") if o.strip())
 
 
 def get_settings() -> Settings:

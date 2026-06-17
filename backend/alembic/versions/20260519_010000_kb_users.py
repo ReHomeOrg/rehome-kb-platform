@@ -1,7 +1,7 @@
 """kb_users — staff registry для admin module (#230, ТЗ OpenAPI §KbUser)
 
 Revision ID: 0024_kb_users
-Revises: 0023_vault_wraps_multi_user
+Revises: 0022_collaborator_reviews
 Create Date: 2026-05-19 01:00:00.000000
 
 Registry of staff users with kb-module roles (staff_support / staff_legal /
@@ -27,7 +27,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0024_kb_users"
-down_revision: str | None = "0023_vault_wraps_multi_user"
+down_revision: str | None = "0022_collaborator_reviews"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
