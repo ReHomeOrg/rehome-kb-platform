@@ -62,49 +62,6 @@ ACTION_HR_EMPLOYEE_ARCHIVED: Final = "hr.employee.archived"
 ACTION_HR_EMPLOYEE_PII_ACCESSED: Final = "hr.employee.pii_accessed"
 ACTION_HR_EMPLOYEE_PII_UPDATED: Final = "hr.employee.pii_updated"
 
-# Vault actions (#146, ADR-0011).
-# Resource — `vault_secret` для secret-level operations, `vault_user` для
-# user-level (unlock attempts), `vault_group` для group changes.
-RESOURCE_VAULT_SECRET: Final = "vault_secret"
-RESOURCE_VAULT_USER: Final = "vault_user"
-RESOURCE_VAULT_GROUP: Final = "vault_group"
-
-# `vault.unlock` — success / failure both audited (failed-unlock attempts
-# обнаруживают brute-force). `secret.read` пишется даже на metadata read'ы,
-# но НЕ на `list` (объём логов взорвётся; статистический pattern detect
-# через aggregate'ы).
-ACTION_VAULT_UNLOCK_SUCCESS: Final = "vault.unlock.success"
-ACTION_VAULT_UNLOCK_FAILED: Final = "vault.unlock.failed"
-ACTION_VAULT_SECRET_READ: Final = "vault.secret.read"
-ACTION_VAULT_SECRET_CREATED: Final = "vault.secret.created"
-ACTION_VAULT_SECRET_UPDATED: Final = "vault.secret.updated"
-ACTION_VAULT_SECRET_DELETED: Final = "vault.secret.deleted"
-ACTION_VAULT_SHARE_ADDED: Final = "vault.share.added"
-ACTION_VAULT_SHARE_REVOKED: Final = "vault.share.revoked"
-ACTION_VAULT_SECRET_ROTATED: Final = "vault.secret.rotated"
-ACTION_VAULT_GROUP_CREATED: Final = "vault.group.created"
-ACTION_VAULT_GROUP_MEMBER_ADDED: Final = "vault.group.member.added"
-ACTION_VAULT_GROUP_MEMBER_REMOVED: Final = "vault.group.member.removed"
-
-# FIDO2 / WebAuthn actions (ADR-0022 A). Metadata содержит credential_id
-# (opaque base64) + transports list; НЕ содержит public_key (избыточно,
-# stored в DB) и НЕ signCounter (включается в incident analysis по
-# credential_id lookup).
-ACTION_VAULT_FIDO2_REGISTERED: Final = "vault.fido2.registered"
-ACTION_VAULT_FIDO2_REVOKED: Final = "vault.fido2.revoked"
-ACTION_VAULT_FIDO2_ASSERT_SUCCESS: Final = "vault.fido2.assert.success"
-ACTION_VAULT_FIDO2_ASSERT_FAILED: Final = "vault.fido2.assert.failed"
-
-# Emergency access actions (ADR-0021 A). Metadata содержит
-# `reason_category` + `requested_by`; reason_text НЕ дублируется в audit
-# (он в vault_emergency_unlock_log table — primary source).
-# `vault.escrow.setup` — owner setup'нул escrow ceremony (запись
-# escrow_wrap в vault_users). Operational event.
-# `vault.emergency.unlock` — admin combined shares + получил access.
-# Всегда paired с auto-created security_incident (severity по reason).
-ACTION_VAULT_ESCROW_SETUP: Final = "vault.escrow.setup"
-ACTION_VAULT_EMERGENCY_UNLOCK: Final = "vault.emergency.unlock"
-
 # Document file actions (#214, ADR-0012). Metadata machine-level only —
 # no filename / no content (анти-leak PII в audit_log JSONB).
 RESOURCE_DOCUMENT: Final = "document"

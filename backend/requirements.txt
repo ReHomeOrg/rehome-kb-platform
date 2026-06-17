@@ -22,11 +22,6 @@ minio==7.2.10
 # CVE-2026-24486 / -40347 / -42561 + CVE-2026-53538 / -53539 / -53540
 # (DoS на malformed multipart; обнаружено pip-audit).
 python-multipart==0.0.31
-# FIDO2 / WebAuthn server-side ceremony (ADR-0022 A). MIT-licensed,
-# self-hosted, no external service. Provides challenge generation +
-# attestation / assertion verification (COSE_Key decode, signature
-# verify against authenticator-provided public key).
-webauthn==2.5.2
 
 # Document parsing & seeding dependencies
 python-docx==1.1.2

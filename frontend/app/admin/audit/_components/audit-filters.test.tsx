@@ -93,7 +93,6 @@ describe("AuditFilters", () => {
     const values = Array.from(select.options).map((o) => o.value);
     expect(values).toContain("article");
     expect(values).toContain("article_question");  // Q&A module 2026-05-28
-    expect(values).toContain("vault_secret");
     expect(values).toContain("webhook");
     // Default option «все» — empty value
     expect(values).toContain("");
@@ -131,9 +130,6 @@ describe("AuditFilters", () => {
       "document",
       "hr_employee",
       "premises_card",
-      "vault_group",
-      "vault_secret",
-      "vault_user",
       "webhook",
     ]);
     expect(values).toEqual(expected);

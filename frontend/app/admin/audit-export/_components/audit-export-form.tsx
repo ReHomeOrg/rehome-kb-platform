@@ -132,7 +132,7 @@ export default function AuditExportForm(): JSX.Element {
             maxLength={64}
             className="rounded-md border border-gray-300 px-2 py-1 text-xs"
             aria-label="Filter by resource_type"
-            placeholder="article / vault_secret / ..."
+            placeholder="article / document / ..."
           />
         </label>
         <label className="flex flex-col gap-1 text-xs">
@@ -144,7 +144,7 @@ export default function AuditExportForm(): JSX.Element {
             maxLength={64}
             className="rounded-md border border-gray-300 px-2 py-1 text-xs"
             aria-label="Filter by action"
-            placeholder="articles.created / vault.unlock.failed / ..."
+            placeholder="articles.created / documents.file.uploaded / ..."
           />
         </label>
       </fieldset>

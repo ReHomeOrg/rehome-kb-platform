@@ -1,7 +1,7 @@
 """hr_employees foundation (#150, PZ §7).
 
 Revision ID: 0017_hr_foundation
-Revises: 0016_vault_foundation
+Revises: 0015_premises_cards
 Create Date: 2026-05-14 03:00:00.000000
 
 Foundation table для kb-hr модуля (PZ §7). Карточка сотрудника +
@@ -20,7 +20,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0017_hr_foundation"
-down_revision: str | None = "0016_vault_foundation"
+down_revision: str | None = "0015_premises_cards"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
