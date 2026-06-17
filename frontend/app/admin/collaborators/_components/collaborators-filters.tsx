@@ -76,7 +76,7 @@ export default function CollaboratorsFilters({ initial }: Props): JSX.Element {
 
       <button
         type="submit"
-        className="rounded-md bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-gray-800"
+        className="rounded-md bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-hover"
       >
         Применить
       </button>

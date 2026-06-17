@@ -112,7 +112,7 @@ export default async function AnalyticsPage({
                     href={`/admin/analytics?window_hours=${p.value}`}
                     className={`rounded-md px-2 py-1 text-xs ${
                       active
-                        ? "bg-gray-900 text-white"
+                        ? "bg-brand text-white"
                         : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                     }`}
                   >

@@ -82,7 +82,7 @@ export default async function HrPage({
           </div>
           <Link
             href="/hr/new"
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+            className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
           >
             + Создать
           </Link>

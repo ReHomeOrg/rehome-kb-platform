@@ -121,7 +121,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
       </label>
       <button
         type="submit"
-        className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+        className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover"
       >
         Применить
       </button>

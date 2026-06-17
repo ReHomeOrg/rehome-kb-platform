@@ -63,7 +63,7 @@ export default async function PremisesPage({
             </p>
             <Link
               href="/login"
-              className="mt-4 inline-block rounded-md bg-gray-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+              className="mt-4 inline-block rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
             >
               Войти
             </Link>
@@ -125,7 +125,7 @@ export default async function PremisesPage({
           </div>
           <Link
             href="/premises/new"
-            className="shrink-0 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
           >
             + Новая карточка
           </Link>

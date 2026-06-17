@@ -65,7 +65,7 @@ export default function ReindexButton(): JSX.Element {
         type="button"
         onClick={handleClick}
         disabled={busy}
-        className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+        className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
       >
         {busy ? "Запуск…" : "Запустить reindex"}
       </button>

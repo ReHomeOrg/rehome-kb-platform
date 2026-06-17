@@ -44,7 +44,7 @@ export default function ErrorBoundary({
       <button
         type="button"
         onClick={reset}
-        className="mx-auto rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+        className="mx-auto rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover"
       >
         Попробовать снова
       </button>
