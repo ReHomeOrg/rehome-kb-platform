@@ -39,6 +39,10 @@ const CATEGORY_VISUALS: Record<string, Omit<CategoryCard, "slug" | "title">> = {
   "9_moveout": { emoji: "🚪", description: "Уведомление, депозит, акт" },
   "10_owners": { emoji: "🏢", description: "Размещение, проверка, выплаты" },
   "11_security": { emoji: "🛡️", description: "ФЗ-152, инциденты, поддержка" },
+  "12_agents": { emoji: "🤝", description: "Агенты reHome, агентский договор, отчёты" },
+  "13_claims": { emoji: "⚖️", description: "Споры, претензии, гарантийная и компенсационная выплаты" },
+  "14_glossary": { emoji: "📖", description: "Термины и определения платформы" },
+  "15_support": { emoji: "🛟", description: "Технические вопросы, ошибки, поддержка" },
 };
 
 const CATEGORY_ORDER = [
@@ -53,6 +57,10 @@ const CATEGORY_ORDER = [
   "9_moveout",
   "10_owners",
   "11_security",
+  "12_agents",
+  "13_claims",
+  "14_glossary",
+  "15_support",
 ] as const;
 
 // FAQ — пять самых востребованных (по импортированному order'у).
