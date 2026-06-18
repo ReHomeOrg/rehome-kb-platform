@@ -23,7 +23,6 @@ import asyncio
 import re
 import sys
 from pathlib import Path
-from typing import Any
 
 # `## <Название>  (`slug`)`. Заголовки без backtick-слага (`## Часть II...`,
 # `## Оглавление`) намеренно не матчатся.
