@@ -65,6 +65,12 @@ COPY --from=builder --chown=app:app /opt/venv /opt/venv
 COPY --chown=app:app src ./src
 COPY --chown=app:app alembic ./alembic
 COPY --chown=app:app alembic.ini ./alembic.ini
+# Seed/ops-скрипты (import_kb_*, seed_kb_categories, reindex_articles) и
+# seed-данные. CMD их НЕ запускает — operator выполняет вручную через
+# `docker compose exec kb-backend python -m scripts.<...>` (см.
+# docs/runbooks/deploy-and-seed-kb-v6.5.md). Без этого `reindex_articles`
+# в deploy.yml — no-op (`|| true`).
+COPY --chown=app:app scripts ./scripts
 
 USER app
 
