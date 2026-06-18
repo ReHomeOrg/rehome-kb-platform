@@ -231,7 +231,7 @@ export default function SystemConfigEditForm({ initial }: Props): JSX.Element {
       <button
         type="submit"
         disabled={busy}
-        className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+        className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
       >
         {busy ? "Сохранение…" : "Сохранить"}
       </button>

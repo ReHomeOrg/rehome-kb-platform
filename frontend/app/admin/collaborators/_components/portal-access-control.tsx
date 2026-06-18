@@ -141,7 +141,7 @@ export default function PortalAccessControl({
         <button
           type="submit"
           disabled={!isChange || pending}
-          className="self-start rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+          className="self-start rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
         >
           {pending ? "Применяем…" : isChange ? "Применить" : "Без изменений"}
         </button>

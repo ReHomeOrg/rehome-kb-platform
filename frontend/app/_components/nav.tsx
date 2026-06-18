@@ -73,7 +73,7 @@ export default async function Nav(): Promise<JSX.Element> {
           ) : (
             <Link
               href="/login"
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
             >
               Войти
             </Link>

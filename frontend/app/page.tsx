@@ -138,7 +138,7 @@ export default async function Home(): Promise<JSX.Element> {
         ) : (
           <Link
             href="/login"
-            className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
+            className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
           >
             Войти
           </Link>
@@ -161,7 +161,7 @@ export default async function Home(): Promise<JSX.Element> {
           />
           <button
             type="submit"
-            className="rounded-md bg-brand px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-hover"
+            className="rounded-md bg-brand px-5 py-2.5 text-sm font-medium text-ink hover:bg-brand-hover"
           >
             Найти
           </button>

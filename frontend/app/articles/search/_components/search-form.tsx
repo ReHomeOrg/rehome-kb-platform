@@ -36,7 +36,7 @@ export default function SearchForm({
       />
       <button
         type="submit"
-        className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-hover"
+        className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
       >
         Найти
       </button>

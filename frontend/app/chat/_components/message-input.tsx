@@ -50,7 +50,7 @@ export default function MessageInput({
       <button
         type="submit"
         disabled={blocked || !content.trim()}
-        className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+        className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
       >
         Отправить
       </button>
