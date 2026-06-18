@@ -68,15 +68,24 @@ docker compose $ENV exec -T kb-backend \
 docker compose $ENV exec -T kb-backend \
   python -m scripts.import_kb_markdown scripts/seed/reHome_KB_master_v6.5.md --direct-db
 
-# 3.3 Документы (9; нужен prod-S3/MinIO из /opt/rehome/prod/.env).
+# 3.3 Документы (9; нужен prod-S3/MinIO). Креды читаем из /opt/rehome/prod/.env
+#     теми же ключами, что и deploy.yml (S3_ENDPOINT_URL/S3_ACCESS_KEY/S3_SECRET_KEY),
+#     и мапим в MINIO_* идентично пайплайну (стрип протокола + detect secure).
 #     Предварительно убедиться, что bucket rehome-kb-files существует.
+ENVFILE=/opt/rehome/prod/.env
+S3_ENDPOINT="$(grep '^S3_ENDPOINT_URL=' $ENVFILE | cut -d= -f2- | tr -d '\"'"'"')"
+S3_KEY="$(grep '^S3_ACCESS_KEY=' $ENVFILE | cut -d= -f2- | tr -d '\"'"'"')"
+S3_SECRET="$(grep '^S3_SECRET_KEY=' $ENVFILE | cut -d= -f2- | tr -d '\"'"'"')"
+MINIO_HOST="$(echo "$S3_ENDPOINT" | sed -e 's|^https\?://||')"
+echo "$S3_ENDPOINT" | grep -q '^https' && MINIO_SECURE=True || MINIO_SECURE=False
+
 docker compose $ENV exec -T \
   -e MINIO_ENABLED=True \
-  -e MINIO_ENDPOINT="<host из S3_ENDPOINT>" \
-  -e MINIO_ACCESS_KEY="<S3_KEY>" \
-  -e MINIO_SECRET_KEY="<S3_SECRET>" \
+  -e MINIO_ENDPOINT="$MINIO_HOST" \
+  -e MINIO_ACCESS_KEY="$S3_KEY" \
+  -e MINIO_SECRET_KEY="$S3_SECRET" \
   -e MINIO_BUCKET=rehome-kb-files \
-  -e MINIO_SECURE="<True если https>" \
+  -e MINIO_SECURE="$MINIO_SECURE" \
   kb-backend python -m scripts.import_kb_documents scripts/seed/reHome_KB_master_v6.5.md
 
 # 3.4 Переиндексация для семантического поиска
