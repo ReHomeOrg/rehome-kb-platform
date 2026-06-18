@@ -102,7 +102,7 @@ export default function SecurityIncidentsTable({
               <td className="px-3 py-2 font-mono">
                 <a
                   href={`/admin/security-incidents/${i.id}`}
-                  className="text-blue-700 hover:underline"
+                  className="text-brand-strong hover:underline"
                 >
                   {i.id.slice(0, 8)}
                 </a>

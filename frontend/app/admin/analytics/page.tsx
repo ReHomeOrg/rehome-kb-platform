@@ -112,7 +112,7 @@ export default async function AnalyticsPage({
                     href={`/admin/analytics?window_hours=${p.value}`}
                     className={`rounded-md px-2 py-1 text-xs ${
                       active
-                        ? "bg-gray-900 text-white"
+                        ? "bg-brand text-ink"
                         : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                     }`}
                   >
@@ -181,7 +181,7 @@ export default async function AnalyticsPage({
             <h2 className="text-lg font-semibold">Q&A: модерация по статьям</h2>
             <Link
               href="/admin/article-questions?status=PENDING"
-              className="text-sm text-blue-600 hover:underline"
+              className="text-sm text-brand-strong hover:underline"
             >
               Очередь модерации →
             </Link>
@@ -210,7 +210,7 @@ export default async function AnalyticsPage({
                     <td className="px-3 py-2">
                       <Link
                         href={`/articles/${encodeURIComponent(a.slug)}`}
-                        className="text-blue-700 hover:underline"
+                        className="text-brand-strong hover:underline"
                       >
                         {a.title}
                       </Link>

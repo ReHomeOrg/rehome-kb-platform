@@ -1,3 +1,30 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Фирменные тона reHome (источник — палитра rehome.one):
+ *   --brand        #ff6b35  тёплый оранжевый — primary-заливки (кнопки с ink-текстом, акценты)
+ *   --brand-hover  #e85a28  затемнённый для hover-заливок
+ *   --brand-strong #c2410c  глубокий оранжевый — бренд-цвет ТЕКСТА/ссылок/границ на светлом (AA 5.18:1)
+ *   --ink          #2a2a2e  чаркол — основной текст/заголовки
+ *   --mint         #a8dcd0  мятный — вторичный акцент (границы инфо-блоков)
+ *   --sand         #fdf8f4  тёплый off-white — фон страниц
+ */
+:root {
+  --brand: #ff6b35;
+  --brand-hover: #e85a28;
+  --brand-strong: #c2410c;
+  --brand-soft: #fff0e8;
+  --ink: #2a2a2e;
+  --mint: #a8dcd0;
+  --mint-soft: #d6f0ec;
+  --sand: #fdf8f4;
+  --background: var(--sand);
+  --foreground: var(--ink);
+}
+
+body {
+  background-color: var(--sand);
+  color: var(--ink);
+}

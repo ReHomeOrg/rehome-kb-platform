@@ -16,7 +16,7 @@ export default function LoginPage() {
       <div className="mt-8">
         <a
           href={`${BASE_PATH}/api/auth/login`}
-          className="inline-flex items-center rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
+          className="inline-flex items-center rounded-md bg-brand px-5 py-2.5 text-sm font-medium text-ink hover:bg-brand-hover"
         >
           Войти через reHome SSO
         </a>

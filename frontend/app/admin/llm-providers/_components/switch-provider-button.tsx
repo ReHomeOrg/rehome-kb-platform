@@ -111,7 +111,7 @@ export default function SwitchProviderButton({ providerId }: Props): JSX.Element
         <button
           type="submit"
           disabled={busy}
-          className="rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+          className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
         >
           {busy ? "Переключение…" : "Подтвердить"}
         </button>

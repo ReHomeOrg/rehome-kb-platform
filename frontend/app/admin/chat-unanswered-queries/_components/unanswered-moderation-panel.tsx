@@ -139,14 +139,14 @@ function UnansweredRow({
           Привязано к статье{" "}
           <Link
             href={`/articles/${row.attached_article_slug}`}
-            className="text-blue-700 underline"
+            className="text-brand-strong underline"
           >
             {row.attached_article_slug}
           </Link>
           {" · "}
           <Link
             href={`/admin/article-questions?status=PENDING`}
-            className="text-blue-700 underline"
+            className="text-brand-strong underline"
           >
             Q&A id {row.attached_question_id.slice(0, 8)}…
           </Link>
@@ -194,7 +194,7 @@ function UnansweredRow({
               type="button"
               onClick={onAttach}
               disabled={!articleSlug.trim() || busy !== null}
-              className="self-start rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              className="self-start rounded bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
             >
               {busy === "attach" ? "…" : "Привязать"}
             </button>

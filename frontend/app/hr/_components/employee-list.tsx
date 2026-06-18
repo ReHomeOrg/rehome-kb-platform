@@ -89,7 +89,7 @@ export default function EmployeeList({
               <td className="py-2 pr-4">
                 <Link
                   href={`/hr/${e.id}`}
-                  className="font-medium text-blue-700 hover:underline"
+                  className="font-medium text-brand-strong hover:underline"
                 >
                   {e.full_name}
                 </Link>

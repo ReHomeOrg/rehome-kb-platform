@@ -65,7 +65,7 @@ export default function MfaStepUpButton({
         className={`rounded border px-3 py-1.5 text-xs font-medium ${
           hasToken
             ? "border-green-300 bg-green-50 text-green-900 hover:bg-green-100"
-            : "border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100"
+            : "border-brand bg-brand-soft text-brand-strong hover:bg-brand/20"
         } disabled:opacity-50`}
       >
         {state === "requesting" ? "Открываем Keycloak…" : buttonLabel}

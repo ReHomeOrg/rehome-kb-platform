@@ -69,7 +69,7 @@ export default function PremisesList({ data, pagination }: Props): JSX.Element {
               <td className="py-2 pr-4">
                 <Link
                   href={`/premises/${p.slug}`}
-                  className="font-medium text-blue-700 hover:underline"
+                  className="font-medium text-brand-strong hover:underline"
                 >
                   {p.address}
                 </Link>

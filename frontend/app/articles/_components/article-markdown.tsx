@@ -26,7 +26,7 @@ export default function ArticleMarkdown({
           a: ({ href, children }) => (
             <a
               href={href}
-              className="font-medium text-blue-600 underline decoration-blue-300 decoration-1 underline-offset-2 hover:text-blue-700 hover:decoration-blue-500"
+              className="font-medium text-brand-strong underline decoration-brand-strong/40 decoration-1 underline-offset-2 hover:text-ink hover:decoration-brand-strong"
             >
               {children}
             </a>

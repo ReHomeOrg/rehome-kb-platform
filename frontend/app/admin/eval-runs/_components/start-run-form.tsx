@@ -128,7 +128,7 @@ export default function StartRunForm(): JSX.Element {
           Run запущен:{" "}
           <a
             href={`/admin/tasks/${success}`}
-            className="font-mono text-blue-700 underline hover:text-blue-900"
+            className="font-mono text-brand-strong underline hover:text-ink"
           >
             {success.slice(0, 8)}
           </a>{" "}
@@ -139,7 +139,7 @@ export default function StartRunForm(): JSX.Element {
       <button
         type="submit"
         disabled={busy}
-        className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+        className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
       >
         {busy ? "Запуск…" : "Запустить"}
       </button>

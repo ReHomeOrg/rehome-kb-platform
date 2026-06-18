@@ -82,7 +82,7 @@ export default async function KbUsersPage({
           <h1 className="text-2xl font-semibold">KB users (staff)</h1>
           <a
             href="/admin/users/new"
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-ink hover:bg-brand-hover"
           >
             + Новый
           </a>
@@ -142,7 +142,7 @@ export default async function KbUsersPage({
           </label>
           <button
             type="submit"
-            className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-ink hover:bg-brand-hover"
           >
             Применить
           </button>
@@ -150,7 +150,7 @@ export default async function KbUsersPage({
             <a
               href="/admin/users"
               aria-label="Reset filters"
-              className="text-xs text-blue-700 underline hover:text-blue-900"
+              className="text-xs text-brand-strong underline hover:text-ink"
             >
               Сбросить
             </a>

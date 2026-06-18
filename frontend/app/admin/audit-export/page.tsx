@@ -15,7 +15,7 @@ export default function AuditExportPage(): JSX.Element {
       <main className="mx-auto max-w-3xl px-4 py-6">
         <a
           href="/admin"
-          className="mb-3 inline-block text-xs text-blue-700 underline hover:text-blue-900"
+          className="mb-3 inline-block text-xs text-brand-strong underline hover:text-ink"
         >
           ← Dashboard
         </a>

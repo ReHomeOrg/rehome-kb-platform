@@ -243,7 +243,7 @@ export default function CollaboratorsSection({
           <button
             type="submit"
             disabled={submitting}
-            className="self-start rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+            className="self-start rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-ink hover:bg-brand-hover disabled:opacity-50"
           >
             {submitting ? "Сохраняем…" : "Назначить"}
           </button>

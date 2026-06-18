@@ -203,16 +203,16 @@ export default async function AdminDashboardPage({
               <h2 className="mb-3 text-sm font-medium text-gray-700">
                 Прочие admin-инструменты
               </h2>
-              <ul className="grid grid-cols-2 gap-2 text-sm text-blue-700">
+              <ul className="grid grid-cols-2 gap-2 text-sm text-brand-strong">
                 <li>
-                  <a href="/admin/audit" className="underline hover:text-blue-900">
+                  <a href="/admin/audit" className="underline hover:text-ink">
                     Аудит-лог →
                   </a>
                 </li>
                 <li>
                   <a
                     href="/admin/audit-export"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     Audit export (compliance) →
                   </a>
@@ -220,20 +220,20 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/eval-runs"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     Eval-стенд →
                   </a>
                 </li>
                 <li>
-                  <a href="/admin/users" className="underline hover:text-blue-900">
+                  <a href="/admin/users" className="underline hover:text-ink">
                     KB users (staff) →
                   </a>
                 </li>
                 <li>
                   <a
                     href="/admin/llm-providers"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     LLM providers →
                   </a>
@@ -241,7 +241,7 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/system-config"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     System config →
                   </a>
@@ -249,7 +249,7 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/maintenance"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     Maintenance (reindex / cache) →
                   </a>
@@ -257,7 +257,7 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/analytics"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     KB Аналитика (top queries / Q&A) →
                   </a>
@@ -265,7 +265,7 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/article-questions?status=PENDING"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     Q&A: модерация вопросов →
                   </a>
@@ -273,7 +273,7 @@ export default async function AdminDashboardPage({
                 <li>
                   <a
                     href="/admin/chat-unanswered-queries?status=NEW"
-                    className="underline hover:text-blue-900"
+                    className="underline hover:text-ink"
                   >
                     Чат: запросы без ответа →
                   </a>
