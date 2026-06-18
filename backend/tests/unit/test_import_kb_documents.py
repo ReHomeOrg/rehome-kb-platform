@@ -87,6 +87,43 @@ def test_to_html_paragraphs_and_linebreaks() -> None:
     assert "<p>Абзац два</p>" in out
 
 
+_DOC_MALFORMED = """## Часть II. Документы
+
+### Документ 1. Хороший документ
+
+- **doc_id:** `legal_offer` · **slug:** `public-offer` · **access_level:** PUBLIC
+
+**Полный текст:**
+
+Корректное тело.
+
+### Документ 2. Сломанный блок без метаданных
+
+Текст без doc_id, slug и пометки.
+
+### Документ 3. Второй хороший
+
+- **doc_id:** `legal_act_services` · **slug:** `act-of-services` · **access_level:** PUBLIC
+
+**Полный текст:**
+
+Тело третьего документа.
+"""
+
+
+def test_malformed_block_is_skipped_not_merged(tmp_path: Path) -> None:
+    # M-1: сломанный блок №2 не должен «съесть» соседние — он пропускается,
+    # а валидные документы 1 и 3 парсятся независимо и не сливаются.
+    path = tmp_path / "master.md"
+    path.write_text(_DOC_MALFORMED, encoding="utf-8")
+    docs = parse_documents(path)
+    assert [d["doc_id"] for d in docs] == ["legal_offer", "legal_act_services"]
+    assert docs[0]["title"] == "Хороший документ"
+    assert "Корректное тело" in docs[0]["html"]
+    assert docs[1]["title"] == "Второй хороший"
+    assert "Тело третьего документа" in docs[1]["html"]
+
+
 def test_full_catalog_categories_are_valid() -> None:
     # Все девять doc_id юр-пакета разложены по валидным категориям A–F.
     assert set(CATEGORY_BY_DOC_ID.values()) <= {"A", "B", "C", "D", "E", "F"}

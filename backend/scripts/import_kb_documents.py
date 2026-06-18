@@ -47,13 +47,13 @@ DEFAULT_CONFIDENTIALITY = "PUBLIC"
 DEFAULT_STATUS = "ACTIVE"
 DEFAULT_VERSION = "1.0"
 
-DOCUMENT_RE = re.compile(
-    r"^### Документ\s+\d+\.\s+(?P<title>.+?)\n"
-    r".*?doc_id:\*\*\s*`(?P<doc_id>[^`]+)`"
-    r".*?slug:\*\*\s*`(?P<slug>[^`]+)`"
-    r".*?\*\*Полный текст:\*\*\n(?P<body>.*?)(?=\n### Документ|\Z)",
-    flags=re.MULTILINE | re.DOTALL,
-)
+# Блочная модель: заголовок документа отбивает границы блока, поэтому поля
+# одного документа не могут «утечь» в соседний (защита от тихой потери при
+# малформ-блоке — такой блок пропускается с предупреждением, а не сливается).
+DOC_HEADER_RE = re.compile(r"^### Документ\s+\d+\.\s+(?P<title>.+?)\s*$", flags=re.MULTILINE)
+DOC_ID_RE = re.compile(r"doc_id:\*\*\s*`(?P<doc_id>[^`]+)`")
+DOC_SLUG_RE = re.compile(r"slug:\*\*\s*`(?P<slug>[^`]+)`")
+BODY_MARKER = "**Полный текст:**"
 
 
 def to_html(title: str, body: str) -> str:
@@ -78,19 +78,44 @@ def to_html(title: str, body: str) -> str:
 
 
 def parse_documents(path: Path) -> list[dict[str, Any]]:
-    """Распарсить Часть II в список документов с HTML-телом и категорией."""
+    """Распарсить Часть II в список документов с HTML-телом и категорией.
+
+    Каждый блок ограничен следующим заголовком `### Документ`, поэтому
+    `doc_id`/`slug`/тело извлекаются строго в его пределах. Малформ-блок
+    (нет `doc_id`/`slug`/`**Полный текст:**` или пустое тело) пропускается
+    с предупреждением в stderr — без тихой потери соседних документов.
+    """
     text = path.read_text(encoding="utf-8")
+    # Ограничиваемся Частью II, чтобы не зацепить статьи/оглавление.
+    part_two = text.split("## Часть II", 1)
+    scope = part_two[1] if len(part_two) > 1 else text
+
+    headers = list(DOC_HEADER_RE.finditer(scope))
     documents: list[dict[str, Any]] = []
-    for match in DOCUMENT_RE.finditer(text):
-        title = match.group("title").strip()
-        doc_id = match.group("doc_id").strip()
-        body = match.group("body").strip()
-        if not title or not body:
+    for index, header in enumerate(headers):
+        start = header.end()
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(scope)
+        block = scope[start:end]
+        title = header.group("title").strip()
+
+        id_match = DOC_ID_RE.search(block)
+        slug_match = DOC_SLUG_RE.search(block)
+        if id_match is None or slug_match is None or BODY_MARKER not in block:
+            print(
+                f"WARN: пропущен малформ-блок «{title}» (нет doc_id/slug/текста)",
+                file=sys.stderr,
+            )
             continue
+        body = block.split(BODY_MARKER, 1)[1].strip()
+        if not body:
+            print(f"WARN: пропущен документ «{title}» — пустое тело", file=sys.stderr)
+            continue
+
+        doc_id = id_match.group("doc_id").strip()
         documents.append(
             {
                 "doc_id": doc_id,
-                "slug": match.group("slug").strip(),
+                "slug": slug_match.group("slug").strip(),
                 "title": title[:500],
                 "category": CATEGORY_BY_DOC_ID.get(doc_id, DEFAULT_CATEGORY),
                 "html": to_html(title, body),
