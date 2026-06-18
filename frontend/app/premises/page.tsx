@@ -138,7 +138,7 @@ export default async function PremisesPage({
             </p>
             <Link
               href="/premises"
-              className="text-blue-700 underline hover:text-blue-900"
+              className="text-brand-strong underline hover:text-ink"
             >
               Сбросить поиск
             </Link>

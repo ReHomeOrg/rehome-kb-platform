@@ -97,7 +97,7 @@ export default function TaskStatusCard({ initial }: Props): JSX.Element {
               <dd>
                 <a
                   href={task.result_url}
-                  className="break-all text-blue-700 underline hover:text-blue-900"
+                  className="break-all text-brand-strong underline hover:text-ink"
                 >
                   {task.result_url}
                 </a>

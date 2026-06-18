@@ -93,7 +93,7 @@ export default async function PdRequestsPage({
           статус, выставляется worker&apos;ом (backlog) или ручным review.
         </p>
         <div className="mb-4 flex flex-wrap gap-3 text-xs">
-          <span className="rounded-md bg-blue-50 px-3 py-1.5 text-blue-900">
+          <span className="rounded-md bg-mint-soft px-3 py-1.5 text-ink">
             Активных: {activeCount}
           </span>
           {overdueCount > 0 ? (
@@ -153,7 +153,7 @@ export default async function PdRequestsPage({
             <a
               href="/admin/personal-data"
               aria-label="Reset filters"
-              className="text-xs text-blue-700 underline hover:text-blue-900"
+              className="text-xs text-brand-strong underline hover:text-ink"
             >
               Сбросить
             </a>

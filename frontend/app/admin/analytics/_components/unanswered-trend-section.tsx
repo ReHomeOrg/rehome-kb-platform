@@ -28,7 +28,7 @@ export default function UnansweredTrendSection({
         </h2>
         <Link
           href="/admin/chat-unanswered-queries?status=NEW"
-          className="text-sm text-blue-600 hover:underline"
+          className="text-sm text-brand-strong hover:underline"
         >
           Очередь модерации →
         </Link>

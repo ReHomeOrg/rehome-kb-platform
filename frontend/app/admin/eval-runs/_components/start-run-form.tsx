@@ -128,7 +128,7 @@ export default function StartRunForm(): JSX.Element {
           Run запущен:{" "}
           <a
             href={`/admin/tasks/${success}`}
-            className="font-mono text-blue-700 underline hover:text-blue-900"
+            className="font-mono text-brand-strong underline hover:text-ink"
           >
             {success.slice(0, 8)}
           </a>{" "}

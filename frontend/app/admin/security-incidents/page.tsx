@@ -146,7 +146,7 @@ export default async function SecurityIncidentsPage({
             <a
               href="/admin/security-incidents"
               aria-label="Reset filters"
-              className="text-xs text-blue-700 underline hover:text-blue-900"
+              className="text-xs text-brand-strong underline hover:text-ink"
             >
               Сбросить
             </a>

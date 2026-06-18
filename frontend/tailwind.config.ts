@@ -16,6 +16,7 @@ const config: Config = {
         brand: {
           DEFAULT: "var(--brand)",
           hover: "var(--brand-hover)",
+          strong: "var(--brand-strong)",
           soft: "var(--brand-soft)",
         },
         ink: "var(--ink)",

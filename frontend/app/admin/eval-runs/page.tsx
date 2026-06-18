@@ -86,7 +86,7 @@ export default async function EvalRunsPage({
             <a
               href="/admin/eval-runs"
               aria-label="Reset filter"
-              className="text-xs text-blue-700 underline hover:text-blue-900"
+              className="text-xs text-brand-strong underline hover:text-ink"
             >
               Сбросить
             </a>

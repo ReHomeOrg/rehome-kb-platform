@@ -94,7 +94,7 @@ export default async function HrPage({
           </p>
           <Link
             href={includeTerminated ? "/hr" : "/hr?include_terminated=true"}
-            className="text-sm text-blue-700 underline hover:text-blue-900"
+            className="text-sm text-brand-strong underline hover:text-ink"
           >
             {includeTerminated
               ? "Скрыть уволенных"

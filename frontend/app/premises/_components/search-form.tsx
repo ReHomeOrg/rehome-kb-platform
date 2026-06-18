@@ -21,7 +21,7 @@ export default function SearchForm({
         name="q"
         defaultValue={initialQuery}
         placeholder="Адрес или кадастровый номер"
-        className="w-full max-w-md rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+        className="w-full max-w-md rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-brand focus:outline-none"
       />
       <button
         type="submit"

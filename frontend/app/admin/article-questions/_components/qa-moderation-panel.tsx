@@ -171,7 +171,7 @@ function QuestionRow({
             rows={3}
             maxLength={5000}
             placeholder="Введите ответ (станет публичным сразу после сохранения)"
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
           />
           <div className="flex flex-wrap items-center gap-2">
             <button

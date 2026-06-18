@@ -46,7 +46,7 @@ export default function DownloadButton({
   return (
     <a
       href={documentFileDownloadHref(documentId, file.format)}
-      className="inline-flex items-center rounded-md border border-gray-300 px-3 py-1 text-xs hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="inline-flex items-center rounded-md border border-gray-300 px-3 py-1 text-xs hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand"
       // Без `download` атрибута: backend отдаёт 302 на cross-origin MinIO
       // URL, `download` work'ает только same-origin. Browser открывает
       // файл по Content-Disposition / Content-Type из MinIO.

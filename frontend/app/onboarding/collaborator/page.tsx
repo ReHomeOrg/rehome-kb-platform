@@ -32,7 +32,7 @@ export default function OnboardingLandingPage(): JSX.Element {
         </p>
       </header>
 
-      <section className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+      <section className="rounded-md border border-mint bg-mint-soft p-4 text-sm text-ink">
         <h2 className="font-medium">Что важно знать заранее</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
           <li>

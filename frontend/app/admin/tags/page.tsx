@@ -81,7 +81,7 @@ export default async function TagsAdminPage({
             <a
               href="/admin/tags"
               aria-label="Reset search"
-              className="text-xs text-blue-700 underline hover:text-blue-900"
+              className="text-xs text-brand-strong underline hover:text-ink"
             >
               Сбросить
             </a>

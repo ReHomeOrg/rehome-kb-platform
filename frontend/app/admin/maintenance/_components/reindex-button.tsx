@@ -87,7 +87,7 @@ export default function ReindexButton(): JSX.Element {
           Task создан:{" "}
           <a
             href={`/admin/tasks/${taskId}`}
-            className="font-mono text-blue-700 underline hover:text-blue-900"
+            className="font-mono text-brand-strong underline hover:text-ink"
           >
             {taskId}
           </a>{" "}

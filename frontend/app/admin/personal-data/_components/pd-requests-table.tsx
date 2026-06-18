@@ -80,7 +80,7 @@ export default function PdRequestsTable({ requests, error }: Props): JSX.Element
               <td className="px-3 py-2 font-mono">
                 <a
                   href={`/admin/personal-data/${r.id}`}
-                  className="text-blue-700 hover:underline"
+                  className="text-brand-strong hover:underline"
                 >
                   {r.id.slice(0, 8)}
                 </a>

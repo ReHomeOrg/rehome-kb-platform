@@ -79,7 +79,7 @@ export default function KbUsersTable({ users, error }: Props): JSX.Element {
               <td className="px-3 py-2 font-mono text-gray-900">
                 <a
                   href={`/admin/users/${u.id}`}
-                  className="text-blue-700 hover:underline"
+                  className="text-brand-strong hover:underline"
                 >
                   {u.email}
                 </a>

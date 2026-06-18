@@ -196,7 +196,7 @@ export default function AuditExportForm(): JSX.Element {
             Task:{" "}
             <a
               href={`/admin/tasks/${result.taskId}`}
-              className="font-mono text-blue-700 underline hover:text-blue-900"
+              className="font-mono text-brand-strong underline hover:text-ink"
             >
               {result.taskId}
             </a>{" "}

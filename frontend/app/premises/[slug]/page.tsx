@@ -164,11 +164,11 @@ export default async function PremisesDetailPage({
 
             {card.financial_data &&
             Object.keys(card.financial_data).length > 0 ? (
-              <section className="rounded-md border border-blue-200 bg-blue-50 p-4">
-                <h2 className="text-sm font-medium text-blue-900">
+              <section className="rounded-md border border-mint bg-mint-soft p-4">
+                <h2 className="text-sm font-medium text-ink">
                   Финансовая информация
                 </h2>
-                <dl className="mt-2 grid grid-cols-2 gap-2 text-sm text-blue-900">
+                <dl className="mt-2 grid grid-cols-2 gap-2 text-sm text-ink">
                   {Object.entries(card.financial_data).map(([k, v]) => (
                     <div key={k}>
                       <dt className="font-medium">{k}</dt>

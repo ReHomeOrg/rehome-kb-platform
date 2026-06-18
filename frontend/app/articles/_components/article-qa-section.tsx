@@ -111,7 +111,7 @@ export default function ArticleQaSection({ slug, isLoggedIn }: Props): JSX.Eleme
             >
               <p className="text-sm font-medium text-gray-900">Вопрос:</p>
               <p className="mt-1 text-sm text-gray-700">{q.body}</p>
-              <p className="mt-3 text-sm font-medium text-blue-900">Ответ:</p>
+              <p className="mt-3 text-sm font-medium text-ink">Ответ:</p>
               <p className="mt-1 text-sm whitespace-pre-wrap text-gray-700">
                 {q.answer_body}
               </p>
@@ -138,7 +138,7 @@ export default function ArticleQaSection({ slug, isLoggedIn }: Props): JSX.Eleme
               rows={3}
               disabled={submitting}
               placeholder="Например: Когда заработает оплата картой?"
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:opacity-50"
             />
             <div className="flex items-center justify-between">
               <p className="text-xs text-gray-500">
@@ -175,7 +175,7 @@ export default function ArticleQaSection({ slug, isLoggedIn }: Props): JSX.Eleme
           </form>
         ) : (
           <p className="text-sm text-gray-600">
-            <a href="/login" className="text-blue-600 hover:underline">
+            <a href="/login" className="text-brand-strong hover:underline">
               Войдите
             </a>
             , чтобы задать вопрос.

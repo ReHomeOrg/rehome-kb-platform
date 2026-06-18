@@ -146,7 +146,7 @@ export default async function Home(): Promise<JSX.Element> {
       </header>
 
       {/* Hero + search */}
-      <section className="mb-12 rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-gray-50 p-8">
+      <section className="mb-12 rounded-lg border border-gray-200 bg-gradient-to-br from-brand-soft to-sand p-8">
         <h2 className="text-2xl font-semibold">Как мы можем помочь?</h2>
         <p className="mt-2 text-sm text-gray-700">
           Найдите ответ среди {topFaq.length > 0 ? "сотен" : "наших"} статей или задайте
@@ -157,7 +157,7 @@ export default async function Home(): Promise<JSX.Element> {
             type="search"
             name="q"
             placeholder="Например: сервисный сбор, договор, заезд…"
-            className="flex-1 rounded-md border border-gray-300 px-4 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="flex-1 rounded-md border border-gray-300 px-4 py-2.5 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
           />
           <button
             type="submit"
@@ -175,7 +175,7 @@ export default async function Home(): Promise<JSX.Element> {
             <h2 className="text-xl font-semibold">Популярные вопросы</h2>
             <Link
               href="/articles?tags=topfaq"
-              className="text-sm text-blue-600 hover:underline"
+              className="text-sm text-brand-strong hover:underline"
             >
               Все FAQ →
             </Link>
@@ -185,7 +185,7 @@ export default async function Home(): Promise<JSX.Element> {
               <li key={a.slug}>
                 <Link
                   href={`/articles/${a.slug}`}
-                  className="block rounded-md border border-gray-200 bg-white p-3 hover:border-blue-300 hover:bg-blue-50/30"
+                  className="block rounded-md border border-gray-200 bg-white p-3 hover:border-brand hover:bg-brand-soft"
                 >
                   <p className="text-sm font-medium text-gray-900">{a.title}</p>
                   {a.tags.length > 0 ? (
@@ -206,7 +206,7 @@ export default async function Home(): Promise<JSX.Element> {
           <h2 className="text-xl font-semibold">Категории</h2>
           <Link
             href="/articles"
-            className="text-sm text-blue-600 hover:underline"
+            className="text-sm text-brand-strong hover:underline"
           >
             Все статьи →
           </Link>
@@ -217,12 +217,12 @@ export default async function Home(): Promise<JSX.Element> {
               <Link
                 href={`/articles?category=${encodeURIComponent(c.slug)}`}
                 aria-label={`Открыть категорию ${c.title}`}
-                className="group block h-full rounded-md border border-gray-200 bg-white p-4 transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                className="group block h-full rounded-md border border-gray-200 bg-white p-4 transition hover:border-brand hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
               >
                 <p className="text-2xl">{c.emoji}</p>
                 <p className="mt-2 text-sm font-medium text-gray-900">{c.title}</p>
                 <p className="mt-1 text-xs text-gray-600">{c.description}</p>
-                <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-blue-600">
+                <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-brand-strong">
                   <span>Открыть статьи</span>
                   <span className="transition group-hover:translate-x-0.5">→</span>
                 </div>

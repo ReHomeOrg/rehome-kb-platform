@@ -128,7 +128,7 @@ export default function AuditFilters({ initial }: Props): JSX.Element {
       <a
         href="/admin/audit"
         aria-label="Reset all filters"
-        className="text-xs text-blue-700 underline hover:text-blue-900"
+        className="text-xs text-brand-strong underline hover:text-ink"
       >
         Сбросить
       </a>

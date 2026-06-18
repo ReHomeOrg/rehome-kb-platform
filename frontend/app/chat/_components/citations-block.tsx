@@ -30,7 +30,7 @@ export default function CitationsBlock({
           <li key={`${c.id}-${c.chunk_index}-${c.question_id ?? "art"}-${idx}`}>
             <Link
               href={c.url}
-              className="text-blue-700 underline hover:text-blue-900"
+              className="text-brand-strong underline hover:text-ink"
             >
               {c.title}
             </Link>{" "}

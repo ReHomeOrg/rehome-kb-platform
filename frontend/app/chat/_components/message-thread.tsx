@@ -194,7 +194,7 @@ export default function MessageThread({
             key={m.id}
             className={`rounded-md border p-3 ${
               m.role === "user"
-                ? "border-blue-200 bg-blue-50"
+                ? "border-mint bg-mint-soft"
                 : "border-gray-200 bg-white"
             }`}
           >
