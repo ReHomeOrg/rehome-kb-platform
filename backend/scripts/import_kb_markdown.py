@@ -87,7 +87,7 @@ def _strip_quotes(value: str) -> str:
     return value
 
 
-def _parse_scalar_or_list(raw: str) -> str | list[str] | list[int]:
+def _parse_scalar_or_list(raw: str) -> str | list[str | int]:
     raw = raw.strip()
     if raw.startswith("[") and raw.endswith("]"):
         items: list[str | int] = []
@@ -118,11 +118,11 @@ def parse_meta(block: str) -> dict[str, Any]:
 
 def normalize_audience(value: Any) -> str:
     values = value if isinstance(value, list) else [value]
-    normalized = [AUDIENCE_MAP.get(str(v).strip().lower()) for v in values]
-    normalized = [v for v in normalized if v]
-    if not normalized:
+    mapped = [AUDIENCE_MAP.get(str(v).strip().lower()) for v in values]
+    present = [v for v in mapped if v is not None]
+    if not present:
         return "all"
-    unique = list(dict.fromkeys(normalized))
+    unique = list(dict.fromkeys(present))
     if "all" in unique or len(unique) > 1:
         return "all"
     return unique[0]
@@ -143,10 +143,49 @@ def body_has_open_placeholders(text: str) -> bool:
     return bool(re.search(r"\{[^{}\n]{1,80}\}", text))
 
 
+# Инлайн-ссылка на статью в теле: ведущее слово «статья/статью/статьёй/…»
+# + номер. Глагол «стать» (без падежного окончания) намеренно не матчится.
+ARTICLE_REF_RE = re.compile(
+    r"(?P<lead>[Сс]тать(?:ями|ях|ям|ёй|ей|я|ю|и|е))\s+(?P<num>\d+)"
+)
+
+
+def linkify_article_refs(
+    body: str,
+    slug_by_source_id: dict[str, str],
+    title_by_source_id: dict[str, str],
+    *,
+    current_id: str,
+) -> str:
+    """Заменить инлайн-ссылки «статью N» на кликабельные названия статей.
+
+    «(см. статью 151)» → «(см. статью [<title 151>](/articles/<slug 151>))».
+    Ведущее слово сохраняется, **номер** заменяется markdown-ссылкой на
+    название целевой статьи (по клику — переход на `/articles/<slug>`).
+    Ссылки на неизвестные id (например, на документы) и на саму статью
+    (self-reference) остаются нетронутыми.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        num = match.group("num")
+        if num == current_id:
+            return match.group(0)
+        slug = slug_by_source_id.get(num)
+        title = title_by_source_id.get(num)
+        if not slug or not title:
+            return match.group(0)
+        # Квадратные скобки в названии сломали бы markdown-ссылку.
+        safe_title = title.replace("[", "(").replace("]", ")")
+        return f"{match.group('lead')} [{safe_title}](/articles/{slug})"
+
+    return ARTICLE_REF_RE.sub(repl, body)
+
+
 def parse_articles(path: Path) -> list[dict[str, Any]]:
     text = path.read_text(encoding="utf-8")
     articles: list[dict[str, Any]] = []
     slug_by_source_id: dict[str, str] = {}
+    title_by_source_id: dict[str, str] = {}
     used_slugs: set[str] = set()
 
     matches = list(ARTICLE_RE.finditer(text))
@@ -164,6 +203,7 @@ def parse_articles(path: Path) -> list[dict[str, Any]]:
             slug = f"{base_slug}-{suffix}"[:80].rstrip("-")
         used_slugs.add(slug)
         slug_by_source_id[article_id] = slug
+        title_by_source_id[article_id] = title
 
     for match in matches:
         meta = parse_meta(match.group("meta"))
@@ -182,6 +222,11 @@ def parse_articles(path: Path) -> list[dict[str, Any]]:
         article_id = str(meta.get("id") or match.group("num"))
         slug = slug_by_source_id[article_id]
 
+        # Инлайн-ссылки «статью N» → кликабельные названия (до футера related).
+        body = linkify_article_refs(
+            body, slug_by_source_id, title_by_source_id, current_id=article_id
+        )
+
         related = meta.get("related")
         related_ids = related if isinstance(related, list) else []
         if related_ids:
@@ -189,10 +234,11 @@ def parse_articles(path: Path) -> list[dict[str, Any]]:
             for item in related_ids:
                 related_id = str(item)
                 related_slug = slug_by_source_id.get(related_id)
-                if related_slug:
-                    links.append(
-                        f"[Перейти к статье {related_id}](/articles/{related_slug})"
-                    )
+                related_title = title_by_source_id.get(related_id)
+                if related_slug and related_title:
+                    # Текст ссылки — название статьи, не номер (как и инлайн).
+                    safe_title = related_title.replace("[", "(").replace("]", ")")
+                    links.append(f"[{safe_title}](/articles/{related_slug})")
                 else:
                     links.append(f"статья {related_id}")
             related_line = "Связанные статьи: " + ", ".join(links)
@@ -264,40 +310,40 @@ async def import_direct_db(path: Path) -> int:
     async with factory() as session:
         existing_categories: dict[str, Category] = {}
         if categories:
-            result = await session.execute(
+            cat_result = await session.execute(
                 select(Category).where(Category.slug.in_([c["slug"] for c in categories]))
             )
-            existing_categories = {category.slug: category for category in result.scalars()}
+            existing_categories = {cat.slug: cat for cat in cat_result.scalars()}
 
         for category in categories:
-            existing = existing_categories.get(category["slug"])
-            if existing is None:
+            existing_cat = existing_categories.get(category["slug"])
+            if existing_cat is None:
                 session.add(Category(**category))
                 created_cats += 1
                 continue
 
             changed = False
             for key in ("title", "description"):
-                if getattr(existing, key) != category[key]:
-                    setattr(existing, key, category[key])
+                if getattr(existing_cat, key) != category[key]:
+                    setattr(existing_cat, key, category[key])
                     changed = True
-            if existing.archived_at is not None:
-                existing.archived_at = None
+            if existing_cat.archived_at is not None:
+                existing_cat.archived_at = None
                 changed = True
             if changed:
                 updated_cats += 1
 
         existing_articles: dict[str, Article] = {}
         if articles:
-            result = await session.execute(
+            art_result = await session.execute(
                 select(Article).where(Article.slug.in_([a["slug"] for a in articles]))
             )
-            existing_articles = {article.slug: article for article in result.scalars()}
+            existing_articles = {art.slug: art for art in art_result.scalars()}
 
         for article in articles:
             payload = {k: v for k, v in article.items() if not k.startswith("_")}
-            existing = existing_articles.get(payload["slug"])
-            if existing is None:
+            existing_art = existing_articles.get(payload["slug"])
+            if existing_art is None:
                 session.add(
                     Article(
                         **payload,
@@ -310,14 +356,14 @@ async def import_direct_db(path: Path) -> int:
 
             changed = False
             for key, value in payload.items():
-                if getattr(existing, key) != value:
-                    setattr(existing, key, value)
+                if getattr(existing_art, key) != value:
+                    setattr(existing_art, key, value)
                     changed = True
-            if existing.status == "PUBLISHED" and existing.published_at is None:
-                existing.published_at = now
+            if existing_art.status == "PUBLISHED" and existing_art.published_at is None:
+                existing_art.published_at = now
                 changed = True
             if changed:
-                existing.updated_at = now
+                existing_art.updated_at = now
                 updated_arts += 1
 
         await session.commit()
