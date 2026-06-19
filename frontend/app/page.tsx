@@ -129,6 +129,25 @@ export default async function Home(): Promise<JSX.Element> {
       {/* Header */}
       <header className="mb-12 flex items-center justify-between">
         <div>
+          {BASE_PATH === "/help" ? (
+            // Встроено в платформу (rehome.one/help): значок+надпись reHome
+            // как на главной, клик → редирект на главную rehome.one.
+            <a
+              href="https://rehome.one"
+              aria-label="reHome — на главную"
+              className="mb-3 inline-flex items-center gap-2 text-lg font-semibold tracking-tight"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="https://rehome.one/assets/locker-logo-mark.jpg"
+                alt=""
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded"
+              />
+              reHome
+            </a>
+          ) : null}
           <h1 className="text-3xl font-semibold tracking-tight">help.rehome.one</h1>
           <p className="mt-1 text-sm text-gray-600">
             Справочник, FAQ и помощник по аренде жилья
