@@ -44,9 +44,29 @@ export default async function Nav(): Promise<JSX.Element> {
     <nav className="border-b border-gray-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-6">
-          <Link href="/" className="font-semibold tracking-tight">
-            reHome
-          </Link>
+          {BASE_PATH === "/help" ? (
+            // Встроено в платформу (rehome.one/help): значок+надпись reHome
+            // как на главной, клик → редирект на главную rehome.one.
+            <a
+              href="https://rehome.one"
+              aria-label="reHome — на главную"
+              className="flex items-center gap-2 font-semibold tracking-tight"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="https://rehome.one/assets/locker-logo-mark.jpg"
+                alt=""
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded"
+              />
+              reHome
+            </a>
+          ) : (
+            <Link href="/" className="font-semibold tracking-tight">
+              reHome
+            </Link>
+          )}
           <ul className="flex items-center gap-4 text-sm text-gray-700">
             {visibleLinks.map((link) => (
               <li key={link.href}>
