@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Nav from "./nav";
 
@@ -10,6 +10,12 @@ const cookieStoreMock = {
 vi.mock("next/headers", () => ({
   cookies: vi.fn(async () => cookieStoreMock),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+const REHOME_BTN = "Авторизация в rehome";
 
 describe("Nav", () => {
   it("renders Login link when no session cookie", async () => {
@@ -55,5 +61,28 @@ describe("Nav", () => {
     expect(screen.getByText("Кадры")).toBeInTheDocument();
     expect(screen.getByText("Вебхуки")).toBeInTheDocument();
     expect(screen.getByText("Админ")).toBeInTheDocument();
+  });
+
+  it("показывает «Авторизация в rehome» анониму при заданном idp-hint", async () => {
+    vi.stubEnv("NEXT_PUBLIC_REHOME_IDP_HINT", "rehome");
+    cookieStoreMock.has.mockReturnValueOnce(false);
+    render(await Nav());
+    const btn = screen.getByText(REHOME_BTN);
+    expect(btn).toBeInTheDocument();
+    expect(btn.getAttribute("href")).toContain("kc_idp_hint=rehome");
+  });
+
+  it("прячет «Авторизация в rehome» без idp-hint (прод-сборка)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_REHOME_IDP_HINT", undefined as unknown as string);
+    cookieStoreMock.has.mockReturnValueOnce(false);
+    render(await Nav());
+    expect(screen.queryByText(REHOME_BTN)).not.toBeInTheDocument();
+  });
+
+  it("прячет «Авторизация в rehome» у залогиненного даже при idp-hint", async () => {
+    vi.stubEnv("NEXT_PUBLIC_REHOME_IDP_HINT", "rehome");
+    cookieStoreMock.has.mockReturnValueOnce(true);
+    render(await Nav());
+    expect(screen.queryByText(REHOME_BTN)).not.toBeInTheDocument();
   });
 });
