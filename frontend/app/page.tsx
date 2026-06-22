@@ -14,9 +14,9 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 
-import { getRehomeIdpHint } from "@/lib/auth/config";
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 import { BASE_PATH } from "@/lib/base-path";
+import { RehomeIdpButton } from "@/app/_components/rehome-idp-button";
 import { listCategories } from "@/lib/api/categories";
 import { listArticles } from "@/lib/api/articles";
 import type { ArticleSummary, Category } from "@/lib/api/types";
@@ -121,8 +121,6 @@ function toCategoryCards(categories: Category[]): CategoryCard[] {
 export default async function Home(): Promise<JSX.Element> {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.has(COOKIE_SESSION);
-  // brokered-login со стейджинговой платформой (кнопка — только если задан alias).
-  const rehomeIdpHint = getRehomeIdpHint();
 
   const [topFaq, categories] = await Promise.all([loadTopFaq(), loadCategories()]);
   const categoryCards = toCategoryCards(categories);
@@ -148,14 +146,7 @@ export default async function Home(): Promise<JSX.Element> {
           </form>
         ) : (
           <div className="flex items-center gap-2">
-            {rehomeIdpHint && (
-              <a
-                href={`${BASE_PATH}/api/auth/login?kc_idp_hint=${rehomeIdpHint}`}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-              >
-                Авторизация в rehome
-              </a>
-            )}
+            <RehomeIdpButton />
             <Link
               href="/login"
               className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
