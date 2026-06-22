@@ -41,6 +41,23 @@ describe("buildAuthorizationUrl", () => {
     expect(parsed.searchParams.get("code_challenge")).toBe("test-challenge");
     expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
   });
+
+  it("omits kc_idp_hint when idpHint not provided", () => {
+    const url = buildAuthorizationUrl(cfg, {
+      state: "s",
+      codeChallenge: "c",
+    });
+    expect(new URL(url).searchParams.has("kc_idp_hint")).toBe(false);
+  });
+
+  it("adds kc_idp_hint when idpHint provided (brokered-login)", () => {
+    const url = buildAuthorizationUrl(cfg, {
+      state: "s",
+      codeChallenge: "c",
+      idpHint: "rehome",
+    });
+    expect(new URL(url).searchParams.get("kc_idp_hint")).toBe("rehome");
+  });
 });
 
 describe("exchangeCodeForToken", () => {

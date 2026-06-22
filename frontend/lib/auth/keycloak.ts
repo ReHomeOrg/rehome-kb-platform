@@ -18,6 +18,11 @@ export interface TokenResponse {
 export interface AuthorizationParams {
   state: string;
   codeChallenge: string;
+  /**
+   * Optional alias upstream-IdP (`kc_idp_hint`): Keycloak сразу редиректит на
+   * этот brokered IdP, минуя свою форму логина (silent SSO при активной сессии).
+   */
+  idpHint?: string;
 }
 
 /**
@@ -37,6 +42,9 @@ export function buildAuthorizationUrl(
     code_challenge: params.codeChallenge,
     code_challenge_method: "S256",
   });
+  if (params.idpHint) {
+    queryParams.set("kc_idp_hint", params.idpHint);
+  }
   return `${issuer}/protocol/openid-connect/auth?${queryParams.toString()}`;
 }
 

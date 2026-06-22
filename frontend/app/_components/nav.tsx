@@ -15,6 +15,7 @@ import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 import { BASE_PATH } from "@/lib/base-path";
+import { RehomeIdpButton } from "./rehome-idp-button";
 
 const NAV_LINKS: ReadonlyArray<{
   href: string;
@@ -91,12 +92,15 @@ export default async function Nav(): Promise<JSX.Element> {
               </button>
             </form>
           ) : (
-            <Link
-              href="/login"
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
-            >
-              Войти
-            </Link>
+            <>
+              <RehomeIdpButton />
+              <Link
+                href="/login"
+                className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
+              >
+                Войти
+              </Link>
+            </>
           )}
         </div>
       </div>

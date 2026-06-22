@@ -16,6 +16,7 @@ import Link from "next/link";
 
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 import { BASE_PATH } from "@/lib/base-path";
+import { RehomeIdpButton } from "@/app/_components/rehome-idp-button";
 import { listCategories } from "@/lib/api/categories";
 import { listArticles } from "@/lib/api/articles";
 import type { ArticleSummary, Category } from "@/lib/api/types";
@@ -163,12 +164,15 @@ export default async function Home(): Promise<JSX.Element> {
             </button>
           </form>
         ) : (
-          <Link
-            href="/login"
-            className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
-          >
-            Войти
-          </Link>
+          <div className="flex items-center gap-2">
+            <RehomeIdpButton />
+            <Link
+              href="/login"
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
+            >
+              Войти
+            </Link>
+          </div>
         )}
       </header>
 
