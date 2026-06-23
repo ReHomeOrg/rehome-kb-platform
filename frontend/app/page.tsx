@@ -263,19 +263,21 @@ export default async function Home(): Promise<JSX.Element> {
         </ul>
       </section>
 
-      {/* AI chat CTA */}
-      <section className="mb-12 rounded-lg border border-indigo-200 bg-indigo-50/50 p-6 text-center">
-        <p className="text-lg font-medium">Не нашли ответ?</p>
-        <p className="mt-1 text-sm text-gray-700">
-          Задайте вопрос AI-ассистенту — он ответит цитатами из базы знаний.
-        </p>
-        <Link
-          href="/chat"
-          className="mt-4 inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          Открыть чат →
-        </Link>
-      </section>
+      {/* AI chat CTA — only for authenticated users */}
+      {isLoggedIn && (
+        <section className="mb-12 rounded-lg border border-indigo-200 bg-indigo-50/50 p-6 text-center">
+          <p className="text-lg font-medium">Не нашли ответ?</p>
+          <p className="mt-1 text-sm text-gray-700">
+            Задайте вопрос AI-ассистенту — он ответит цитатами из базы знаний.
+          </p>
+          <Link
+            href="/chat"
+            className="mt-4 inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Открыть чат →
+          </Link>
+        </section>
+      )}
 
       <footer className="mt-auto border-t border-gray-200 pt-6 text-xs text-gray-500">
         <p>
