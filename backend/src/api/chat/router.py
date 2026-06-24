@@ -33,6 +33,7 @@ from src.api.audit import (
     get_audit_repository,
 )
 from src.api.auth.dependency import get_current_access_levels, get_current_scope
+from src.api.auth.exceptions import UnauthorizedError
 from src.api.auth.scope import AccessLevel, Scope
 from src.api.chat.idempotency import process_chat_idempotency_key
 from src.api.chat.llm import LLMMessage, LLMProvider, get_llm_provider
@@ -105,6 +106,7 @@ async def create_session(
     owner: tuple[UUID | None, UUID | None] = Depends(extract_chat_owner),
     scope: Scope = Depends(get_current_scope),
     repo: ChatRepository = Depends(get_chat_repository),
+    settings: Settings = Depends(get_settings),
 ) -> ChatSessionResponse:
     """`POST /chat/sessions` — создать новую сессию.
 
@@ -118,6 +120,10 @@ async def create_session(
     при последующих GET/DELETE.
     """
     user_id, _ = owner
+    # Chat — только для залогиненных (CHAT_REQUIRE_AUTH). Анонимам в помощи
+    # остаются FAQ и статьи; чат-сессию создать нельзя.
+    if settings.chat_require_auth and user_id is None:
+        raise UnauthorizedError(detail="Authentication required")
     context = (
         payload.context.model_dump(mode="json")
         if payload is not None and payload.context is not None
@@ -441,6 +447,10 @@ async def send_message(
     5. `record_chat_turn` — atomic INSERT обоих сообщений с citations.
     """
     user_id, session_token = owner
+    # Chat — только для залогиненных (CHAT_REQUIRE_AUTH); defense-in-depth
+    # к гейту в create_session (анон не сможет создать сессию).
+    if settings.chat_require_auth and user_id is None:
+        raise UnauthorizedError(detail="Authentication required")
     session = await repo.get_session_by_owner(
         session_id, user_id=user_id, session_token=session_token
     )

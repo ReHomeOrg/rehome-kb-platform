@@ -162,6 +162,12 @@ class Settings(BaseSettings):
     chat_capture_unanswered_enabled: bool = Field(
         default=True, alias="CHAT_CAPTURE_UNANSWERED_ENABLED"
     )
+    # Chat доступен только залогиненным пользователям. True (secure default):
+    # анонимные клиенты (без user_id из JWT) получают 401 на создание сессии
+    # и отправку сообщений — в помощи им остаются FAQ и статьи. Анон-flow
+    # (X-Chat-Session-Token) сохранён в коде для тестов/гибкости, но в prod
+    # выключен флагом.
+    chat_require_auth: bool = Field(default=True, alias="CHAT_REQUIRE_AUTH")
     # Provider selection: 'mock' (default, deterministic SHA — для dev/tests),
     # 'hf' (sentence-transformers, production). HF provider land'ится в
     # follow-up; до тех пор `hf` режим fail-fast при startup.

@@ -120,6 +120,51 @@ def test_post_anon_returns_201_with_session_token_header(
     assert "session_token" not in body
 
 
+def test_post_anon_with_require_auth_returns_401(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CHAT_REQUIRE_AUTH=true: анонимный POST /sessions → 401 (чат только залогиненным)."""
+    monkeypatch.setenv("CHAT_REQUIRE_AUTH", "true")
+    resp = client.post("/api/v1/chat/sessions")
+    assert resp.status_code == 401
+
+
+def test_post_authed_with_require_auth_returns_201(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CHAT_REQUIRE_AUTH=true: залогиненный POST /sessions → 201 (доступ есть)."""
+    monkeypatch.setenv("CHAT_REQUIRE_AUTH", "true")
+    create_mock, *_ = override_repo
+    user_id = uuid4()
+    create_mock.return_value = _make_session(user_id=user_id)
+    token = make_jwt(roles=["tenant"], sub=str(user_id))
+    resp = client.post(
+        "/api/v1/chat/sessions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201
+
+
+def test_message_anon_with_require_auth_returns_401(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CHAT_REQUIRE_AUTH=true: анонимная отправка сообщения → 401 (defense-in-depth)."""
+    monkeypatch.setenv("CHAT_REQUIRE_AUTH", "true")
+    resp = client.post(
+        f"/api/v1/chat/sessions/{uuid4()}/messages",
+        json={"content": "привет"},
+        headers={"X-Chat-Session-Token": str(uuid4())},
+    )
+    assert resp.status_code == 401
+
+
 def test_post_with_jwt_returns_201_without_session_token_header(
     client: TestClient,
     override_repo: tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock],

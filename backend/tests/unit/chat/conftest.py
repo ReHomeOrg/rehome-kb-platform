@@ -10,6 +10,18 @@ from src.api.chat.llm import factory as _llm_factory
 
 
 @pytest.fixture(autouse=True)
+def _chat_auth_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """По умолчанию отключаем CHAT_REQUIRE_AUTH в chat-тестах.
+
+    Большинство тестов проверяют анонимный flow (X-Chat-Session-Token),
+    который остаётся валидным механизмом при выключенном флаге. Тесты
+    энфорсмента (chat только для залогиненных) ставят флаг обратно в `true`
+    через `monkeypatch.setenv` в теле теста (перекрывает этот autouse).
+    """
+    monkeypatch.setenv("CHAT_REQUIRE_AUTH", "false")
+
+
+@pytest.fixture(autouse=True)
 def _reset_llm_singleton() -> Iterator[None]:
     """Изолирует module-level LLM provider singleton между tests.
 

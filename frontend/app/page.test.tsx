@@ -188,11 +188,21 @@ describe("Home (help.rehome.one landing)", () => {
     expect(screen.queryByText(/Популярные вопросы/i)).not.toBeInTheDocument();
   });
 
-  it("renders AI chat CTA pointing к /chat", async () => {
+  it("renders AI chat CTA pointing к /chat for logged-in users", async () => {
+    setCookies({ has: (name: string) => name === "kb_session" });
     const tree = await Home();
     render(tree);
     const ctaLink = screen.getByRole("link", { name: /Открыть чат/i });
     expect(ctaLink).toHaveAttribute("href", "/chat");
+  });
+
+  it("hides AI chat CTA for anonymous visitors (chat — только залогиненным)", async () => {
+    setCookies({ has: () => false });
+    const tree = await Home();
+    render(tree);
+    expect(
+      screen.queryByRole("link", { name: /Открыть чат/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders 'Войти' link when no kb_session cookie", async () => {
