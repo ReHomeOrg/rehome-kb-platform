@@ -73,6 +73,32 @@ def resolve_system_prompt(overlay: dict[str, Any] | None) -> str:
     return DEFAULT_SYSTEM_PROMPT
 
 
+# Правило приветствия: «Здравствуйте» — только один раз в течение одного
+# календарного дня (по таймзоне Москвы). Первый ответ ассистента за день
+# несёт приветствие, последующие — нет. Условие (`greeted_today`)
+# вычисляется в router'е из истории диалога; директива дописывается к
+# system prompt, т.к. сам LLM не знает, здоровался ли он сегодня.
+GREETING_DIRECTIVE_FIRST = (
+    "Это твой первый ответ пользователю за сегодняшний календарный день — "
+    "начни ответ с приветствия «Здравствуйте»."
+)
+GREETING_DIRECTIVE_REPEAT = (
+    "Сегодня ты уже здоровался с пользователем — НЕ пиши «Здравствуйте» и не "
+    "используй других приветствий, сразу переходи к сути ответа."
+)
+
+
+def build_greeting_directive(*, greeted_today: bool) -> str:
+    """Директива приветствия в зависимости от того, был ли уже greeting сегодня."""
+    return GREETING_DIRECTIVE_REPEAT if greeted_today else GREETING_DIRECTIVE_FIRST
+
+
+def apply_greeting_rule(prompt: str, *, greeted_today: bool) -> str:
+    """Дописать к system prompt правило «Здравствуйте раз в календарный день»."""
+    directive = build_greeting_directive(greeted_today=greeted_today)
+    return f"{prompt}\n\n## Приветствие\n{directive}"
+
+
 def build_rag_system_prompt(
     chunks: list[RetrievalHit],
     *,

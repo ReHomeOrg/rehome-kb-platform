@@ -11,15 +11,24 @@
 
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.api.chat.models import ChatMessage, ChatSession
 from src.api.chat.repository import ChatRepository, get_chat_repository
+from src.api.chat.router import _assistant_greeted_today
 from src.api.main import app
+
+_MSK = ZoneInfo("Europe/Moscow")
+
+
+def _hist_msg(role: str, created: datetime) -> SimpleNamespace:
+    return SimpleNamespace(role=role, created_at=created)
 
 
 def _make_session(user_id: object = None, session_token: object = None) -> ChatSession:
@@ -376,3 +385,39 @@ def test_delete_invalid_uuid_path_returns_422(
 ) -> None:
     resp = client.delete("/api/v1/chat/sessions/not-a-uuid")
     assert resp.status_code == 422
+
+
+# --- правило приветствия: «Здравствуйте» раз в календарный день (МСК) ---
+
+
+def test_greeted_today_false_for_empty_history() -> None:
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=_MSK)
+    assert _assistant_greeted_today([], now=now) is False
+
+
+def test_greeted_today_true_when_assistant_answered_today() -> None:
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=_MSK)
+    history = [_hist_msg("assistant", now - timedelta(hours=2))]
+    assert _assistant_greeted_today(history, now=now) is True
+
+
+def test_greeted_today_false_when_only_yesterday() -> None:
+    now = datetime(2026, 6, 24, 9, 0, tzinfo=_MSK)
+    history = [
+        _hist_msg("user", now - timedelta(days=1)),
+        _hist_msg("assistant", now - timedelta(days=1)),
+    ]
+    assert _assistant_greeted_today(history, now=now) is False
+
+
+def test_greeted_today_ignores_user_messages() -> None:
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=_MSK)
+    history = [_hist_msg("user", now - timedelta(minutes=5))]
+    assert _assistant_greeted_today(history, now=now) is False
+
+
+def test_greeted_today_naive_created_at_treated_as_utc() -> None:
+    # 00:30 UTC = 03:30 MSK того же дня → считается «сегодня» в МСК.
+    now = datetime(2026, 6, 24, 4, 0, tzinfo=_MSK)
+    history = [_hist_msg("assistant", datetime(2026, 6, 24, 0, 30))]
+    assert _assistant_greeted_today(history, now=now) is True

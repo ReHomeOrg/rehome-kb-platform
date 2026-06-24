@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -55,6 +56,7 @@ from src.api.chat.schemas import (
 )
 from src.api.chat.sse import format_sse_event
 from src.api.chat.system_prompt import (
+    apply_greeting_rule,
     build_rag_system_prompt,
     hits_to_citations,
     resolve_system_prompt,
@@ -285,6 +287,34 @@ async def _retrieve_chunks_for_rag(
         return []
 
 
+# «Календарный день» для правила приветствия — по таймзоне Москвы (reHome
+# работает в МСК; граница суток считается по локальному времени пользователя).
+_GREETING_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _assistant_greeted_today(
+    history_messages: list[object], *, now: datetime | None = None
+) -> bool:
+    """True, если ассистент уже отвечал сегодня в этом диалоге.
+
+    Приветствие «Здравствуйте» добавляется только в первый ответ ассистента
+    за календарный день (МСК), поэтому наличие assistant-сообщения за сегодня
+    означает, что приветствие уже было. naive `created_at` трактуется как UTC.
+    """
+    today = (now or datetime.now(tz=_GREETING_TZ)).astimezone(_GREETING_TZ).date()
+    for message in history_messages:
+        if getattr(message, "role", None) != "assistant":
+            continue
+        created = getattr(message, "created_at", None)
+        if not isinstance(created, datetime):
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        if created.astimezone(_GREETING_TZ).date() == today:
+            return True
+    return False
+
+
 def _build_llm_history(history_messages: list[object], new_user_content: str) -> list[LLMMessage]:
     """Конвертировать DB messages + new user content в LLMMessage list.
 
@@ -440,6 +470,12 @@ async def send_message(
         overlay = {}
     base_prompt = resolve_system_prompt(overlay)
     system_prompt = build_rag_system_prompt(retrieved_chunks, base_prompt=base_prompt)
+    # Правило приветствия: «Здравствуйте» — один раз за календарный день (МСК).
+    # `history` ещё не содержит текущую пару сообщений, поэтому первый ответ
+    # за день увидит greeted_today=False, последующие — True.
+    system_prompt = apply_greeting_rule(
+        system_prompt, greeted_today=_assistant_greeted_today(list(history))
+    )
     citations = hits_to_citations(retrieved_chunks)
 
     # #222 / ТЗ §5.1: fire `chat.no_answer` если RAG включён, но не

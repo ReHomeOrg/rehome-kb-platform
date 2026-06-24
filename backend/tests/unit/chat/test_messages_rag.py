@@ -231,7 +231,9 @@ def test_rag_disabled_does_not_call_retrieval(
     assert record_turn_mock.call_args.kwargs["citations"] == []
     # System prompt unchanged.
     sys_prompt = override_llm.call_args.args[1]
-    assert sys_prompt == SYSTEM_PROMPT
+    # RAG не augment'ил base prompt; greeting-директива дописывается отдельно.
+    assert sys_prompt.startswith(SYSTEM_PROMPT)
+    assert "## Контекст из базы знаний" not in sys_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +368,9 @@ def test_rag_retrieval_exception_degrades_gracefully(
     assert record_turn_mock.call_args.kwargs["citations"] == []
     # System prompt не augmented.
     sys_prompt = override_llm.call_args.args[1]
-    assert sys_prompt == SYSTEM_PROMPT
+    # RAG не augment'ил base prompt; greeting-директива дописывается отдельно.
+    assert sys_prompt.startswith(SYSTEM_PROMPT)
+    assert "## Контекст из базы знаний" not in sys_prompt
 
 
 def test_rag_enabled_empty_retrieval_unchanged_prompt(
@@ -393,7 +397,9 @@ def test_rag_enabled_empty_retrieval_unchanged_prompt(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert record_turn_mock.call_args.kwargs["citations"] == []
-    assert override_llm.call_args.args[1] == SYSTEM_PROMPT
+    empty_sys_prompt = override_llm.call_args.args[1]
+    assert empty_sys_prompt.startswith(SYSTEM_PROMPT)
+    assert "## Контекст из базы знаний" not in empty_sys_prompt
 
 
 # ---------------------------------------------------------------------------

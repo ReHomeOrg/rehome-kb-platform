@@ -8,9 +8,13 @@ from uuid import UUID
 
 from src.api.chat.system_prompt import (
     DEFAULT_SYSTEM_PROMPT,
+    GREETING_DIRECTIVE_FIRST,
+    GREETING_DIRECTIVE_REPEAT,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_MAX_LENGTH,
     SYSTEM_PROMPT_OVERLAY_KEY,
+    apply_greeting_rule,
+    build_greeting_directive,
     build_rag_system_prompt,
     resolve_system_prompt,
 )
@@ -113,3 +117,32 @@ def test_build_rag_with_chunks_explicit_none_uses_default() -> None:
     """base_prompt=None (explicit) → DEFAULT (idempotent)."""
     prompt = build_rag_system_prompt([_hit()], base_prompt=None)
     assert prompt.startswith(DEFAULT_SYSTEM_PROMPT)
+
+
+def test_greeting_directive_first_when_not_greeted() -> None:
+    """greeted_today=False → директива поздороваться «Здравствуйте»."""
+    directive = build_greeting_directive(greeted_today=False)
+    assert directive == GREETING_DIRECTIVE_FIRST
+    assert "Здравствуйте" in directive
+
+
+def test_greeting_directive_repeat_when_greeted() -> None:
+    """greeted_today=True → директива не здороваться повторно."""
+    directive = build_greeting_directive(greeted_today=True)
+    assert directive == GREETING_DIRECTIVE_REPEAT
+    assert "НЕ пиши" in directive
+
+
+def test_apply_greeting_rule_first_appends_greet_instruction() -> None:
+    """Правило дописывается к prompt, base сохраняется, велит поздороваться."""
+    out = apply_greeting_rule("BASE PROMPT", greeted_today=False)
+    assert out.startswith("BASE PROMPT")
+    assert GREETING_DIRECTIVE_FIRST in out
+    assert "## Приветствие" in out
+
+
+def test_apply_greeting_rule_repeat_says_no_greeting() -> None:
+    """greeted_today=True → в prompt директива не здороваться."""
+    out = apply_greeting_rule("BASE PROMPT", greeted_today=True)
+    assert out.startswith("BASE PROMPT")
+    assert GREETING_DIRECTIVE_REPEAT in out
