@@ -14,12 +14,19 @@ external LLM API (phones / emails / СНИЛС / passport / ИНН / cards).
 """
 
 import logging
+import re
 from typing import Any
 
 from src.api.chat.pii_masking import mask_pii
 from src.api.search.repository import RetrievalHit
 
 logger = logging.getLogger(__name__)
+
+# #383: источники показываются пользователю отдельным блоком citations (карточки
+# со ссылками), поэтому inline-сноски вида `[2]` в тексте ответа — визуальный
+# шум. Паттерн ловит только числовые маркеры `[N]` (не трогает `[важно]` и
+# markdown-ссылки `[текст](url)`), опционально съедая пробел перед ними.
+_CITATION_MARKER_RE = re.compile(r" ?\[\d+\]")
 
 # `system_config` overlay key для системного prompt'а. Соответствует
 # `MUTABLE_KEYS` в `admin/system_config_repository.py`.
@@ -124,9 +131,10 @@ def build_rag_system_prompt(
         "",
         "## Контекст из базы знаний",
         "",
-        "Используй приведённые фрагменты для ответа. Цитируй источники в формате `[N]` "
-        "где N — номер фрагмента ниже. Если фрагменты не содержат ответа — скажи "
-        "об этом и не выдумывай.",
+        "Используй приведённые фрагменты для ответа. НЕ вставляй в текст ответа "
+        "номера источников в квадратных скобках (вида [1], [2]) — источники "
+        "показываются пользователю отдельно. Если фрагменты не содержат ответа — "
+        "скажи об этом и не выдумывай.",
         "",
     ]
     # #338 ФЗ-152 Stage 2: mask ПДн в chunk text перед отправкой в LLM.
@@ -147,6 +155,18 @@ def build_rag_system_prompt(
             extra={"counts": total_masks, "chunks": len(chunks)},
         )
     return "\n".join(lines)
+
+
+def strip_citation_markers(text: str) -> str:
+    """Удалить inline-сноски `[N]` из текста ответа ассистента (#383).
+
+    Defensive-нетто поверх prompt-инструкции «не используй [N]»: LLM —
+    вероятностная модель и изредка всё же вставляет маркер. Источники
+    отдаются клиенту отдельным `citations`-блоком, поэтому `[2]` в тексте —
+    только визуальный шум. Трогает лишь числовые маркеры; markdown-ссылки
+    `[текст](url)` и `[слово]` не затрагиваются.
+    """
+    return _CITATION_MARKER_RE.sub("", text)
 
 
 def hits_to_citations(chunks: list[RetrievalHit]) -> list[dict[str, Any]]:

@@ -17,6 +17,7 @@ from src.api.chat.system_prompt import (
     build_greeting_directive,
     build_rag_system_prompt,
     resolve_system_prompt,
+    strip_citation_markers,
 )
 from src.api.search.repository import RetrievalHit
 
@@ -146,3 +147,53 @@ def test_apply_greeting_rule_repeat_says_no_greeting() -> None:
     out = apply_greeting_rule("BASE PROMPT", greeted_today=True)
     assert out.startswith("BASE PROMPT")
     assert GREETING_DIRECTIVE_REPEAT in out
+
+
+# ---------------------------------------------------------------------------
+# strip_citation_markers (#383): inline `[N]` сноски убираются из ответа
+
+
+def test_strip_removes_single_marker_with_leading_space() -> None:
+    """`текст [2].` → `текст.` (маркер и пробел перед ним срезаны)."""
+    assert strip_citation_markers("Страховка покрывает ремонт [2].") == (
+        "Страховка покрывает ремонт."
+    )
+
+
+def test_strip_removes_multiple_markers() -> None:
+    assert strip_citation_markers("a [1] b [22] c [333]") == "a b c"
+
+
+def test_strip_no_markers_unchanged() -> None:
+    text = "Ответ без сносок, просто текст."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_ignores_markdown_links() -> None:
+    """Markdown-ссылки `[текст](url)` не трогаются (не числовой маркер)."""
+    text = "См. статью [Ремонт техники](/articles/remont)."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_ignores_non_numeric_brackets() -> None:
+    """`[важно]` и прочие не-числовые скобки остаются."""
+    text = "Это [важно] и [NB] помнить."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_marker_at_start() -> None:
+    """Маркер в начале строки тоже убирается (проверяем суть, не пробелы)."""
+    out = strip_citation_markers("[1] начало ответа")
+    assert "[1]" not in out
+    assert "начало ответа" in out
+
+
+# ---------------------------------------------------------------------------
+# build_rag_system_prompt: RAG-блок больше НЕ просит формат `[N]`
+
+
+def test_build_rag_instruction_forbids_bracket_markers() -> None:
+    """Инструкция RAG-блока велит НЕ вставлять `[N]`, а не цитировать ими."""
+    prompt = build_rag_system_prompt([_hit(text="frag")], base_prompt="BASE")
+    assert "НЕ вставляй" in prompt
+    assert "в квадратных скобках" in prompt
