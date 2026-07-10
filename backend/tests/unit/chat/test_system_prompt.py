@@ -181,11 +181,21 @@ def test_strip_ignores_non_numeric_brackets() -> None:
     assert strip_citation_markers(text) == text
 
 
-def test_strip_marker_at_start() -> None:
-    """Маркер в начале строки тоже убирается (проверяем суть, не пробелы)."""
-    out = strip_citation_markers("[1] начало ответа")
-    assert "[1]" not in out
-    assert "начало ответа" in out
+def test_strip_marker_at_start_leaves_leading_space() -> None:
+    """Маркер в самом начале строки убирается, но оставляет ведущий пробел —
+    принятое ограничение (LLM не начинает ответ с `[N]`, см. коммент у regex)."""
+    assert strip_citation_markers("[1] начало ответа") == " начало ответа"
+
+
+def test_strip_marker_glued_between_words_documents_limitation() -> None:
+    """Маркер вплотную без пробелов склеивает слова — принятое ограничение
+    defensive-нетто (реальный LLM пишет `[N]` с пробелом)."""
+    assert strip_citation_markers("ремонт[3]техники") == "ремонттехники"
+
+
+def test_strip_multi_digit_marker() -> None:
+    """Многозначные `[N]` тоже срезаются (как источники не встречаются)."""
+    assert strip_citation_markers("текст [1000] дальше") == "текст дальше"
 
 
 # ---------------------------------------------------------------------------
