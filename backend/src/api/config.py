@@ -155,6 +155,14 @@ class Settings(BaseSettings):
     # foundation landed в off-state, явный flip когда indexer + endpoint
     # готовы. Эмбеддинги через self-hosted model (ФЗ-152: no external API).
     rag_enabled: bool = Field(default=False, alias="RAG_ENABLED")
+    # Confidence-gated escalation (#382, Tier 2). Порог top-score хита, ниже
+    # которого retrieval считается «нет уверенного контекста» → в system
+    # prompt добавляется no-context директива (честно сказать «не нашёл в
+    # базе» + предложить поддержку), вместо дежурной эскалации в каждом
+    # ответе. `0.0` default = порог ВЫКЛЮЧЕН: сигнал только по пустому
+    # retrieval (robust). Значение >0 включает score-порог — калибровать
+    # под конкретный корпус (RRF fused score, higher=better для hybrid).
+    rag_min_confidence_score: float = Field(default=0.0, alias="RAG_MIN_CONFIDENCE_SCORE")
     # Chat unanswered query capture (2026-05-29). При RAG_ENABLED + query
     # без relevant chunks → пишется в chat_unanswered_queries для admin
     # moderation queue. Default True — feature gated на RAG_ENABLED, так что

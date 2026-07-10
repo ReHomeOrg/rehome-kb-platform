@@ -58,7 +58,9 @@ from src.api.chat.schemas import (
 from src.api.chat.sse import format_sse_event
 from src.api.chat.system_prompt import (
     apply_greeting_rule,
+    apply_no_context_rule,
     build_rag_system_prompt,
+    has_usable_context,
     hits_to_citations,
     resolve_system_prompt,
 )
@@ -480,6 +482,20 @@ async def send_message(
         overlay = {}
     base_prompt = resolve_system_prompt(overlay)
     system_prompt = build_rag_system_prompt(retrieved_chunks, base_prompt=base_prompt)
+    # Confidence-gated escalation (#382, Tier 2): если RAG не дал уверенного
+    # контекста (пусто / top-score ниже порога) — дописываем no-context
+    # директиву, чтобы модель честно сказала «не нашёл в базе» и предложила
+    # поддержку. Эскалация к оператору = крайняя мера, привязанная к реальному
+    # отсутствию ответа, а не дежурная приписка. При RAG off контекста и так
+    # нет по дизайну — гейтим на rag_enabled, чтобы не форсить no-context в
+    # не-RAG режиме.
+    if settings.rag_enabled:
+        system_prompt = apply_no_context_rule(
+            system_prompt,
+            has_context=has_usable_context(
+                retrieved_chunks, min_score=settings.rag_min_confidence_score
+            ),
+        )
     # Правило приветствия: «Здравствуйте» — один раз за календарный день (МСК).
     # `history` ещё не содержит текущую пару сообщений, поэтому первый ответ
     # за день увидит greeted_today=False, последующие — True.

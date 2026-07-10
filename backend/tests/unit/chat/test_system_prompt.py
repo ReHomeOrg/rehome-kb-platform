@@ -10,25 +10,28 @@ from src.api.chat.system_prompt import (
     DEFAULT_SYSTEM_PROMPT,
     GREETING_DIRECTIVE_FIRST,
     GREETING_DIRECTIVE_REPEAT,
+    NO_CONTEXT_DIRECTIVE,
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_MAX_LENGTH,
     SYSTEM_PROMPT_OVERLAY_KEY,
     apply_greeting_rule,
+    apply_no_context_rule,
     build_greeting_directive,
     build_rag_system_prompt,
+    has_usable_context,
     resolve_system_prompt,
 )
 from src.api.search.repository import RetrievalHit
 
 
-def _hit(text: str = "fragment") -> RetrievalHit:
+def _hit(text: str = "fragment", score: float = 0.5) -> RetrievalHit:
     return RetrievalHit(
         article_id=UUID("00000000-0000-0000-0000-000000000001"),
         slug="x",
         title="t",
         chunk_index=0,
         text=text,
-        score=0.5,
+        score=score,
         char_start=0,
         char_end=10,
     )
@@ -146,3 +149,57 @@ def test_apply_greeting_rule_repeat_says_no_greeting() -> None:
     out = apply_greeting_rule("BASE PROMPT", greeted_today=True)
     assert out.startswith("BASE PROMPT")
     assert GREETING_DIRECTIVE_REPEAT in out
+
+
+# ---------------------------------------------------------------------------
+# Confidence-gated escalation (#382, Tier 2): has_usable_context
+
+
+def test_has_usable_context_empty_is_false() -> None:
+    """Пустой retrieval → нет уверенного контекста."""
+    assert has_usable_context([]) is False
+
+
+def test_has_usable_context_nonempty_no_threshold_is_true() -> None:
+    """Непустой retrieval при выключенном пороге (min_score=0) → есть контекст."""
+    assert has_usable_context([_hit()]) is True
+
+
+def test_has_usable_context_above_threshold_is_true() -> None:
+    """Top-score выше порога → есть контекст."""
+    assert has_usable_context([_hit(score=0.6)], min_score=0.5) is True
+
+
+def test_has_usable_context_below_threshold_is_false() -> None:
+    """Top-score ниже порога → контекста нет (data-driven эскалация)."""
+    assert has_usable_context([_hit(score=0.1)], min_score=0.5) is False
+
+
+def test_has_usable_context_uses_max_score() -> None:
+    """Порог сверяется с ЛУЧШИМ (максимальным) score хита, не первым."""
+    hits = [_hit(score=0.1), _hit(score=0.6)]
+    assert has_usable_context(hits, min_score=0.5) is True
+
+
+def test_has_usable_context_empty_ignores_threshold() -> None:
+    """Пустой retrieval → False независимо от порога."""
+    assert has_usable_context([], min_score=0.9) is False
+
+
+# ---------------------------------------------------------------------------
+# Confidence-gated escalation: apply_no_context_rule
+
+
+def test_apply_no_context_rule_appends_when_no_context() -> None:
+    """has_context=False → дописывается no-context директива, base сохраняется."""
+    out = apply_no_context_rule("BASE PROMPT", has_context=False)
+    assert out.startswith("BASE PROMPT")
+    assert NO_CONTEXT_DIRECTIVE in out
+    assert "поддержку" in out
+
+
+def test_apply_no_context_rule_idempotent_when_has_context() -> None:
+    """has_context=True → prompt без изменений (no-context не дописывается)."""
+    out = apply_no_context_rule("BASE PROMPT", has_context=True)
+    assert out == "BASE PROMPT"
+    assert NO_CONTEXT_DIRECTIVE not in out
