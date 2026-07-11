@@ -99,6 +99,52 @@ def apply_greeting_rule(prompt: str, *, greeted_today: bool) -> str:
     return f"{prompt}\n\n## Приветствие\n{directive}"
 
 
+# Confidence-gated escalation (#382, Tier 2). Директива дописывается к system
+# prompt ТОЛЬКО когда retrieval не дал уверенного контекста (пусто или top-score
+# ниже порога). Делает эскалацию data-driven — «нет ответа в базе» → предложить
+# поддержку, — вместо дежурной приписки про оператора в каждом ответе (это
+# отдельно вычищено в chat.system_prompt overlay, Tier 1).
+NO_CONTEXT_DIRECTIVE = (
+    "## Нет данных в базе знаний\n"
+    "По этому вопросу в базе знаний reHome не нашлось релевантной информации. "
+    "Не выдумывай ответ и не приводи вымышленные факты. Честно сообщи, что не "
+    "нашёл информации по этому вопросу в базе знаний, и предложи обратиться в "
+    "поддержку за помощью."
+)
+
+
+def has_usable_context(
+    chunks: list[RetrievalHit],
+    *,
+    min_score: float = 0.0,
+) -> bool:
+    """Есть ли у retrieval уверенный контекст для ответа.
+
+    `False` когда chunks пусты. При `min_score > 0` дополнительно требует,
+    чтобы лучший (максимальный) score хита был не ниже порога — RRF fused
+    score для hybrid retrieval: higher = better. `min_score <= 0` (default)
+    отключает score-гейт: сигнал строится только на непустом retrieval
+    (robust — абсолютный порог по RRF хрупок, калибруется под корпус).
+    """
+    if not chunks:
+        return False
+    if min_score <= 0.0:
+        return True
+    return max(hit.score for hit in chunks) >= min_score
+
+
+def apply_no_context_rule(prompt: str, *, has_context: bool) -> str:
+    """Дописать no-context директиву к system prompt, если контекста нет.
+
+    Idempotent при `has_context=True` — возвращает prompt без изменений.
+    Так эскалация к оператору становится крайней мерой, привязанной к
+    реальному отсутствию ответа в базе, а не к каждому ответу.
+    """
+    if has_context:
+        return prompt
+    return f"{prompt}\n\n{NO_CONTEXT_DIRECTIVE}"
+
+
 def build_rag_system_prompt(
     chunks: list[RetrievalHit],
     *,
