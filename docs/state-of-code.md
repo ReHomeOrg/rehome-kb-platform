@@ -991,3 +991,92 @@ Code-only self-serve backlog **исчерпан** для текущего horizo
   против running Grafana (ops dep).
 - **Real LLM creds + golden dataset 200 pairs** — без изменений
   с CS.11 (ops + content team).
+
+---
+
+# Current State (2026-07-11)
+
+> Refresh после «чат-эпопеи» июля 2026: разобрана и починена продовая
+> топология KB-чата (два деплоя), анонимный виджет на главной переведён
+> на канонический backend, эскалация сделана крайней мерой, из ответов
+> убраны технические сноски `[N]`, донастроена человечность. Полная
+> фиксация архитектурных решений — **ADR-0028**.
+
+**Метрики проекта (delta vs 2026-05-30):**
+- **28 ADRs** (0001–0028; +ADR-0028 «Публичный анонимный чат-виджет →
+  канонический KB-backend; эскалация как крайняя мера; цитаты отдельным
+  блоком»).
+- Merged PR'ы этой сессии: **#381** (Issue #383, confidence-gated
+  эскалация), **#382** (Issue #384, стрип inline-`[N]`). Оба squash→main,
+  задеплоены на 93.x. Ранее в июле: **v7.3** импорт (296 статей),
+  `#380` (307-редирект `/chat` для анонимов).
+- Миграций не добавлено (изменения — chat-логика + prompt/config).
+- Тесты чата: 57 unit в `test_system_prompt.py` + `test_messages_rag.py`
+  (включая новые `has_usable_context`/`apply_no_context_rule`/
+  `strip_citation_markers` + router-интеграционные). ruff + mypy strict clean.
+
+## CS.15. Продовая топология KB-чата (два деплоя)
+
+**Канонический backend — `help.rehome.one` → 93.77.180.57 (Yandex Cloud).**
+`rehome-kb-platform-api` (образ `rehome/kb-platform-indexer:local`, собирается
+вручную `docker build -f backend/Dockerfile.indexer`, т.к. несёт hf-эмбеддинги),
+БД `rehome_kb` c KB v7.3 (296 статей), LLM=YandexGPT, EMBEDDING=hf. Здесь
+работает и `/help`-чат, и (через прокси) виджет с главной. Деплой ручной:
+`git pull main` → rebuild образа → `docker compose -f docker-compose.prod.yml
+up -d --no-deps --force-recreate kb-platform-api`.
+
+**Главный сайт — `rehome.one` → 95.213.154.92 (Selectel).** `rehome-frontend-prod`
+(Next.js главного сайта) + отдельный `rehome-kb-frontend-prod` (`/help`). У 95.x
+**нет** своего «настоящего» KB-backend — оба фронта проксируют на 93.x. Раньше
+compose-дефолт указывал на per-stack **mock**-backend (`rehome-kb-backend`,
+LLM/EMBEDDING=mock, старая БД 164 статьи) — это был источник «корявых» mock-ответов
+виджета. Теперь дефолты в hand-maintained `/app/docker-compose.yml` (деплой их не
+регенерит, в отличие от `.env` из GH-секрета `ENV_FILE_PROD`) указывают на
+`https://help.rehome.one/api/platform`; теги образов запиннены. Mock-backend
+декоммишен как backend виджета (тома сохранены).
+
+## CS.16. Виджет «Ассистент поддержки» (анонимный, главная)
+
+`rehome-frontend-next/src/widgets/SupportWidget` — анонимный чат на главной.
+Зовёт `/api/kb/chat/sessions` → главный фронт (`src/app/api/kb/[...path]`)
+проксирует на `KB_BACKEND_INTERNAL_URL` (= 93.x). Анон-flow через
+`X-Chat-Session-Token`. Для его работы на 93.x включён `CHAT_REQUIRE_AUTH=false`
+(в `.env.kb-platform`) — это **амендит** backend-энфорс из PR #379: auth-гейт
+`/help`-чата теперь на frontend-редиректе (`app/chat/layout.tsx` → `/login`), а не
+на backend. См. ADR-0028 (компромисс security-posture).
+
+## CS.17. Эскалация — крайняя мера + человечность
+
+- **Overlay-промпт** (`chat.system_prompt`, ADR-0019, в `system_config` БД 93.x,
+  эффект без деплоя): эскалация к оператору только при явных триггерах (нет ответа
+  в базе / нужен человек / конфликт-юрспор / явный запрос), без дежурной приписки;
+  человечный тон, прямой ответ «кто платит», без канцелярита.
+- **Confidence-gate в коде** (PR #381): `has_usable_context()` +
+  `apply_no_context_rule()` + `RAG_MIN_CONFIDENCE_SCORE` — no-context директива в
+  system prompt только при пустом/слабом retrieval (гейт на `RAG_ENABLED`).
+
+## CS.18. Презентация цитат — без inline-`[N]`
+
+`build_rag_system_prompt` больше не просит формат `[N]`, а запрещает его в тексте;
+`strip_citation_markers()` (regex `[N]`, не трогает markdown-ссылки/не-числовые
+скобки) срезает остаточные маркеры в JSON-ответе и persist SSE (PR #382). Источники
+пользователь видит отдельным блоком `citations` (карточки со ссылками).
+
+## CS.19. Валидация на проде (2026-07-11)
+
+Через реальный путь виджета (аноним) и полный auth-code флоу (логин): сайты +
+backend 200; логин `/help/api/auth/login`→307 (KC), `refresh`→401, `session-info`→200,
+полный вход → `kb_session` + сессия 201 + SSE; виджет-чат — сессия 201, ответ
+по v7.3, **`[N]`=0, приписка-оператор=0** (6 прогонов). Логин/авторизация не
+затронуты (правки только в backend-логике чата на 93.x).
+
+## CS.20. Хвосты (после эпопеи)
+
+- **Tier 3 (function-calling / агентность):** сверено с OpenAI function-calling
+  best practices — чат сейчас чистый RAG без инструментов. Дать агенту tools
+  (действия) ИЛИ маршрутизировать виджет через уже существующий `kb-concierge`
+  (tool-layer/guardrails/handoff) — вынесено в отдельное проектное обсуждение.
+- Вернуть backend-энфорс auth для `/help`-чата в форме, различающей анон-виджет и
+  `/help` (per-client policy) — см. ADR-0028 «Технические следствия».
+- SSE-путь `streamMessage` во фронте не делает refresh-on-401 — отдельный мелкий
+  фикс UX при истечении токена в долгих сессиях.
