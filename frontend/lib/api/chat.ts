@@ -203,11 +203,21 @@ export async function* streamMessage(
     Accept: "text/event-stream",
     ...chatHeaders(opts),
   };
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(input),
-  });
+  const send = (): Promise<Response> =>
+    fetch(url, { method: "POST", headers, body: JSON.stringify(input) });
+
+  let response = await send();
+  // Refresh-on-401 (#386): истёкший access_token в cookie → SSE-proxy
+  // отвечает 401 ДО начала стрима (как обычный ответ). Как в `apiFetch`,
+  // делаем один refresh + retry, чтобы долгая сессия не рвалась «ошибкой
+  // связи с сервером». Browser-only (SSE-стрим только на клиенте); свежий
+  // `kb_session` cookie подхватывается повторным `fetch` автоматически.
+  if (response.status === 401 && typeof window !== "undefined") {
+    const { tryRefresh } = await import("./client");
+    if (await tryRefresh()) {
+      response = await send();
+    }
+  }
   if (!response.ok || !response.body) {
     const { ApiError } = await import("./client");
     const body = await response.json().catch(() => null);

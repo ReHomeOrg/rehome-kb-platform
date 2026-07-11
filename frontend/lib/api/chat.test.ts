@@ -205,5 +205,50 @@ describe("streamMessage SSE parsing", () => {
         void ev;
       }
     }).rejects.toMatchObject({ status: 404 });
+    // non-401 → без refresh-retry (единственный fetch).
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("on 401 refreshes token and retries once → streams (#386)", async () => {
+    const { streamMessage } = await import("./chat");
+    const sse = 'event: chunk\ndata: {"text":"Hi"}\n\n' + "event: done\ndata: {}\n\n";
+    fetchMock
+      // 1) SSE запрос → 401 (протухший cookie)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "expired" }), { status: 401 }),
+      )
+      // 2) /api/auth/refresh → ok
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      // 3) retry SSE → стрим
+      .mockResolvedValueOnce(
+        new Response(new TextEncoder().encode(sse).buffer, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+    const events: Array<{ event: string; data: unknown }> = [];
+    for await (const ev of streamMessage("s", { content: "hi" })) {
+      events.push(ev);
+    }
+    expect(events.map((e) => e.event)).toEqual(["chunk", "done"]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/api/auth/refresh");
+  });
+
+  it("on 401 with failed refresh → throws ApiError(401), no retry (#386)", async () => {
+    const { streamMessage } = await import("./chat");
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "expired" }), { status: 401 }),
+      )
+      // refresh не удался (refresh cookie тоже истёк) → r.ok=false
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    await expect(async () => {
+      for await (const ev of streamMessage("s", { content: "hi" })) {
+        void ev;
+      }
+    }).rejects.toMatchObject({ status: 401 });
+    // 1 SSE + 1 refresh, без повторного SSE-retry.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

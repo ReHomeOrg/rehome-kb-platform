@@ -100,7 +100,7 @@ async function _doFetch<T>(
     // Token expired или revoked; try refresh once. На success — retry
     // original request с свежим cookie. На refresh failure — fall through
     // в ApiError(401); caller redirect'нет на /login.
-    const refreshed = await _tryRefresh();
+    const refreshed = await tryRefresh();
     if (refreshed) {
       return _doFetch<T>(path, init, /* allowRefresh */ false);
     }
@@ -126,7 +126,15 @@ async function _doFetch<T>(
   return JSON.parse(text) as T;
 }
 
-async function _tryRefresh(): Promise<boolean> {
+/**
+ * Обновить access_token cookie через `/api/auth/refresh` (#386).
+ *
+ * Browser-only helper. Экспортируется, чтобы SSE-путь чата
+ * (`streamMessage` в `chat.ts`) мог переиспользовать тот же
+ * refresh-on-401, что и `apiFetch` — без импорта `_private`.
+ * Возвращает `true` если refresh удался (свежий cookie выставлен).
+ */
+export async function tryRefresh(): Promise<boolean> {
   try {
     const prefix = BASE_PATH;
     const r = await fetch(`${prefix}/api/auth/refresh`, {
