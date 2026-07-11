@@ -13,6 +13,7 @@ from src.api.chat.llm import LLMResponse, MockProvider, get_llm_provider
 from src.api.chat.models import ChatMessage, ChatSession
 from src.api.chat.repository import ChatRepository, get_chat_repository
 from src.api.chat.system_prompt import (
+    NO_CONTEXT_DIRECTIVE,
     SYSTEM_PROMPT,
     build_rag_system_prompt,
     hits_to_citations,
@@ -659,3 +660,89 @@ def test_sse_emits_empty_citations_when_rag_disabled(
         assert cit_data == {"data": []}
     finally:
         app.dependency_overrides.pop(get_llm_provider, None)
+
+
+# ---------------------------------------------------------------------------
+# Confidence-gated escalation (#382, Tier 2) — router-обвязка no-context директивы
+
+
+def test_rag_enabled_empty_retrieval_appends_no_context_directive(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG on + пустой retrieval → no-context директива дописана в system prompt."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "вопрос без ответа в базе"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    sys_prompt = override_llm.call_args.args[1]
+    assert NO_CONTEXT_DIRECTIVE in sys_prompt
+
+
+def test_rag_enabled_with_context_omits_no_context_directive(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG on + есть контекст → no-context директива НЕ дописывается."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = [_hit()]
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "сервисный платёж"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    sys_prompt = override_llm.call_args.args[1]
+    assert NO_CONTEXT_DIRECTIVE not in sys_prompt
+
+
+def test_rag_disabled_omits_no_context_directive(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG off → no-context директива не форсится (гейт на rag_enabled)."""
+    monkeypatch.setenv("RAG_ENABLED", "false")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "договор"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    sys_prompt = override_llm.call_args.args[1]
+    assert NO_CONTEXT_DIRECTIVE not in sys_prompt
