@@ -312,3 +312,31 @@ def test_strip_footer_ignores_plain_support_mention() -> None:
     """Фраза со словом «поддержка» без приглашения не считается footer'ом."""
     text = "Поддержка работает круглосуточно."
     assert strip_operator_footer(text) == text
+
+
+# --- #388 review (PR #389): защита от переедания/обнуления содержательного текста
+
+
+def test_strip_footer_does_not_eat_comma_glued_content() -> None:
+    """Приписка, приклеенная к содержательному предложению через запятую, НЕ
+    должна съедать это предложение (иначе тихая потеря контента, ревью #389)."""
+    text = "Залога нет. Ремонт покрыт страховкой, обратитесь в поддержку."
+    out = strip_operator_footer(text)
+    # содержательная часть сохранена (не обнулена и не потеряна)
+    assert "Ремонт покрыт страховкой" in out
+    assert "Залога нет." in out
+
+
+def test_strip_footer_single_sentence_glued_kept_intact() -> None:
+    """Одно предложение «<суть>, обратитесь в поддержку» без границы — не
+    трогаем целиком (лучше оставить приписку, чем потерять суть)."""
+    text = "Стоимость аренды фиксирована в договоре, при вопросах обратитесь в поддержку."
+    out = strip_operator_footer(text)
+    assert "Стоимость аренды фиксирована в договоре" in out
+    assert out != ""
+
+
+def test_strip_footer_guard_never_returns_empty() -> None:
+    """Если бы стрип съел весь ответ (ответ = только приглашение) → исходный текст."""
+    text = "Обратитесь в поддержку."
+    assert strip_operator_footer(text) == text
