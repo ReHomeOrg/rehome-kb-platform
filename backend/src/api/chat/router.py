@@ -63,6 +63,7 @@ from src.api.chat.system_prompt import (
     has_usable_context,
     hits_to_citations,
     resolve_system_prompt,
+    strip_citation_markers,
 )
 from src.api.chat.unanswered_queries import (
     ChatUnansweredQueryRepository,
@@ -391,7 +392,11 @@ async def _stream_message_events(
             yield format_sse_event("error", {"message": "LLM upstream error"})
             return
 
-        full_content = "".join(chunks)
+        # #383: срезаем остаточные inline-сноски `[N]` в persist'нутом ответе.
+        # Live SSE-чанки уже ушли клиенту; prompt-инструкция «не используй [N]»
+        # держит стрим чистым в подавляющем большинстве случаев, а стрип
+        # гарантирует чистоту сохранённой истории (и повторной загрузки чата).
+        full_content = strip_citation_markers("".join(chunks))
         token_count = len(full_content) // _CHARS_PER_TOKEN
 
         # Atomic persist после успешного stream'а — retry-safe.
@@ -555,10 +560,13 @@ async def send_message(
         system_prompt,
         max_tokens=settings.llm_max_tokens,
     )
+    # #383: срезаем остаточные inline-сноски `[N]` — источники клиент видит
+    # отдельным citations-блоком, в тексте они лишний шум.
+    assistant_content = strip_citation_markers(response.content)
     assistant_msg = await repo.record_chat_turn(
         session_id,
         user_content=payload.content,
-        assistant_content=response.content,
+        assistant_content=assistant_content,
         citations=citations,
         token_count=response.token_count,
         duration_ms=response.duration_ms,

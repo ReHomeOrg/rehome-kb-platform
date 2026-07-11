@@ -20,6 +20,7 @@ from src.api.chat.system_prompt import (
     build_rag_system_prompt,
     has_usable_context,
     resolve_system_prompt,
+    strip_citation_markers,
 )
 from src.api.search.repository import RetrievalHit
 
@@ -152,7 +153,67 @@ def test_apply_greeting_rule_repeat_says_no_greeting() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Confidence-gated escalation (#382, Tier 2): has_usable_context
+# strip_citation_markers (#383): inline `[N]` сноски убираются из ответа
+
+
+def test_strip_removes_single_marker_with_leading_space() -> None:
+    """`текст [2].` → `текст.` (маркер и пробел перед ним срезаны)."""
+    assert strip_citation_markers("Страховка покрывает ремонт [2].") == (
+        "Страховка покрывает ремонт."
+    )
+
+
+def test_strip_removes_multiple_markers() -> None:
+    assert strip_citation_markers("a [1] b [22] c [333]") == "a b c"
+
+
+def test_strip_no_markers_unchanged() -> None:
+    text = "Ответ без сносок, просто текст."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_ignores_markdown_links() -> None:
+    """Markdown-ссылки `[текст](url)` не трогаются (не числовой маркер)."""
+    text = "См. статью [Ремонт техники](/articles/remont)."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_ignores_non_numeric_brackets() -> None:
+    """`[важно]` и прочие не-числовые скобки остаются."""
+    text = "Это [важно] и [NB] помнить."
+    assert strip_citation_markers(text) == text
+
+
+def test_strip_marker_at_start_leaves_leading_space() -> None:
+    """Маркер в самом начале строки убирается, но оставляет ведущий пробел —
+    принятое ограничение (LLM не начинает ответ с `[N]`, см. коммент у regex)."""
+    assert strip_citation_markers("[1] начало ответа") == " начало ответа"
+
+
+def test_strip_marker_glued_between_words_documents_limitation() -> None:
+    """Маркер вплотную без пробелов склеивает слова — принятое ограничение
+    defensive-нетто (реальный LLM пишет `[N]` с пробелом)."""
+    assert strip_citation_markers("ремонт[3]техники") == "ремонттехники"
+
+
+def test_strip_multi_digit_marker() -> None:
+    """Многозначные `[N]` тоже срезаются (как источники не встречаются)."""
+    assert strip_citation_markers("текст [1000] дальше") == "текст дальше"
+
+
+# ---------------------------------------------------------------------------
+# build_rag_system_prompt: RAG-блок больше НЕ просит формат `[N]`
+
+
+def test_build_rag_instruction_forbids_bracket_markers() -> None:
+    """Инструкция RAG-блока велит НЕ вставлять `[N]`, а не цитировать ими."""
+    prompt = build_rag_system_prompt([_hit(text="frag")], base_prompt="BASE")
+    assert "НЕ вставляй" in prompt
+    assert "в квадратных скобках" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Confidence-gated escalation (#383, Tier 2): has_usable_context
 
 
 def test_has_usable_context_empty_is_false() -> None:
