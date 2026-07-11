@@ -21,6 +21,7 @@ from src.api.chat.system_prompt import (
     has_usable_context,
     resolve_system_prompt,
     strip_citation_markers,
+    strip_operator_footer,
 )
 from src.api.search.repository import RetrievalHit
 
@@ -264,3 +265,50 @@ def test_apply_no_context_rule_idempotent_when_has_context() -> None:
     out = apply_no_context_rule("BASE PROMPT", has_context=True)
     assert out == "BASE PROMPT"
     assert NO_CONTEXT_DIRECTIVE not in out
+
+
+# ---------------------------------------------------------------------------
+# strip_operator_footer (#388): завершающая приписка об операторе убирается
+
+
+def test_strip_footer_operator_poddershki() -> None:
+    """Реальная приписка «сообщите оператору поддержки» срезается."""
+    text = (
+        "Ремонт покрывается страхованием. "
+        "Если у вас остались вопросы, пожалуйста, сообщите оператору поддержки."
+    )
+    assert strip_operator_footer(text) == "Ремонт покрывается страхованием."
+
+
+def test_strip_footer_obratites_v_podderzhku() -> None:
+    """Вариант «обратитесь в поддержку» в конце срезается."""
+    text = "Залога нет. Пожалуйста, обратитесь в поддержку за помощью."
+    assert strip_operator_footer(text) == "Залога нет."
+
+
+def test_strip_footer_razdel_podderzhki() -> None:
+    text = "Ответ по существу. Перейдите в раздел поддержки."
+    assert strip_operator_footer(text) == "Ответ по существу."
+
+
+def test_strip_footer_separate_paragraph() -> None:
+    """Приписка отдельным абзацем — срезается, хвостовые переводы строк тоже."""
+    text = "Полный ответ на вопрос.\n\nЕсли остались вопросы, сообщите оператору."
+    assert strip_operator_footer(text) == "Полный ответ на вопрос."
+
+
+def test_strip_footer_no_footer_unchanged() -> None:
+    text = "Просто ответ без приглашения куда-либо."
+    assert strip_operator_footer(text) == text
+
+
+def test_strip_footer_preserves_mid_text_mention() -> None:
+    """Упоминание поддержки НЕ в конце (есть предложение после) — не трогаем."""
+    text = "Для смены тарифа обратитесь в поддержку. Также вы можете сделать это в кабинете."
+    assert strip_operator_footer(text) == text
+
+
+def test_strip_footer_ignores_plain_support_mention() -> None:
+    """Фраза со словом «поддержка» без приглашения не считается footer'ом."""
+    text = "Поддержка работает круглосуточно."
+    assert strip_operator_footer(text) == text

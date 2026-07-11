@@ -64,6 +64,7 @@ from src.api.chat.system_prompt import (
     hits_to_citations,
     resolve_system_prompt,
     strip_citation_markers,
+    strip_operator_footer,
 )
 from src.api.chat.unanswered_queries import (
     ChatUnansweredQueryRepository,
@@ -350,6 +351,7 @@ async def _stream_message_events(
     system_prompt: str,
     citations: list[dict[str, Any]],
     started: float,
+    has_context: bool,
 ) -> AsyncIterator[str]:
     """Generator для SSE streaming (E3.4).
 
@@ -397,6 +399,11 @@ async def _stream_message_events(
         # держит стрим чистым в подавляющем большинстве случаев, а стрип
         # гарантирует чистоту сохранённой истории (и повторной загрузки чата).
         full_content = strip_citation_markers("".join(chunks))
+        # #388: содержательный ответ → срезаем остаточную приписку об операторе
+        # в persist'нутом контенте (live-чанки уже ушли; overlay держит стрим
+        # чистым, стрип гарантирует чистую сохранённую историю).
+        if has_context:
+            full_content = strip_operator_footer(full_content)
         token_count = len(full_content) // _CHARS_PER_TOKEN
 
         # Atomic persist после успешного stream'а — retry-safe.
@@ -494,13 +501,14 @@ async def send_message(
     # отсутствию ответа, а не дежурная приписка. При RAG off контекста и так
     # нет по дизайну — гейтим на rag_enabled, чтобы не форсить no-context в
     # не-RAG режиме.
+    # has_context: RAG дал уверенный контекст. Используется для no-context
+    # директивы (#383) и стрипа дежурной приписки об операторе (#388). При RAG
+    # off контекста нет по дизайну → False (footer не стрипаем — не-RAG режим).
+    has_context = settings.rag_enabled and has_usable_context(
+        retrieved_chunks, min_score=settings.rag_min_confidence_score
+    )
     if settings.rag_enabled:
-        system_prompt = apply_no_context_rule(
-            system_prompt,
-            has_context=has_usable_context(
-                retrieved_chunks, min_score=settings.rag_min_confidence_score
-            ),
-        )
+        system_prompt = apply_no_context_rule(system_prompt, has_context=has_context)
     # Правило приветствия: «Здравствуйте» — один раз за календарный день (МСК).
     # `history` ещё не содержит текущую пару сообщений, поэтому первый ответ
     # за день увидит greeted_today=False, последующие — True.
@@ -548,6 +556,7 @@ async def send_message(
                 system_prompt,
                 citations,
                 started,
+                has_context,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
@@ -563,6 +572,11 @@ async def send_message(
     # #383: срезаем остаточные inline-сноски `[N]` — источники клиент видит
     # отдельным citations-блоком, в тексте они лишний шум.
     assistant_content = strip_citation_markers(response.content)
+    # #388: при содержательном ответе срезаем остаточную дежурную приписку об
+    # операторе (overlay давит её, но малая LLM не на 100%). При no-context —
+    # приписка уместна, оставляем.
+    if has_context:
+        assistant_content = strip_operator_footer(assistant_content)
     assistant_msg = await repo.record_chat_turn(
         session_id,
         user_content=payload.content,
