@@ -119,3 +119,83 @@ def test_settings_has_keycloak_urls(test_settings: Settings) -> None:
         test_settings.keycloak_jwks_url
         == "http://localhost:8080/realms/rehome/protocol/openid-connect/certs"
     )
+
+
+# --- CC-1: делегированные audiences (вариант A, аддитивный accept-list) ----------
+
+
+def _verifier_with_delegated(monkeypatch: pytest.MonkeyPatch, delegated: str) -> OIDCVerifier:
+    """Verifier с KC_DELEGATED_AUDIENCES (остальной keycloak-конфиг = как в test_settings)."""
+    from src.api.config import get_settings
+
+    monkeypatch.setenv("KC_URL", "http://localhost:8080")
+    monkeypatch.setenv("KC_REALM", "rehome")
+    monkeypatch.setenv("KC_AUDIENCE", "rehome-platform-m2m")
+    monkeypatch.setenv("KC_VERIFY_AUD", "true")
+    monkeypatch.setenv("KC_DELEGATED_AUDIENCES", delegated)
+    return OIDCVerifier(get_settings())
+
+
+def test_delegated_audience_accepted_when_configured(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # Делегированный токен Консьержа (audience=kb-search) принимается, когда aud в accept-list.
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search,rehome-platform")
+    claims = verifier.verify(make_jwt(roles=["tenant"], audience="kb-search"))
+    assert claims["aud"] == "kb-search"
+
+
+def test_second_delegated_audience_accepted(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search,rehome-platform")
+    assert verifier.verify(make_jwt(audience="rehome-platform"))["aud"] == "rehome-platform"
+
+
+def test_primary_audience_still_accepted_with_delegated(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # SECURITY/backcompat: существующие m2m-токены (rehome-platform-m2m) НЕ ломаются.
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search")
+    assert verifier.verify(make_jwt(audience="rehome-platform-m2m"))["aud"] == "rehome-platform-m2m"
+
+
+def test_delegated_audience_rejected_when_empty(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # Default (KC_DELEGATED_AUDIENCES пусто) → поведение не меняется: kb-search-aud отвергается.
+    verifier = _verifier_with_delegated(monkeypatch, "")
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(make_jwt(audience="kb-search"))
+
+
+def test_unlisted_audience_still_rejected_with_delegated(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # SECURITY: aud вне accept-list по-прежнему 401 (не «принимаем что угодно»).
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search")
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(make_jwt(audience="evil-service"))
+
+
+def test_accepted_audiences_default_is_primary_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.api.config import get_settings
+
+    monkeypatch.setenv("KC_AUDIENCE", "rehome-platform-m2m")
+    monkeypatch.delenv("KC_DELEGATED_AUDIENCES", raising=False)
+    assert get_settings().accepted_audiences == ["rehome-platform-m2m"]
+
+
+def test_accepted_audiences_includes_delegated_deduped(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.api.config import get_settings
+
+    monkeypatch.setenv("KC_AUDIENCE", "rehome-platform-m2m")
+    # дубль основного + пробелы + пустой хвост — дедуп/стрип.
+    monkeypatch.setenv(
+        "KC_DELEGATED_AUDIENCES", " kb-search , rehome-platform , rehome-platform-m2m ,"
+    )
+    assert get_settings().accepted_audiences == [
+        "rehome-platform-m2m",
+        "kb-search",
+        "rehome-platform",
+    ]

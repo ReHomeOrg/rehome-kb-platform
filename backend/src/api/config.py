@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # realm-export.json (см. infra/keycloak/realm-export.json clients[0]).
     # Issue #21 (E1.3.4) добавил mapper и включил verify_aud по умолчанию.
     keycloak_audience: str = Field(default="rehome-platform-m2m", alias="KC_AUDIENCE")
+    # CC-1 (сквозное делегирование Консьержа, RFC 8693): дополнительные aud, принимаемые
+    # для делегированных токенов (агент от имени пользователя шлёт audience=kb-search /
+    # rehome-platform). Comma-separated. Пусто (default) → принимается ТОЛЬКО
+    # `keycloak_audience`, поведение НЕ меняется (прод-safe). Ops выставляет
+    # KC_DELEGATED_AUDIENCES=kb-search,rehome-platform при боевизации CC-1 (вариант A,
+    # аддитивно — не ломает существующих m2m-клиентов на rehome-platform-m2m).
+    keycloak_delegated_audiences: str = Field(default="", alias="KC_DELEGATED_AUDIENCES")
     verify_aud: bool = Field(default=True, alias="KC_VERIFY_AUD")
     # ADR-0019 §"X-MFA-Token validation" / RFC 9470 step-up auth. Token's
     # `acr` claim must equal this value to gate MFA-protected admin
@@ -311,6 +318,21 @@ class Settings(BaseSettings):
     def keycloak_jwks_url(self) -> str:
         """JWKS endpoint для получения публичных ключей realm."""
         return f"{self.keycloak_issuer}/protocol/openid-connect/certs"
+
+    @property
+    def accepted_audiences(self) -> list[str]:
+        """Список aud, принимаемых валидатором: основной + делегированные (CC-1, вариант A).
+
+        Пусто в `KC_DELEGATED_AUDIENCES` → только `keycloak_audience` (default, прод не
+        меняется). PyJWT принимает токен, если ЛЮБОЙ из этих aud присутствует в его `aud`
+        (аддитивно). Дедуплицировано, пустые отброшены.
+        """
+        extra = [a.strip() for a in self.keycloak_delegated_audiences.split(",") if a.strip()]
+        result: list[str] = []
+        for aud in (self.keycloak_audience, *extra):
+            if aud and aud not in result:
+                result.append(aud)
+        return result
 
 
 def get_settings() -> Settings:
