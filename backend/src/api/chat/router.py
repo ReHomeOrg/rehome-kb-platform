@@ -538,6 +538,15 @@ async def send_message(
     # возвращаем детерминированный no-answer (enforcement на слое, запрет ответа из
     # параметрики). Config-gated (default OFF → прежнее soft-поведение). При срабатывании
     # citations пусты (уверенных источников нет). Работает и в JSON-, и в SSE-режиме.
+    #
+    # Аналитика «content gap»: `RAG_HARD_GATE_TOTAL` считает ВСЕ срабатывания гейта
+    # (пустой retrieval + low-score). Per-query сигналы (`chat.no_answer` webhook +
+    # capture-queue ниже) гейтятся на `retrieved_chunks == []`, поэтому при low-score
+    # (`RAG_MIN_CONFIDENCE_SCORE > 0`, непустой, но ниже порога retrieval) они НЕ
+    # срабатывают — это осознанно совпадает с текущим soft-поведением (#382/#383: там
+    # low-score тоже не шлёт no_answer). При default `min_score=0` гейт триггерит только
+    # на пустом retrieval → расхождения нет. Расширение per-query сигналов на low-score —
+    # отдельная задача (меняет и soft-путь), вне скоупа C23.
     forced_reply: str | None = None
     if settings.rag_hard_gate_enabled and settings.rag_enabled and not has_context:
         forced_reply = _HARD_NO_ANSWER_REPLY
