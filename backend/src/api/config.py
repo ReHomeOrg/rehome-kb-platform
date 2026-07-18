@@ -170,6 +170,14 @@ class Settings(BaseSettings):
     # retrieval (robust). Значение >0 включает score-порог — калибровать
     # под конкретный корпус (RRF fused score, higher=better для hybrid).
     rag_min_confidence_score: float = Field(default=0.0, alias="RAG_MIN_CONFIDENCE_SCORE")
+    # C23 — ЖЁСТКИЙ retrieval-gate (enforcement на слое, не на промпте). Когда
+    # retrieval не дал уверенного контекста (`has_usable_context` False: пусто /
+    # top-score ниже RAG_MIN_CONFIDENCE_SCORE) — НЕ вызываем LLM, возвращаем
+    # детерминированный no-answer + предложение поддержки. Запрещает ответ из
+    # параметрической памяти LLM (лечит «grounded≠correct»/галлюцинации), даже если
+    # модель проигнорировала no-context-директиву (#382/#383, мягкий гейт). Default
+    # `False` = прежнее поведение (генерация идёт, полагаемся на директиву в промпте).
+    rag_hard_gate_enabled: bool = Field(default=False, alias="RAG_HARD_GATE_ENABLED")
     # Chat unanswered query capture (2026-05-29). При RAG_ENABLED + query
     # без relevant chunks → пишется в chat_unanswered_queries для admin
     # moderation queue. Default True — feature gated на RAG_ENABLED, так что

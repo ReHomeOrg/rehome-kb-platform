@@ -50,9 +50,19 @@ MESSAGE_DURATION_SECONDS: Final = Histogram(
     buckets=_MESSAGE_DURATION_BUCKETS,
 )
 
+# C23: срабатывания жёсткого retrieval-gate — сколько ответов вернули детерминированный
+# no-answer (нет уверенного контекста) вместо вызова LLM. Сигнал «content gap» + доля
+# запросов без уверенной базы (калибровка порога / приоритет наполнения KB).
+RAG_HARD_GATE_TOTAL: Final = Counter(
+    "kb_chat_rag_hard_gate_total",
+    "Chat responses short-circuited to a deterministic no-answer by the C23 hard "
+    "retrieval-gate (no confident context, LLM not called).",
+)
+
 
 __all__ = [
     "MESSAGES_TOTAL",
     "MESSAGE_DURATION_SECONDS",
+    "RAG_HARD_GATE_TOTAL",
     "SESSIONS_CREATED_TOTAL",
 ]
