@@ -71,7 +71,10 @@ class OIDCVerifier:
                 token,
                 key=signing_key,
                 algorithms=["RS256"],  # жёстко: защита от `alg: none`
-                audience=self._settings.keycloak_audience,
+                # Список: основной aud + делегированные (CC-1, вариант A). PyJWT принимает
+                # токен, если ЛЮБОЙ из них присутствует в `aud`. Default = [keycloak_audience]
+                # (поведение не меняется, пока KC_DELEGATED_AUDIENCES пусто).
+                audience=self._settings.accepted_audiences,
                 issuer=self._settings.keycloak_issuer,
                 leeway=30,  # 30s допуск на clock skew
                 options={
