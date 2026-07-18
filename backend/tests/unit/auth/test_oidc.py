@@ -178,6 +178,25 @@ def test_unlisted_audience_still_rejected_with_delegated(
         verifier.verify(make_jwt(audience="evil-service"))
 
 
+def test_token_with_aud_array_accepted_by_intersection(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # Целевой CC-1-кейс: делегированный токен несёт aud СПИСКОМ (напр. [account, kb-search]).
+    # Принимается, если хотя бы один элемент — в accept-list (intersection).
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search")
+    token = make_jwt(roles=["tenant"], extra_claims={"aud": ["account", "kb-search"]})
+    assert verifier.verify(token)["aud"] == ["account", "kb-search"]
+
+
+def test_token_with_aud_array_none_listed_rejected(
+    monkeypatch: pytest.MonkeyPatch, make_jwt: Callable[..., str]
+) -> None:
+    # aud-массив без пересечения с accept-list → 401 (SECURITY).
+    verifier = _verifier_with_delegated(monkeypatch, "kb-search")
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(make_jwt(extra_claims={"aud": ["account", "other-service"]}))
+
+
 def test_accepted_audiences_default_is_primary_only(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.api.config import get_settings
 
