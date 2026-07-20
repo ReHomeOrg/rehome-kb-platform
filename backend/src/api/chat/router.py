@@ -11,7 +11,7 @@ POST /messages, SSE, feedback, escalate — E3.3+.
 
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
@@ -41,6 +41,7 @@ from src.api.chat.llm.base import LLMRole
 from src.api.chat.metrics import (
     MESSAGE_DURATION_SECONDS,
     MESSAGES_TOTAL,
+    RAG_HARD_GATE_TOTAL,
     SESSIONS_CREATED_TOTAL,
 )
 from src.api.chat.owner import extract_chat_owner
@@ -181,6 +182,15 @@ async def get_session_detail(
 # типичных open-weight моделей.
 _RAG_CHAT_TOP_K = 5
 
+# C23 — детерминированный ответ жёсткого retrieval-gate: когда нет уверенного
+# контекста, честно сообщаем «не нашёл в базе» + предлагаем поддержку, БЕЗ вызова LLM
+# (запрет ответа из параметрики). Тон консистентен с NO_CONTEXT_DIRECTIVE (мягкий гейт).
+_HARD_NO_ANSWER_REPLY = (
+    "К сожалению, по этому вопросу я не нашёл информации в базе знаний reHome. "
+    "Попробуйте переформулировать вопрос или обратитесь в поддержку — я передам "
+    "ваш вопрос специалисту."
+)
+
 
 async def _maybe_capture_no_answer(
     unanswered_repo: ChatUnansweredQueryRepository,
@@ -303,7 +313,7 @@ _GREETING_TZ = ZoneInfo("Europe/Moscow")
 
 
 def _assistant_greeted_today(
-    history_messages: list[object], *, now: datetime | None = None
+    history_messages: Sequence[object], *, now: datetime | None = None
 ) -> bool:
     """True, если ассистент уже отвечал сегодня в этом диалоге.
 
@@ -352,6 +362,7 @@ async def _stream_message_events(
     citations: list[dict[str, Any]],
     started: float,
     has_context: bool,
+    forced_reply: str | None = None,
 ) -> AsyncIterator[str]:
     """Generator для SSE streaming (E3.4).
 
@@ -381,29 +392,35 @@ async def _stream_message_events(
         # disabled или не нашёл relevant chunks.
         yield format_sse_event("citations", {"data": citations})
 
-        llm_messages = _build_llm_history(history_messages, user_content)
-        chunks: list[str] = []
-        try:
-            async for chunk in llm.stream(llm_messages, system_prompt, max_tokens=max_tokens):
-                chunks.append(chunk)
-                yield format_sse_event("chunk", {"text": chunk})
-        except Exception:
-            # Defensive: НЕ эхо'им детали exception'а в SSE event
-            # (могут содержать sensitive info от upstream LLM).
-            logger.exception("chat.sse_stream_failed", extra={"session_id": str(session_id)})
-            yield format_sse_event("error", {"message": "LLM upstream error"})
-            return
+        if forced_reply is not None:
+            # C23: детерминированный no-answer — эмитим одним chunk, LLM НЕ вызываем
+            # (нет уверенного контекста; запрет ответа из параметрики).
+            yield format_sse_event("chunk", {"text": forced_reply})
+            full_content = forced_reply
+        else:
+            llm_messages = _build_llm_history(history_messages, user_content)
+            chunks: list[str] = []
+            try:
+                async for chunk in llm.stream(llm_messages, system_prompt, max_tokens=max_tokens):
+                    chunks.append(chunk)
+                    yield format_sse_event("chunk", {"text": chunk})
+            except Exception:
+                # Defensive: НЕ эхо'им детали exception'а в SSE event
+                # (могут содержать sensitive info от upstream LLM).
+                logger.exception("chat.sse_stream_failed", extra={"session_id": str(session_id)})
+                yield format_sse_event("error", {"message": "LLM upstream error"})
+                return
 
-        # #383: срезаем остаточные inline-сноски `[N]` в persist'нутом ответе.
-        # Live SSE-чанки уже ушли клиенту; prompt-инструкция «не используй [N]»
-        # держит стрим чистым в подавляющем большинстве случаев, а стрип
-        # гарантирует чистоту сохранённой истории (и повторной загрузки чата).
-        full_content = strip_citation_markers("".join(chunks))
-        # #388: содержательный ответ → срезаем остаточную приписку об операторе
-        # в persist'нутом контенте (live-чанки уже ушли; overlay держит стрим
-        # чистым, стрип гарантирует чистую сохранённую историю).
-        if has_context:
-            full_content = strip_operator_footer(full_content)
+            # #383: срезаем остаточные inline-сноски `[N]` в persist'нутом ответе.
+            # Live SSE-чанки уже ушли клиенту; prompt-инструкция «не используй [N]»
+            # держит стрим чистым в подавляющем большинстве случаев, а стрип
+            # гарантирует чистоту сохранённой истории (и повторной загрузки чата).
+            full_content = strip_citation_markers("".join(chunks))
+            # #388: содержательный ответ → срезаем остаточную приписку об операторе
+            # в persist'нутом контенте (live-чанки уже ушли; overlay держит стрим
+            # чистым, стрип гарантирует чистую сохранённую историю).
+            if has_context:
+                full_content = strip_operator_footer(full_content)
         token_count = len(full_content) // _CHARS_PER_TOKEN
 
         # Atomic persist после успешного stream'а — retry-safe.
@@ -517,6 +534,25 @@ async def send_message(
     )
     citations = hits_to_citations(retrieved_chunks)
 
+    # C23 — жёсткий retrieval-gate: нет уверенного контекста → НЕ вызываем LLM,
+    # возвращаем детерминированный no-answer (enforcement на слое, запрет ответа из
+    # параметрики). Config-gated (default OFF → прежнее soft-поведение). При срабатывании
+    # citations пусты (уверенных источников нет). Работает и в JSON-, и в SSE-режиме.
+    #
+    # Аналитика «content gap»: `RAG_HARD_GATE_TOTAL` считает ВСЕ срабатывания гейта
+    # (пустой retrieval + low-score). Per-query сигналы (`chat.no_answer` webhook +
+    # capture-queue ниже) гейтятся на `retrieved_chunks == []`, поэтому при low-score
+    # (`RAG_MIN_CONFIDENCE_SCORE > 0`, непустой, но ниже порога retrieval) они НЕ
+    # срабатывают — это осознанно совпадает с текущим soft-поведением (#382/#383: там
+    # low-score тоже не шлёт no_answer). При default `min_score=0` гейт триггерит только
+    # на пустом retrieval → расхождения нет. Расширение per-query сигналов на low-score —
+    # отдельная задача (меняет и soft-путь), вне скоупа C23.
+    forced_reply: str | None = None
+    if settings.rag_hard_gate_enabled and settings.rag_enabled and not has_context:
+        forced_reply = _HARD_NO_ANSWER_REPLY
+        citations = []
+        RAG_HARD_GATE_TOTAL.inc()
+
     # #222 / ТЗ §5.1: fire `chat.no_answer` если RAG включён, но не
     # нашёл relevant chunks — signal для аналитики «нужен content gap fill».
     await _maybe_dispatch_no_answer(
@@ -557,33 +593,42 @@ async def send_message(
                 citations,
                 started,
                 has_context,
+                forced_reply,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
 
     # JSON mode (E3.3) — wait full completion.
-    llm_messages = _build_llm_history(list(history), payload.content)
-    response = await llm.complete(
-        llm_messages,
-        system_prompt,
-        max_tokens=settings.llm_max_tokens,
-    )
-    # #383: срезаем остаточные inline-сноски `[N]` — источники клиент видит
-    # отдельным citations-блоком, в тексте они лишний шум.
-    assistant_content = strip_citation_markers(response.content)
-    # #388: при содержательном ответе срезаем остаточную дежурную приписку об
-    # операторе (overlay давит её, но малая LLM не на 100%). При no-context —
-    # приписка уместна, оставляем.
-    if has_context:
-        assistant_content = strip_operator_footer(assistant_content)
+    if forced_reply is not None:
+        # C23: детерминированный no-answer без вызова LLM (нет уверенного контекста).
+        assistant_content = forced_reply
+        token_count = 0
+        duration_ms: int | None = 0
+    else:
+        llm_messages = _build_llm_history(list(history), payload.content)
+        response = await llm.complete(
+            llm_messages,
+            system_prompt,
+            max_tokens=settings.llm_max_tokens,
+        )
+        # #383: срезаем остаточные inline-сноски `[N]` — источники клиент видит
+        # отдельным citations-блоком, в тексте они лишний шум.
+        assistant_content = strip_citation_markers(response.content)
+        # #388: при содержательном ответе срезаем остаточную дежурную приписку об
+        # операторе (overlay давит её, но малая LLM не на 100%). При no-context —
+        # приписка уместна, оставляем.
+        if has_context:
+            assistant_content = strip_operator_footer(assistant_content)
+        token_count = response.token_count
+        duration_ms = response.duration_ms
     assistant_msg = await repo.record_chat_turn(
         session_id,
         user_content=payload.content,
         assistant_content=assistant_content,
         citations=citations,
-        token_count=response.token_count,
-        duration_ms=response.duration_ms,
+        token_count=token_count,
+        duration_ms=duration_ms,
     )
     MESSAGE_DURATION_SECONDS.observe(time.perf_counter() - started)
     return ChatMessageResponse.from_model(assistant_msg)

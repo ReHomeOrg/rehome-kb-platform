@@ -431,3 +431,49 @@ def test_json_mode_unaffected_by_sse_changes(
         assert body["role"] == "assistant"
     finally:
         _restore_llm()
+
+
+# ---------------------------------------------------------------------------
+# C23 — жёсткий retrieval-gate в SSE-режиме
+
+
+def test_sse_hard_gate_no_context_emits_deterministic_no_answer(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock, AsyncMock],
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ON + нет контекста (SSE): LLM.stream НЕ вызывается, эмитится детерминированный
+    no-answer одним chunk'ом (запрет ответа из параметрики в стриминге тоже)."""
+    from src.api.search.retrieval import RetrievalService, get_retrieval_service
+
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    get_session_mock, _, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="r")
+    # retrieval → нет контекста
+    svc = RetrievalService.__new__(RetrievalService)
+    svc.search = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    app.dependency_overrides[get_retrieval_service] = lambda: svc
+    # если бы стрим LLM вызвался — этот текст попал бы в SSE (и провалил бы проверку)
+    _override_llm(_ScriptedStreamProvider(chunks=["НЕ-ДОЛЖНО-ПОЯВИТЬСЯ"]))
+    try:
+        token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+        resp = client.post(
+            f"/api/v1/chat/sessions/{session.id}/messages",
+            json={"content": "экзотический вопрос"},
+            headers={"Authorization": f"Bearer {token}", "Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 200
+        events = _parse_sse_events(resp.text)
+        names = [n for n, _ in events]
+        assert names == ["message-start", "citations", "chunk", "message-end", "done"]
+        chunk_data = next(d for n, d in events if n == "chunk")
+        assert "передам ваш вопрос специалисту" in chunk_data
+        assert "НЕ-ДОЛЖНО-ПОЯВИТЬСЯ" not in resp.text  # SECURITY: LLM.stream не вызван
+        assert record_turn_mock.call_args.kwargs["citations"] == []
+    finally:
+        _restore_llm()
+        app.dependency_overrides.pop(get_retrieval_service, None)

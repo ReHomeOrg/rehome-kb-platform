@@ -812,3 +812,188 @@ def test_operator_footer_kept_when_no_context(
     )
     assert resp.status_code == 200
     assert "поддержку" in record_turn_mock.call_args.kwargs["assistant_content"]
+
+
+# ---------------------------------------------------------------------------
+# C23 — жёсткий retrieval-gate (RAG_HARD_GATE_ENABLED)
+
+
+def test_hard_gate_off_still_calls_llm_without_context(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default (гейт OFF): нет контекста → LLM ВСЁ РАВНО зовётся (прежнее soft-поведение)."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.delenv("RAG_HARD_GATE_ENABLED", raising=False)
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []  # нет контекста
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "экзотический вопрос"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    override_llm.assert_awaited_once()  # LLM вызван (гейт выключен)
+
+
+def test_hard_gate_on_no_context_skips_llm_deterministic_reply(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ON + нет уверенного контекста → LLM НЕ вызывается, детерминированный no-answer."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []  # нет уверенного контекста
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "экзотический вопрос"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    override_llm.assert_not_awaited()  # SECURITY: LLM НЕ вызван (запрет ответа из параметрики)
+    kwargs = record_turn_mock.call_args.kwargs
+    assert "передам ваш вопрос специалисту" in kwargs["assistant_content"]
+    assert kwargs["citations"] == []  # уверенных источников нет
+
+
+def test_hard_gate_on_with_context_calls_llm(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ON + есть контекст → LLM зовётся нормально (гейт не мешает уверенным ответам)."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = [_hit(title="Договор", text="Договор аренды...")]
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "договор"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    override_llm.assert_awaited_once()  # есть контекст → LLM зовётся
+
+
+def test_hard_gate_on_low_score_skips_llm(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ON + непустой retrieval, но top-score НИЖЕ порога → LLM НЕ вызывается.
+
+    Самый нетривиальный путь C23: `has_context=False` при НЕпустых chunks
+    (`RAG_MIN_CONFIDENCE_SCORE > 0`), а не только на пустом retrieval.
+    """
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    monkeypatch.setenv("RAG_MIN_CONFIDENCE_SCORE", "0.9")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    # Непустой retrieval, но score ниже порога 0.9 → has_usable_context=False.
+    retrieval_search_mock.return_value = [_hit(score=0.01)]
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "договор"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    override_llm.assert_not_awaited()  # low-score → гейт срабатывает (не только на пустом)
+    kwargs = record_turn_mock.call_args.kwargs
+    assert "передам ваш вопрос специалисту" in kwargs["assistant_content"]
+    assert kwargs["citations"] == []  # below-threshold chunks НЕ показываются источниками
+
+
+def test_hard_gate_persists_zero_token_and_duration(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Гейт ON: детерминированный no-answer persist'ится с token_count=0/duration_ms=0
+    (LLM не звали — ни токенов, ни латентности вызова)."""
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "экзотический вопрос"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    kwargs = record_turn_mock.call_args.kwargs
+    assert kwargs["token_count"] == 0
+    assert kwargs["duration_ms"] == 0
+
+
+def test_hard_gate_increments_metric_on_trigger(
+    client: TestClient,
+    override_repo: tuple[AsyncMock, AsyncMock],
+    override_llm: AsyncMock,
+    override_retrieval: AsyncMock,
+    retrieval_search_mock: AsyncMock,
+    make_jwt: Callable[..., str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Срабатывание гейта инкрементит `kb_chat_rag_hard_gate_total` (сигнал content-gap)."""
+    from src.api.chat.metrics import RAG_HARD_GATE_TOTAL
+
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("RAG_HARD_GATE_ENABLED", "true")
+    get_session_mock, record_turn_mock = override_repo
+    session = _make_session()
+    get_session_mock.return_value = session
+    record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
+    retrieval_search_mock.return_value = []
+    before = float(RAG_HARD_GATE_TOTAL._value.get())
+    token = make_jwt(roles=["tenant"], sub=str(uuid4()))
+    resp = client.post(
+        f"/api/v1/chat/sessions/{session.id}/messages",
+        json={"content": "экзотический вопрос"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    after = float(RAG_HARD_GATE_TOTAL._value.get())
+    assert after == before + 1.0
