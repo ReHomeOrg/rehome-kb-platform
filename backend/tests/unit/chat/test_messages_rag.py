@@ -987,7 +987,7 @@ def test_hard_gate_increments_metric_on_trigger(
     get_session_mock.return_value = session
     record_turn_mock.return_value = _make_message(session.id, role="assistant", content="x")
     retrieval_search_mock.return_value = []
-    before = float(RAG_HARD_GATE_TOTAL._value.get())  # type: ignore[attr-defined]
+    before = float(RAG_HARD_GATE_TOTAL._value.get())
     token = make_jwt(roles=["tenant"], sub=str(uuid4()))
     resp = client.post(
         f"/api/v1/chat/sessions/{session.id}/messages",
@@ -995,5 +995,5 @@ def test_hard_gate_increments_metric_on_trigger(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
-    after = float(RAG_HARD_GATE_TOTAL._value.get())  # type: ignore[attr-defined]
+    after = float(RAG_HARD_GATE_TOTAL._value.get())
     assert after == before + 1.0

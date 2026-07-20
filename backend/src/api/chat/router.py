@@ -11,7 +11,7 @@ POST /messages, SSE, feedback, escalate — E3.3+.
 
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
@@ -313,7 +313,7 @@ _GREETING_TZ = ZoneInfo("Europe/Moscow")
 
 
 def _assistant_greeted_today(
-    history_messages: list[object], *, now: datetime | None = None
+    history_messages: Sequence[object], *, now: datetime | None = None
 ) -> bool:
     """True, если ассистент уже отвечал сегодня в этом диалоге.
 
