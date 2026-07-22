@@ -24,6 +24,7 @@ import {
   submitArticleQuestion,
   type ArticleQuestionPublic,
 } from "@/lib/api/articles";
+import { PLATFORM_LOGIN_URL } from "@/lib/platform";
 
 interface Props {
   slug: string;
@@ -175,7 +176,10 @@ export default function ArticleQaSection({ slug, isLoggedIn }: Props): JSX.Eleme
           </form>
         ) : (
           <p className="text-sm text-gray-600">
-            <a href="/login" className="text-brand-strong hover:underline">
+            <a
+              href={PLATFORM_LOGIN_URL}
+              className="text-brand-strong hover:underline"
+            >
               Войдите
             </a>
             , чтобы задать вопрос.

@@ -13,9 +13,35 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
 
+import { apiFetch } from "@/lib/api/client";
 import { COOKIE_SESSION } from "@/lib/auth/cookies";
 import { BASE_PATH } from "@/lib/base-path";
+import { PLATFORM_LOGIN_URL, PLATFORM_ORIGIN } from "@/lib/platform";
 import { RehomeIdpButton } from "./rehome-idp-button";
+
+/**
+ * Признать залогиненного на платформе (rehome.one) юзера по cookie `rh_token`.
+ *
+ * Help-центр под rehome.one/help делит домен с платформой, поэтому httpOnly
+ * `rh_token` (phone-first Django-сессия) доезжает и сюда. Валидируем его на
+ * backend (`/auth/platform-session` → platform `/auth/me/`) и, если ок, шапка
+ * показывает имя вместо «Войти». Флаг/ключ не выставлены → backend вернёт
+ * `authenticated=false`, и мы тихо деградируем к «Войти» (прод-поведение).
+ */
+async function recognizePlatformUser(rhToken: string): Promise<string | null> {
+  try {
+    const res = await apiFetch<{ authenticated: boolean; display_name?: string | null }>(
+      "/api/v1/auth/platform-session",
+      { method: "POST", headers: { "X-RH-Token": rhToken }, cache: "no-store" },
+    );
+    if (!res?.authenticated) return null;
+    return res.display_name?.trim() || "Профиль";
+  } catch {
+    // Backend недоступен / эндпоинт не задеплоен / токен невалиден — не мешаем
+    // рендеру help: просто остаёмся в анонимном виде.
+    return null;
+  }
+}
 
 const NAV_LINKS: ReadonlyArray<{
   href: string;
@@ -35,6 +61,11 @@ const NAV_LINKS: ReadonlyArray<{
 export default async function Nav(): Promise<JSX.Element> {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.has(COOKIE_SESSION);
+  // Признание платформенной сессии (rehome.one) — только для тех, у кого нет
+  // KB-сессии, но есть `rh_token`. Кадры / Вебхуки / Админ остаются гейтнутыми
+  // ИМЕННО по KB-сессии (это KB-внутренние разделы, не платформенные).
+  const rhToken = isLoggedIn ? undefined : cookieStore.get("rh_token")?.value;
+  const platformName = rhToken ? await recognizePlatformUser(rhToken) : null;
   // Кадры / Вебхуки / Админ — только для залогиненных (UX; сами страницы
   // всё равно гейтятся бэкендом по RBAC).
   const visibleLinks = NAV_LINKS.filter(
@@ -91,15 +122,29 @@ export default async function Nav(): Promise<JSX.Element> {
                 Выйти
               </button>
             </form>
+          ) : platformName ? (
+            // Узнан по платформенной сессии (rehome.one). KB-сессии нет, поэтому
+            // не «Выйти», а имя-ссылка в кабинет платформы.
+            <a
+              href={`${PLATFORM_ORIGIN}/dashboard`}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
+            >
+              {platformName}
+            </a>
           ) : (
             <>
               <RehomeIdpButton />
-              <Link
-                href="/login"
+              {/* Вход — на платформе (rehome.one), а не в Keycloak help-центра:
+                  у прод-пользователей (phone-first) Keycloak-аккаунта нет.
+                  Абсолютный URL из origin-корня → не зависит от basePath
+                  (прежний `<Link href="/login">` под `/help`-проксёй уезжал в
+                  `rehome.one/login` → 404). */}
+              <a
+                href={PLATFORM_LOGIN_URL}
                 className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-ink hover:bg-brand-hover"
               >
                 Войти
-              </Link>
+              </a>
             </>
           )}
         </div>

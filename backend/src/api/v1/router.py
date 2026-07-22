@@ -34,6 +34,7 @@ from src.api.collaborators.router import router as collaborators_router
 from src.api.collaborators.service_orders_router import router as service_orders_router
 from src.api.documents.router import router as documents_router
 from src.api.hr.router import router as hr_router
+from src.api.platform.router import router as platform_session_router
 from src.api.premises.router import router as premises_router
 from src.api.search.router import router as search_router
 from src.api.tags.router import router as tags_router
@@ -43,6 +44,7 @@ from src.api.webhooks.router import router as webhooks_router
 router = APIRouter(prefix="/api/v1")
 router.include_router(health.router)
 router.include_router(auth.router)
+router.include_router(platform_session_router)
 router.include_router(articles_router)
 router.include_router(article_questions_public_router)
 router.include_router(article_questions_admin_router)

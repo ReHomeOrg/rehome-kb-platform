@@ -280,6 +280,20 @@ class Settings(BaseSettings):
         alias="WEBHOOK_CLEANUP_POLL_INTERVAL_SECONDS",
     )
 
+    # --- Платформа reHome (rehome.one): мост личности help-центра ----------
+    # Help-центр под rehome.one/help делит домен с платформой (phone-first
+    # Django-сессия, cookie `rh_token`). Чтобы help узнавал залогиненного на
+    # платформе юзера, backend валидирует `rh_token` через platform `/auth/me/`
+    # и (опц.) обогащает статусом онбординга через internal m2m-эндпоинт по
+    # ТЕЛЕФОНУ (см. platform-side `internal_onboarding.py`). Флаг по умолчанию
+    # off — прод-поведение неизменно, пока ops не выставит ключ и не включит.
+    platform_session_enabled: bool = Field(default=False, alias="PLATFORM_SESSION_ENABLED")
+    platform_api_url: str = Field(default="https://rehome.one/api/v1", alias="PLATFORM_API_URL")
+    # Shared-secret для internal m2m-эндпоинтов платформы (X-Internal-Service-Key).
+    # Пусто → обогащение онбордингом пропускается (recognition всё равно работает).
+    internal_service_key: str = Field(default="", alias="INTERNAL_SERVICE_KEY")
+    platform_timeout_seconds: float = Field(default=8.0, alias="PLATFORM_TIMEOUT_SECONDS")
+
     model_config = SettingsConfigDict(
         env_file=None,
         case_sensitive=False,
